@@ -22,8 +22,21 @@ export default function App(): React.JSX.Element {
       setApiMissing(true);
       return;
     }
-    void window.api.dbStatus().then(setStatus);
-    void window.api.appInfo().then(setInfo);
+    const ipcError = (err: unknown): void => {
+      setStatus({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        dbPath: '',
+        tableCount: 0,
+        appliedMigrations: [],
+        counts: {
+          academicYear: 0, semester: 0, timeSlot: 0, room: 0,
+          master: 0, professor: 0, module: 0, masterModule: 0, session: 0,
+        },
+      });
+    };
+    void window.api.dbStatus().then(setStatus).catch(ipcError);
+    void window.api.appInfo().then(setInfo).catch(ipcError);
   }, []);
 
   return (

@@ -37,12 +37,20 @@ export function openDatabase(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
+  db.exec('PRAGMA busy_timeout = 5000;');
   return db;
 }
 
 /** Singleton de connexion — une seule connexion partagée dans le main (AD-2). */
 export function getDb(dbPath?: string): DbHandle {
-  if (current) return current;
+  if (current) {
+    if (dbPath && dbPath !== current.path) {
+      throw new Error(
+        `getDb() déjà ouvert sur '${current.path}' — chemin demandé '${dbPath}'`,
+      );
+    }
+    return current;
+  }
   const resolved = resolveDbPath(dbPath);
   current = {
     db: openDatabase(resolved),
@@ -89,8 +97,13 @@ export function run(
   return db.prepare(sql).run(...params);
 }
 
+const TABLE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /** Nombre de lignes d'une table (compteurs de statut/seed). */
 export function countRows(db: DatabaseSync, table: string): number {
+  if (!TABLE_NAME_RE.test(table)) {
+    throw new Error(`Nom de table invalide : '${table}'`);
+  }
   const row = get<{ c: number }>(db, `SELECT count(*) AS c FROM "${table}"`);
   return row?.c ?? 0;
 }

@@ -9,7 +9,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { countRows, get, openDatabase } from '../electron/main/db/connection';
+import {
+  closeDb,
+  countRows,
+  get,
+  getDb,
+  openDatabase,
+  resolveDbPath,
+} from '../electron/main/db/connection';
 import {
   bundledMigrations,
   loadMigrationsFromDir,
@@ -18,6 +25,8 @@ import {
   type MigrationSource,
 } from '../electron/main/db/migrate';
 import { seedDemo } from '../electron/main/db/seed-demo';
+import { collectDbStatus } from '../electron/main/db/status';
+import { effectiveSessionStatus } from '../shared/types';
 
 const MIGRATIONS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -73,7 +82,7 @@ describe('migrations', () => {
       db,
       "SELECT count(*) AS c FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
     )!.c;
-    expect(indexCount).toBe(9);
+    expect(indexCount).toBe(11); // 9 index + ux_master_module + ux_student_group_ext
 
     const versions = db
       .prepare('SELECT version FROM schema_migrations')
@@ -213,7 +222,7 @@ describe('seed DÉMO', () => {
     expect(overlap).toBe(0);
   });
 
-  it('cycle complet sur :memory: — migrate + seed + status dérivé', () => {
+  it('cycle complet sur :memory: — migrate + seed + séances futures', () => {
     const db = openMemoryDb();
     runMigrations(db, { migrations: bundledMigrations() });
     seedDemo(db);
@@ -224,5 +233,92 @@ describe('seed DÉMO', () => {
       "SELECT count(*) AS c FROM session WHERE status='PREVUE' AND date < date('now')",
     )!.c;
     expect(past).toBe(0);
+  });
+});
+
+describe('collectDbStatus', () => {
+  it('ok path : 23 tables, migrations [0001], compteurs du seed', () => {
+    const db = openTempFileDb();
+    runMigrations(db, { migrations: loadMigrationsFromDir(MIGRATIONS_DIR) });
+    seedDemo(db);
+    const status = collectDbStatus(db, dbPath, null);
+    expect(status.ok).toBe(true);
+    expect(status.error).toBeNull();
+    expect(status.dbPath).toBe(dbPath);
+    expect(status.tableCount).toBe(23);
+    expect(status.appliedMigrations).toEqual(['0001']);
+    expect(status.counts.master).toBe(3);
+    expect(status.counts.professor).toBe(8);
+    expect(status.counts.room).toBe(3);
+    expect(status.counts.session).toBeGreaterThan(0);
+  });
+
+  it('startupError est remonté : ok=false + error, compteurs conservés', () => {
+    const db = openTempFileDb();
+    runMigrations(db, { migrations: loadMigrationsFromDir(MIGRATIONS_DIR) });
+    seedDemo(db);
+    const status = collectDbStatus(db, dbPath, 'migration 0002 a échoué');
+    expect(status.ok).toBe(false);
+    expect(status.error).toBe('migration 0002 a échoué');
+    expect(status.tableCount).toBe(23); // base lisible malgré l'erreur
+  });
+
+  it('db null : ok=false même sans startupError', () => {
+    const status = collectDbStatus(null, ':memory:', null);
+    expect(status.ok).toBe(false);
+    expect(status.error).not.toBeNull();
+  });
+});
+
+describe('resolveDbPath / getDb', () => {
+  afterEach(() => {
+    closeDb(); // réinitialise le singleton entre les tests
+  });
+
+  it('resolveDbPath : chemin explicite > MASTERTIME_DB_PATH > :memory:', () => {
+    expect(resolveDbPath('/tmp/explicite.db')).toBe('/tmp/explicite.db');
+    const prev = process.env.MASTERTIME_DB_PATH;
+    try {
+      process.env.MASTERTIME_DB_PATH = '/tmp/env.db';
+      expect(resolveDbPath()).toBe('/tmp/env.db');
+      expect(resolveDbPath('/tmp/explicite.db')).toBe('/tmp/explicite.db');
+      delete process.env.MASTERTIME_DB_PATH;
+      expect(resolveDbPath()).toBe(':memory:');
+    } finally {
+      if (prev === undefined) delete process.env.MASTERTIME_DB_PATH;
+      else process.env.MASTERTIME_DB_PATH = prev;
+    }
+  });
+
+  it('getDb(path) fichier : isMemory=false, ouverture sur disque', () => {
+    const handle = getDb(dbPath);
+    expect(handle.isMemory).toBe(false);
+    expect(handle.path).toBe(dbPath);
+    expect(fs.existsSync(dbPath)).toBe(true);
+    // même appel → même handle
+    expect(getDb(dbPath)).toBe(handle);
+    // chemin différent → erreur explicite
+    expect(() => getDb(path.join(tmpDir, 'autre.db'))).toThrow(/déjà ouvert/);
+    closeDb();
+  });
+});
+
+describe('effectiveSessionStatus (AD-7)', () => {
+  it('PREVUE passée → NON_ENCORE_REALISEE, autres statuts inchangés', () => {
+    expect(effectiveSessionStatus('PREVUE', '2020-01-01', '2026-10-22')).toBe(
+      'NON_ENCORE_REALISEE',
+    );
+    expect(effectiveSessionStatus('PREVUE', '2027-01-01', '2026-10-22')).toBe(
+      'PREVUE',
+    );
+    expect(effectiveSessionStatus('REALISEE', '2020-01-01', '2026-10-22')).toBe(
+      'REALISEE',
+    );
+    expect(effectiveSessionStatus('ANNULEE', '2020-01-01', '2026-10-22')).toBe(
+      'ANNULEE',
+    );
+    expect(effectiveSessionStatus('REPORTEE', '2020-01-01', '2026-10-22')).toBe(
+      'REPORTEE',
+    );
   });
 });

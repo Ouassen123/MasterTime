@@ -25,12 +25,14 @@ CREATE TABLE semester (
 CREATE TABLE time_slot (                                -- créneaux autorisés
   id INTEGER PRIMARY KEY, weekday INTEGER NOT NULL,     -- 0=lun..6=dim
   start_min INTEGER NOT NULL, end_min INTEGER NOT NULL, label TEXT,
+  CHECK (weekday BETWEEN 0 AND 6),
   CHECK (start_min < end_min));
 
 CREATE TABLE calendar_exception (                       -- fériés, examens, fermetures
   id INTEGER PRIMARY KEY, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('FERIE','EXAMEN','FERMETURE','VACANCES')),
-  label TEXT NOT NULL);
+  label TEXT NOT NULL,
+  CHECK (start_date <= end_date));
 
 -- Structure pédagogique
 CREATE TABLE master (
@@ -48,8 +50,9 @@ CREATE TABLE student_group (
 
 CREATE TABLE student (                                  -- registre (import)
   id INTEGER PRIMARY KEY, student_group_id INTEGER NOT NULL REFERENCES student_group(id),
-  external_id TEXT, full_name TEXT NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(student_group_id, external_id));
+  external_id TEXT, full_name TEXT NOT NULL, is_demo INTEGER NOT NULL DEFAULT 0);
+-- unicité (groupe, external_id) par index ux_student_group_ext (UNIQUE tolère
+-- NULL — COALESCE external_id→'' la rend effective)
 
 CREATE TABLE professor (
   id INTEGER PRIMARY KEY, full_name TEXT NOT NULL, internal_ref TEXT UNIQUE,
@@ -70,8 +73,9 @@ CREATE TABLE master_module (                            -- le "quoi enseigner"
   session_duration_min INTEGER NOT NULL,
   planned_sessions INTEGER NOT NULL,
   distribution_rule TEXT,                                 -- JSON: prefs/répartition
-  sched_start TEXT NOT NULL, sched_end TEXT NOT NULL,
-  UNIQUE(master_id, module_id, semester_id, student_group_id));
+  sched_start TEXT NOT NULL, sched_end TEXT NOT NULL);
+-- unicité par index ux_master_module (UNIQUE tolère NULL — COALESCE
+-- student_group_id→0 rend l'unicité effective pour "master entier")
 
 -- Ressources
 CREATE TABLE room (
@@ -83,13 +87,15 @@ CREATE TABLE professor_availability (
   weekday INTEGER NOT NULL, start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('DISPO','INDISPO')),
   effective_from TEXT, effective_to TEXT,
+  CHECK (weekday BETWEEN 0 AND 6),
   CHECK (start_min < end_min));
 
 CREATE TABLE professor_absence (
   id INTEGER PRIMARY KEY, professor_id INTEGER NOT NULL REFERENCES professor(id),
   start_date TEXT NOT NULL, end_date TEXT NOT NULL, reason TEXT,
   resolution TEXT NOT NULL DEFAULT 'A_TRAITER'
-    CHECK(resolution IN ('A_TRAITER','PARTIELLE','RESOLUE')));
+    CHECK(resolution IN ('A_TRAITER','PARTIELLE','RESOLUE')),
+  CHECK (start_date <= end_date));
 
 -- Utilisateurs (déclarés tôt : référencés par generation/history/audit)
 CREATE TABLE app_user (
@@ -101,7 +107,8 @@ CREATE TABLE app_user (
 CREATE TABLE schedule_generation (
   id INTEGER PRIMARY KEY, created_at TEXT NOT NULL DEFAULT (datetime('now')),
   created_by INTEGER REFERENCES app_user(id),
-  academic_year_id INTEGER, semester_id INTEGER,
+  academic_year_id INTEGER REFERENCES academic_year(id),
+  semester_id INTEGER REFERENCES semester(id),
   params_json TEXT, result_json TEXT,                     -- non placées + motifs
   placed_count INTEGER, status TEXT NOT NULL DEFAULT 'PREVIEW'
     CHECK(status IN ('PREVIEW','APPLIED','ABANDONED')));
@@ -112,7 +119,8 @@ CREATE TABLE session (
   master_module_id INTEGER NOT NULL REFERENCES master_module(id),
   professor_id INTEGER NOT NULL REFERENCES professor(id),
   room_id INTEGER NOT NULL REFERENCES room(id),
-  date TEXT NOT NULL, start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
+  date TEXT NOT NULL CHECK (date GLOB '????-??-??'),
+  start_min INTEGER NOT NULL, end_min INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'PREVUE' CHECK(status IN
     ('PREVUE','REALISEE','ANNULEE','REPORTEE')),
   actual_date TEXT, actual_start_min INTEGER, actual_end_min INTEGER,
@@ -163,6 +171,10 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);
 ## Index
 
 ```sql
+CREATE UNIQUE INDEX ux_master_module
+  ON master_module(master_id, module_id, semester_id, COALESCE(student_group_id, 0));
+CREATE UNIQUE INDEX ux_student_group_ext
+  ON student(student_group_id, COALESCE(external_id, ''));
 CREATE INDEX ix_session_room_date    ON session(date, room_id)   WHERE status != 'ANNULEE';
 CREATE INDEX ix_session_prof_date    ON session(date, professor_id) WHERE status != 'ANNULEE';
 CREATE INDEX ix_session_mm           ON session(master_module_id);

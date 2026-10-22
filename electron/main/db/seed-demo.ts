@@ -1,6 +1,10 @@
 /**
- * Seed DÉMO (AD-11) — insère le jeu de démonstration uniquement si la base
- * est vide (`master` vide), dans une transaction unique. Idempotent.
+ * Seed DÉMO (AD-11) — insère le jeu de démonstration une seule fois,
+ * dans une transaction unique. Idempotent.
+ *
+ * Gardes : drapeau `setting.seed_done='1'` (survit à une future purge
+ * DÉMO qui viderait `master` mais garderait salles/modules réels) —
+ * `master` non vide sert de garde secondaire.
  *
  * Toutes les entités portant la colonne `is_demo` sont insérées avec
  * `is_demo = 1`. Les salles (paramétrage initial exigé par le brief :
@@ -11,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { countRows, get } from './connection';
 
 export interface SeedResult {
-  /** true si le jeu DÉMO a été inséré, false si la base était déjà remplie. */
+  /** true si le jeu DÉMO a été inséré, false sinon. */
   inserted: boolean;
 }
 
@@ -20,6 +24,12 @@ function isoDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function addMonths(d: Date, months: number): Date {
+  const r = new Date(d);
+  r.setMonth(r.getMonth() + months);
+  return r;
 }
 
 /** Prochaine occurrence d'un jour de semaine (0=lun … 6=dim, convention AD-7). */
@@ -32,32 +42,37 @@ function nextWeekday(weekday: number, from = new Date()): Date {
 }
 
 export function seedDemo(db: DatabaseSync): SeedResult {
-  if (countRows(db, 'master') > 0) {
-    return { inserted: false }; // base non vide → aucune insertion (idempotent)
+  const flag = get<{ value: string }>(
+    db,
+    "SELECT value FROM setting WHERE key = 'seed_done'",
+  );
+  if (flag?.value === '1' || countRows(db, 'master') > 0) {
+    return { inserted: false }; // déjà seedé ou base non vide → idempotent
   }
 
-  db.exec('BEGIN IMMEDIATE;');
   try {
-    // --- Référentiel temps : 1 année, 2 semestres -------------------------
-    db.prepare(
-      "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2026-2027', '2026-09-01', '2027-08-31', 1)",
-    ).run();
-    const yearId = Number(
-      get<{ id: number }>(db, 'SELECT id FROM academic_year LIMIT 1')!.id,
+    db.exec('BEGIN IMMEDIATE;');
+
+    // --- Paramètres par défaut --------------------------------------------
+    const insSetting = db.prepare(
+      'INSERT INTO setting (key, value) VALUES (?, ?)',
     );
+    insSetting.run('backup_retention', '10');
+    insSetting.run('max_daily_load_min', '360');
+    insSetting.run('generation_tolerance_min', '0');
+
+    // --- Référentiel temps : 1 année, 2 semestres -------------------------
+    const yearRes = db
+      .prepare(
+        "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2026-2027', '2026-09-01', '2027-08-31', 1)",
+      )
+      .run();
+    const yearId = Number(yearRes.lastInsertRowid);
     const insSemester = db.prepare(
       'INSERT INTO semester (academic_year_id, label, ordinal) VALUES (?, ?, ?)',
     );
-    insSemester.run(yearId, 'S1', 1);
-    insSemester.run(yearId, 'S2', 2);
-    const sem1 = get<{ id: number }>(
-      db,
-      'SELECT id FROM semester WHERE ordinal = 1',
-    )!.id;
-    const sem2 = get<{ id: number }>(
-      db,
-      'SELECT id FROM semester WHERE ordinal = 2',
-    )!.id;
+    const sem1 = Number(insSemester.run(yearId, 'S1', 1).lastInsertRowid);
+    const sem2 = Number(insSemester.run(yearId, 'S2', 2).lastInsertRowid);
 
     // --- Créneaux par défaut : Lun–Sam 08h–19h ----------------------------
     const insSlot = db.prepare(
@@ -123,6 +138,9 @@ export function seedDemo(db: DatabaseSync): SeedResult {
           distribution_rule, sched_start, sched_end)
        VALUES (?, ?, ?, ?, NULL, 1350, 90, 15, NULL, ?, ?)`,
     );
+    // Fenêtre de planification relative à aujourd'hui : maintenant → +6 mois
+    const schedStart = isoDate(new Date());
+    const schedEnd = isoDate(addMonths(new Date(), 6));
     // 2 modules par master (student_group NULL = master entier)
     const mmPairs: [number, number, number, number][] = [
       [masterIds[0], modIds[0], sem1, profIds[0]],
@@ -133,9 +151,11 @@ export function seedDemo(db: DatabaseSync): SeedResult {
       [masterIds[2], modIds[5], sem2, profIds[5]],
     ];
     for (const [mId, modId, semId, pId] of mmPairs) {
-      insMM.run(mId, modId, semId, pId, '2026-09-01', '2027-01-31');
+      insMM.run(mId, modId, semId, pId, schedStart, schedEnd);
     }
-    const mmIds = (db.prepare('SELECT id FROM master_module ORDER BY id').all() as { id: number }[]).map((r) => r.id);
+    const mmRows = db
+      .prepare('SELECT id, professor_id FROM master_module ORDER BY id')
+      .all() as { id: number; professor_id: number }[];
     const roomIds = (db.prepare('SELECT id FROM room ORDER BY id').all() as { id: number }[]).map((r) => r.id);
 
     // --- Séances DÉMO (PREVUE, dates futures pour rester "prévues") --------
@@ -151,23 +171,21 @@ export function seedDemo(db: DatabaseSync): SeedResult {
       [14 * 60, 15 * 60 + 30], // 14h00–15h30
     ];
     for (let i = 0; i < 8; i++) {
-      const mmId = mmIds[i % mmIds.length];
-      const weekday = i % 6; // lun–sam
+      const mm = mmRows[i % mmRows.length];
+      const weekday = Math.floor(i / slots.length) % 6; // répartit lun→sam
       const [start, end] = slots[i % slots.length];
-      // Décalage d'une semaine par cycle de 6 jours : évite tout chevauchement
-      // salle/master entre séances seedées (i=0 et i=6 partageraient sinon
-      // la même date, le même créneau et la même salle).
-      const date = nextWeekday(weekday);
-      date.setDate(date.getDate() + 7 * Math.floor(i / 6));
       insSession.run(
-        mmId,
-        profIds[i % profIds.length],
+        mm.id,
+        mm.professor_id, // prof désigné par le master_module
         roomIds[i % roomIds.length],
-        isoDate(date),
+        isoDate(nextWeekday(weekday)),
         start,
         end,
       );
     }
+
+    // --- Drapeau d'idempotence (en dernier, dans la même transaction) ------
+    insSetting.run('seed_done', '1');
 
     db.exec('COMMIT;');
   } catch (err) {

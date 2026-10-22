@@ -2,6 +2,10 @@
 
 Application de gestion des emplois du temps des Masters (Electron + React + SQLite `node:sqlite`).
 
+## Prérequis
+
+- **Node ≥ 22.13.0** — requis pour `node:sqlite` `DatabaseSync` actif sans flag (utilisé par le main et par les tests Vitest). Épinglé dans `package.json` `engines`.
+
 ## Commandes
 
 | Commande | Effet |

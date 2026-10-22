@@ -43,9 +43,13 @@ function createWindow(): void {
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
+    win.loadURL(process.env.ELECTRON_RENDERER_URL).catch((err) => {
+      console.error('[window] Échec loadURL :', err);
+    });
   } else {
-    void win.loadFile(path.join(__dirname, '../renderer/index.html'));
+    win.loadFile(path.join(__dirname, '../renderer/index.html')).catch((err) => {
+      console.error('[window] Échec loadFile :', err);
+    });
   }
 }
 

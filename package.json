@@ -4,6 +4,9 @@
   "description": "MasterTime Tanger — gestion des emplois du temps des Masters (Electron + SQLite)",
   "private": true,
   "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

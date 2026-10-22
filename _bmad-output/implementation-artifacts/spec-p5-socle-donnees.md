@@ -2,7 +2,7 @@
 title: 'P5 — Socle Electron + base de données et migrations'
 type: 'feature'
 created: '2026-10-22'
-status: 'in-progress'
+status: 'in-review'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: 'NO_VCS'
@@ -88,6 +88,31 @@ context:
 ## Spec Change Log
 
 ## Review Triage Log
+
+| Finding | Verdict | Evidence / Route |
+|---|---|---|
+| status.ts masque startupError quand db non-null | high | Vérifié ligne 39-41 : ok:true/error:null quel que soit startupError; db assignée avant runMigrations. -> patch |
+| CSP script-src self bloque react-refresh dev | high | index.html:8 ; preamble inline injecté par plugin-react en dev. -> patch unsafe-inline |
+| seedDemo guard master-vide -> UNIQUE crash après purge DÉMO | medium | seed-demo.ts:35 ; room/module UNIQUE. -> patch flag setting.seed_done |
+| bundledMigrations sans filtre NNNN_ (NaN version) | medium | migrate.ts:58-70 ; loadMigrationsFromDir filtre, pas le glob. -> patch |
+| BEGIN IMMEDIATE hors try (migrate + seed) | low | erreur brute sans contexte. -> patch |
+| Migration SQL contenant BEGIN/COMMIT -> rollback inefficace | medium | guard simple à ajouter. -> patch |
+| wal_checkpoint non vérifié -> backup obsolète | medium | pragma retourne busy sans throw. -> patch (VACUUM INTO) |
+| schedule_generation sans REFERENCES year/semester | medium | DDL inconsist. -> patch 0001 + DATA-MODEL |
+| UNIQUE avec NULL inefficace (master_module, student) | medium | SQLite NULL distinct -> doublons groupe NULL. -> patch index COALESCE |
+| CHECKs manquants (weekday, start<=end, format date) | low | durcissement cheap. -> patch 0001 |
+| getDb ignore dbPath après init ; pas de busy_timeout | medium | connection.ts:44-53. -> patch throw + pragma |
+| App.tsx IPC sans .catch -> spinner infini | medium | -> patch état erreur |
+| Test gaps: collectDbStatus, resolveDbPath/getDb, effectiveSessionStatus | medium | verification-gap confirmé. -> patch tests |
+| Seed: prof session != prof master_module (i=6,7) ; sched window hardcodée vs dates relatives | low | -> patch seed |
+| engines Node >=22.13 absent ; AGENTS.md ne le mentionne pas | low | -> patch |
+| setting defaults jamais insérés | low | -> patch dans seed |
+| Collision backup même milliseconde | false(low rejeté) | inatteignable : une seule passe de migration par run, timestamp ms |
+| runMigrations throw sur version dupliquée avant filtre applied | false | comportement défensif voulu |
+| Date non paddée -> comparaison lexicale fausse | false | aucun writer ne produit de date non paddée ; CHECK ajouté en durcissement |
+| Vendored .agents dans le commit, pas de ESLint/README/verrou mono-instance | defer | outillage/hygiène, hors intention P5 |
+| Versions non contiguës (v2 après v3) | low->patch inclus | rejet pending <= max(applied) dans le même lot runner |
+
 
 ## Design Notes
 

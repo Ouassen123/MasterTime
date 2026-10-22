@@ -37,8 +37,8 @@ export function collectDbStatus(
       ).map((r) => String(r.version).padStart(4, '0'))
     : [];
   return {
-    ok: true,
-    error: null,
+    ok: !startupError,
+    error: startupError,
     dbPath,
     tableCount: userTableCount(db),
     appliedMigrations,

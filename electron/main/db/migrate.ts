@@ -54,6 +54,7 @@ export function loadMigrationsFromDir(dir: string): MigrationSource[] {
 /**
  * Migrations embarquées dans le bundle main via `import.meta.glob`
  * (pas de copie de fichiers nécessaire dans `out/`).
+ * Tout `*.sql` dont le nom ne suit pas `NNNN_*.sql` est refusé.
  */
 export function bundledMigrations(): MigrationSource[] {
   const modules = import.meta.glob('./migrations/*.sql', {
@@ -64,6 +65,11 @@ export function bundledMigrations(): MigrationSource[] {
   return Object.entries(modules)
     .map(([p, sql]) => {
       const name = path.basename(p);
+      if (!MIGRATION_FILE_RE.test(name)) {
+        throw new Error(
+          `Fichier SQL non conforme au format NNNN_*.sql : '${name}'`,
+        );
+      }
       return { version: Number.parseInt(name.slice(0, 4), 10), name, sql };
     })
     .sort((a, b) => a.version - b.version);
@@ -98,15 +104,14 @@ export function userTableCount(db: DatabaseSync): number {
 /** Copie de sauvegarde PRE_MIGRATION + entrée `backup_history` si la table existe. */
 function createPreMigrationBackup(
   db: DatabaseSync,
-  dbPath: string,
   backupDir: string,
 ): string {
-  // Consolider le WAL dans le fichier principal avant la copie.
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   fs.mkdirSync(backupDir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const backupPath = path.join(backupDir, `pre-migration-${ts}.db`);
-  fs.copyFileSync(dbPath, backupPath);
+  // VACUUM INTO = snapshot atomique cohérent (WAL inclus), pas de copie de fichier.
+  const escaped = backupPath.replace(/'/g, "''");
+  db.exec(`VACUUM INTO '${escaped}';`);
 
   if (tableExists(db, 'backup_history')) {
     const size = fs.statSync(backupPath).size;
@@ -115,6 +120,25 @@ function createPreMigrationBackup(
     ).run(backupPath, size);
   }
   return backupPath;
+}
+
+/**
+ * Refuse une migration contenant des ordres de contrôle de transaction
+ * top-level (BEGIN/COMMIT/ROLLBACK) — ils court-circuiteraient le wrapper
+ * transactionnel du runner. Les commentaires et littéraux sont exclus.
+ */
+function rejectTransactionControl(m: MigrationSource): void {
+  const stripped = m.sql
+    .replace(/--[^\n]*/g, ' ') // commentaires ligne
+    .replace(/\/\*[\s\S]*?\*\//g, ' ') // commentaires bloc
+    .replace(/'(?:[^']|'')*'/g, "''"); // littéraux 'texte'
+  if (/(^|;)\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(stripped)) {
+    throw new Error(
+      `Migration '${m.name}' invalide : instruction de contrôle de ` +
+        'transaction (BEGIN/COMMIT/ROLLBACK) détectée — interdite, le runner ' +
+        'gère la transaction.',
+    );
+  }
 }
 
 /**
@@ -141,6 +165,17 @@ export function runMigrations(
     .sort((a, b) => a.version - b.version)
     .filter((m) => !applied.has(m.version));
 
+  // Version en attente ≤ max déjà appliquée = migration "insérée" après coup
+  // (hors ordre) — refusée pour préserver l'ordre strict des migrations.
+  const maxApplied = applied.size > 0 ? Math.max(...applied) : 0;
+  const outOfOrder = pending.find((m) => m.version <= maxApplied);
+  if (outOfOrder) {
+    throw new Error(
+      `Migration hors ordre : '${outOfOrder.name}' (version ${outOfOrder.version}) ` +
+        `≤ dernière version appliquée ${maxApplied}`,
+    );
+  }
+
   const result: MigrationResult = {
     applied: [],
     alreadyApplied: [...applied].sort((a, b) => a - b),
@@ -150,12 +185,13 @@ export function runMigrations(
   const isFileBacked =
     !!opts.dbPath && opts.dbPath !== ':memory:' && fs.existsSync(opts.dbPath);
   if (isFileBacked && opts.backupDir && userTableCount(db) > 0) {
-    result.backupPath = createPreMigrationBackup(db, opts.dbPath!, opts.backupDir);
+    result.backupPath = createPreMigrationBackup(db, opts.backupDir);
   }
 
   for (const m of pending) {
-    db.exec('BEGIN IMMEDIATE;');
     try {
+      rejectTransactionControl(m);
+      db.exec('BEGIN IMMEDIATE;');
       db.exec(m.sql);
       db.prepare(
         "INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
