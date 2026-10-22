@@ -3,9 +3,18 @@
  * données. Les KPI métier (FR-1…5) arrivent avec les phases suivantes.
  */
 import { useEffect, useState } from 'react';
-import { Alert, Card, Descriptions, Skeleton, Space, Statistic, Tag } from 'antd';
+import {
+  Alert,
+  Card,
+  Descriptions,
+  Skeleton,
+  Space,
+  Statistic,
+  Tag,
+  message,
+} from 'antd';
 import { useTranslation } from 'react-i18next';
-import { api, hasApi } from '../api/client';
+import { api, errorMessage, hasApi } from '../api/client';
 import type { AppInfo, DbStatus } from '../../shared/types';
 
 const COUNT_KEYS = [
@@ -27,7 +36,9 @@ export function DashboardPage(): React.JSX.Element {
     void Promise.allSettled([api().dbStatus(), api().appInfo()]).then(
       ([statusRes, infoRes]) => {
         if (statusRes.status === 'fulfilled') setStatus(statusRes.value);
+        else void message.error(errorMessage(statusRes.reason));
         if (infoRes.status === 'fulfilled') setInfo(infoRes.value);
+        else void message.error(errorMessage(infoRes.reason));
         setLoading(false);
       },
     );

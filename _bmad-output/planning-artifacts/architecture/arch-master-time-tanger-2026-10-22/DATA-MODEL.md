@@ -184,6 +184,9 @@ CREATE INDEX ix_avail_prof_day       ON professor_availability(professor_id, wee
 CREATE INDEX ix_attend_session       ON student_attendance(session_id);
 CREATE INDEX ix_audit_entity         ON audit_log(entity, entity_id);
 CREATE INDEX ix_audit_at             ON audit_log(at);
+-- ajoutés en migration 0002 (compteurs corrélés des référentiels)
+CREATE INDEX ix_session_room         ON session(room_id);
+CREATE INDEX ix_master_module_module ON master_module(module_id);
 ```
 
 ## Points d'intégrité notables

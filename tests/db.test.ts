@@ -70,24 +70,25 @@ afterEach(() => {
 });
 
 describe('migrations', () => {
-  it('applique 0001 sur une base vierge : 23 tables + index', () => {
+  it('applique 0001+0002 sur une base vierge : 23 tables + index', () => {
     const db = openTempFileDb();
     const result = runMigrations(db, {
       migrations: loadMigrationsFromDir(MIGRATIONS_DIR),
     });
-    expect(result.applied).toEqual(['0001_init.sql']);
+    expect(result.applied).toEqual(['0001_init.sql', '0002_perf_indexes.sql']);
     expect(userTableCount(db)).toBe(23);
 
     const indexCount = get<{ c: number }>(
       db,
       "SELECT count(*) AS c FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
     )!.c;
-    expect(indexCount).toBe(11); // 9 index + ux_master_module + ux_student_group_ext
+    // 9 index + ux_master_module + ux_student_group_ext + ix_session_room + ix_master_module_module
+    expect(indexCount).toBe(13);
 
     const versions = db
       .prepare('SELECT version FROM schema_migrations')
       .all() as { version: number }[];
-    expect(versions.map((v) => v.version)).toEqual([1]);
+    expect(versions.map((v) => v.version)).toEqual([1, 2]);
   });
 
   it('bundledMigrations() charge le même SQL que le fichier disque', () => {
@@ -103,7 +104,7 @@ describe('migrations', () => {
     runMigrations(db, { migrations });
     const second = runMigrations(db, { migrations });
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toEqual([1]);
+    expect(second.alreadyApplied).toEqual([1, 2]);
     expect(second.backupPath).toBeUndefined();
     expect(userTableCount(db)).toBe(23);
   });
@@ -141,14 +142,14 @@ describe('migrations', () => {
 
     const bad: MigrationSource[] = [
       {
-        version: 2,
-        name: '0002_partial.sql',
-        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (2, 'x'); THIS IS NOT SQL;",
+        version: 3,
+        name: '0003_partial.sql',
+        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (3, 'x'); THIS IS NOT SQL;",
       },
     ];
     expect(() =>
       runMigrations(db, { migrations: bad, backupDir, dbPath }),
-    ).toThrow(/0002_partial/);
+    ).toThrow(/0003_partial/);
 
     // Rien n'a été appliqué : ni table fantôme, ni version enregistrée
     expect(userTableCount(db)).toBe(tablesBefore);
@@ -158,7 +159,7 @@ describe('migrations', () => {
         "SELECT count(*) AS c FROM sqlite_master WHERE name='should_not_survive'",
       )!.c,
     ).toBe(0);
-    expect(countRows(db, 'schema_migrations')).toBe(1);
+    expect(countRows(db, 'schema_migrations')).toBe(2);
     expect(countRows(db, 'master')).toBe(mastersBefore);
 
     // Sauvegarde PRE_MIGRATION créée + enregistrée (base existante non vide)
@@ -246,7 +247,7 @@ describe('collectDbStatus', () => {
     expect(status.error).toBeNull();
     expect(status.dbPath).toBe(dbPath);
     expect(status.tableCount).toBe(23);
-    expect(status.appliedMigrations).toEqual(['0001']);
+    expect(status.appliedMigrations).toEqual(['0001', '0002']);
     expect(status.counts.master).toBe(3);
     expect(status.counts.professor).toBe(8);
     expect(status.counts.room).toBe(3);

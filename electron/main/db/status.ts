@@ -61,7 +61,8 @@ export function collectDbStatus(
 /** Total des lignes `is_demo=1` — pilote le bandeau DÉMO (AD-11). */
 function countDemoRows(db: DatabaseSync): number {
   let total = 0;
-  for (const table of ['master', 'professor', 'module', 'session']) {
+  // Toutes les tables portant `is_demo` (seed DÉMO, AD-11).
+  for (const table of ['master', 'professor', 'module', 'session', 'student']) {
     total += get<{ c: number }>(
       db,
       `SELECT count(*) AS c FROM "${table}" WHERE is_demo = 1`,

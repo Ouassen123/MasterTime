@@ -18,6 +18,11 @@ export interface EntityDrawerProps<TValues extends object> {
   /** Appel API : le parent rafraîchit ses données et retourne le ApiResult. */
   onSubmit: (values: TValues) => Promise<ApiResult<unknown>>;
   onClose: () => void;
+  /**
+   * Noms des champs présents dans le formulaire — les erreurs serveur dont
+   * le `field` n'y figure pas sont affichées en erreur globale (fallback).
+   */
+  fieldNames: string[];
   children: React.ReactNode;
 }
 
@@ -30,7 +35,10 @@ export function EntityDrawer<TValues extends object>(
   const [globalError, setGlobalError] = useState<string | null>(null);
   const dirty = useRef(false);
 
-  // À l'ouverture : réinitialise le formulaire puis injecte les valeurs initiales.
+  // À l'ouverture uniquement : réinitialise le formulaire puis injecte les
+  // valeurs initiales. Ne dépend ni de `initialValues` (littéral frais à
+  // chaque rendu parent → écraserait la saisie en cours) ni des callbacks :
+  // l'identité de l'entité est portée par la `key` posée par le parent.
   useEffect(() => {
     if (props.open) {
       setGlobalError(null);
@@ -40,7 +48,8 @@ export function EntityDrawer<TValues extends object>(
         form.setFieldsValue(props.initialValues as TValues);
       }
     }
-  }, [props.open, props.initialValues, form]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.open, form]);
 
   const requestClose = (): void => {
     if (dirty.current && !submitting) {
@@ -66,14 +75,24 @@ export function EntityDrawer<TValues extends object>(
         props.onClose();
         return;
       }
-      if (res.fields && res.fields.length > 0) {
+      const fields = res.fields ?? [];
+      const mapped = fields.filter((f) => props.fieldNames.includes(f.field));
+      const unmapped = fields.filter((f) => !props.fieldNames.includes(f.field));
+      if (mapped.length > 0) {
         // Le serveur nomme les champs par chaîne — mappés tels quels sur le Form.
         form.setFields(
-          res.fields.map((f) => ({ name: f.field, errors: [f.message] })) as never,
+          mapped.map((f) => ({ name: f.field, errors: [f.message] })) as never,
         );
-      } else {
+      }
+      if (unmapped.length > 0) {
+        // Champ serveur sans Form.Item correspondant : ne pas le perdre.
+        setGlobalError(unmapped.map((f) => `${f.field} : ${f.message}`).join(' — '));
+      } else if (mapped.length === 0) {
         setGlobalError(res.error);
       }
+    } catch (err) {
+      // Rejet IPC / exception réseau : feedback visible, pas de rejection muette.
+      setGlobalError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }

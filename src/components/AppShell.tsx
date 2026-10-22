@@ -61,28 +61,35 @@ export function AppShell(): React.JSX.Element {
       setApiMissing(true);
       return;
     }
+    // Échec IPC / rejet : message visible, jamais d'erreur avalée en silence.
+    const notifyError = (err: unknown): void => {
+      void message.error(errorMessage(err));
+    };
     void api()
       .profile.list()
       .then((res) => {
         if (res.ok) setProfiles(res.data);
+        else notifyError(res);
       })
-      .catch(() => undefined);
+      .catch(notifyError);
     void api()
       .profile.current()
       .then((res) => {
         if (res.ok) setCurrentProfile(res.data);
+        else notifyError(res);
       })
-      .catch(() => undefined);
+      .catch(notifyError);
     void api()
       .appContext()
       .then((res) => {
         if (res.ok) setContext(res.data);
+        else notifyError(res);
       })
-      .catch(() => undefined);
+      .catch(notifyError);
     void api()
       .dbStatus()
       .then(setStatus)
-      .catch(() => undefined);
+      .catch(notifyError);
   }, []);
 
   const isAdmin = currentProfile?.role === 'ADMIN';
@@ -106,12 +113,18 @@ export function AppShell(): React.JSX.Element {
       ?.path ?? '/';
 
   const switchProfile = async (id: number): Promise<void> => {
-    const res = await api().profile.set(id);
-    if (res.ok) {
-      setCurrentProfile(res.data);
-      void message.success(t('profile.changed', { name: res.data.display_name }));
-    } else {
-      void message.error(errorMessage(res));
+    try {
+      const res = await api().profile.set(id);
+      if (res.ok) {
+        setCurrentProfile(res.data);
+        void message.success(
+          t('profile.changed', { name: res.data.display_name }),
+        );
+      } else {
+        void message.error(errorMessage(res));
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
     }
   };
 

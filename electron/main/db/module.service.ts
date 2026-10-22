@@ -45,7 +45,7 @@ function validateModule(
   } else {
     const dup = get<{ id: number }>(
       db,
-      'SELECT id FROM module WHERE code = ? AND id != ?',
+      'SELECT id FROM module WHERE code = ? COLLATE NOCASE AND id != ?',
       code,
       excludeId ?? -1,
     );
@@ -58,7 +58,7 @@ function validateModule(
   } else {
     const dup = get<{ id: number }>(
       db,
-      'SELECT id FROM module WHERE name = ? AND id != ?',
+      'SELECT id FROM module WHERE name = ? COLLATE NOCASE AND id != ?',
       name,
       excludeId ?? -1,
     );

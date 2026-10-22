@@ -25,7 +25,7 @@
     "contextEmpty": "Contexte non défini"
   },
   "demo": {
-    "banner": "Données de démonstration présentes dans la base (marquées DÉMO). Purge disponible dans Paramètres (profil Administrateur)."
+    "banner": "Des données de démonstration sont présentes dans la base (marquées DÉMO)."
   },
   "common": {
     "search": "Rechercher…",
@@ -60,10 +60,9 @@
     "activated": "Salle activée.",
     "deactivated": "Salle désactivée.",
     "deleteTitle": "Supprimer la salle",
-    "deleteConfirm": "Supprimer « {{name}} » ? Cette salle est utilisée par {{count}} séance(s).",
     "deleteConfirmFree": "Supprimer « {{name}} » ? Aucune séance ne l'utilise.",
     "deleteRefused": "Suppression refusée",
-    "deactivateOffer": "La suppression est impossible. Voulez-vous désactiver la salle à la place ?",
+    "refusedBody": "Cette salle est utilisée par {{count}} séance(s) : suppression impossible. Voulez-vous la désactiver à la place ?",
     "capacityPlaceholder": "ex. 30"
   },
   "modules": {
@@ -80,9 +79,9 @@
     "updated": "Module mis à jour.",
     "deleted": "Module supprimé.",
     "deleteTitle": "Supprimer le module",
-    "deleteConfirm": "Supprimer « {{name}} » ? Ce module est utilisé par {{count}} master-module(s) lié(s).",
     "deleteConfirmFree": "Supprimer « {{name}} » ? Aucun master-module ne l'utilise.",
-    "deleteRefused": "Suppression refusée"
+    "deleteRefused": "Suppression refusée",
+    "refusedBody": "Ce module est utilisé par {{count}} master-module(s) lié(s) : suppression impossible."
   },
   "placeholder": {
     "title": "Fonctionnalité à venir",

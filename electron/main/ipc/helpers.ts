@@ -11,6 +11,16 @@ import { getCurrentProfile } from '../db/profile.service';
 
 export type DbGetter = () => DatabaseSync | null;
 
+export interface GuardOptions {
+  /**
+   * BR-24 — seam pour les handlers réservés : `requireRole: 'ADMIN'`
+   * refuse l'appel si le profil courant n'est pas administrateur.
+   * (Aucun handler ne l'exige encore — P6a ne couvre que des actions
+   * ouvertes aux deux profils.)
+   */
+  requireRole?: 'ADMIN';
+}
+
 function isApiResult(value: unknown): value is ApiResult<unknown> {
   return (
     typeof value === 'object' && value !== null && 'ok' in value &&
@@ -22,21 +32,31 @@ function isApiResult(value: unknown): value is ApiResult<unknown> {
  * Exécute `fn` avec la connexion courante ; retourne toujours un ApiResult.
  * `fn` peut retourner soit un `ApiResult` (passé tel quel), soit une donnée
  * brute (enveloppée `{ ok:true, data }`).
+ * Les erreurs inattendues sont journalisées côté main mais jamais transmises
+ * brutes au renderer (pas de fuite d'erreurs SQLite vers l'UI).
  */
 export function guard<T>(
   getDb: DbGetter,
   fn: (db: DatabaseSync) => ApiResult<T> | T,
+  opts?: GuardOptions,
 ): ApiResult<T> {
   const db = getDb();
   if (!db) {
     return apiErr('Base de données non initialisée.');
   }
   try {
+    if (opts?.requireRole === 'ADMIN') {
+      const profile = getCurrentProfile(db);
+      if (profile?.role !== 'ADMIN') {
+        return apiErr('Action réservée au profil Administrateur.');
+      }
+    }
     const result = fn(db);
     if (isApiResult(result)) return result as ApiResult<T>;
     return { ok: true, data: result };
   } catch (err) {
-    return apiErr(err instanceof Error ? err.message : String(err));
+    console.error('[ipc] Erreur dans un handler :', err);
+    return apiErr('Une erreur interne est survenue.');
   }
 }
 

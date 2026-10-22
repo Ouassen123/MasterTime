@@ -2,7 +2,7 @@
 title: 'P6a — Socle applicatif + référentiels Salles & Modules (CRUD)'
 type: 'feature'
 created: '2026-10-22'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '89e11e79072241480fd58fa2ed52014b65bb3414'
@@ -63,21 +63,21 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `shared/types.ts` — DTOs + `ApiResult<T> = {ok:true,data}|{ok:false,error,fields?}` + `WindowApi` étendu
-- [ ] `electron/main/db/audit.service.ts` — `withAudit(db, userId, action, entity, entityId, fn)` : wrap transaction, capture old/new JSON, insère audit_log
-- [ ] `electron/main/db/profile.service.ts` — seed 2 profils si vide ; `getCurrentProfile()`, `setCurrentProfile(id)`, `listProfiles()`
-- [ ] `electron/main/db/room.service.ts` — list/create/update/delete/setActive ; validations ; protection suppression (séances liées) ; audit via `withAudit`
-- [ ] `electron/main/db/module.service.ts` — idem pour module (liés via master_module)
-- [ ] `electron/main/ipc/index.ts` + handlers domaine — canaux `rooms:list|create|update|remove|setActive`, `modules:*`, `profile:list|current|set`
-- [ ] `electron/main/preload.ts` — `window.api` étendu typé
-- [ ] `src/api/client.ts` + `src/api.d.ts` — client typé `window.api`
-- [ ] `src/App.tsx` + `src/components/AppShell.tsx` — Layout antd : sidebar 13 entrées (actives : Dashboard placeholder, Salles, Modules ; autres désactivées), topbar profil+année courante, `Alert` ambre si `is_demo` (via dbStatus counts)
-- [ ] `src/components/CrudTable.tsx` — Table antd : recherche, pagination 15, tri, colonnes paramétrées, boutons éditer/désactiver/supprimer
-- [ ] `src/components/EntityDrawer.tsx` — Drawer+Form antd avec mapping erreurs serveur → champs
-- [ ] `src/pages/RoomsPage.tsx`, `src/pages/ModulesPage.tsx`, `src/pages/PlaceholderPage.tsx`
-- [ ] `src/main.tsx` — react-router routes + ConfigProvider fr
-- [ ] `src/i18n/fr.json` — toutes les chaînes UI nouvelles
-- [ ] `tests/referentiels.test.ts` — Vitest : CRUD salle+module, doublon refusé, suppression liée refusée, audit écrit avec old/new, profils seedés, `setCurrentProfile`
+- [x] `shared/types.ts` — DTOs + `ApiResult<T> = {ok:true,data}|{ok:false,error,fields?}` + `WindowApi` étendu
+- [x] `electron/main/db/audit.service.ts` — `withAudit(db, userId, action, entity, entityId, fn)` : wrap transaction, capture old/new JSON, insère audit_log
+- [x] `electron/main/db/profile.service.ts` — seed 2 profils si vide ; `getCurrentProfile()`, `setCurrentProfile(id)`, `listProfiles()`
+- [x] `electron/main/db/room.service.ts` — list/create/update/delete/setActive ; validations ; protection suppression (séances liées) ; audit via `withAudit`
+- [x] `electron/main/db/module.service.ts` — idem pour module (liés via master_module)
+- [x] `electron/main/ipc/index.ts` + handlers domaine — canaux `rooms:list|create|update|remove|setActive`, `modules:*`, `profile:list|current|set`
+- [x] `electron/main/preload.ts` — `window.api` étendu typé
+- [x] `src/api/client.ts` + `src/api.d.ts` — client typé `window.api`
+- [x] `src/App.tsx` + `src/components/AppShell.tsx` — Layout antd : sidebar 13 entrées (actives : Dashboard placeholder, Salles, Modules ; autres désactivées), topbar profil+année courante, `Alert` ambre si `is_demo` (via dbStatus counts)
+- [x] `src/components/CrudTable.tsx` — Table antd : recherche, pagination 15, tri, colonnes paramétrées, boutons éditer/désactiver/supprimer
+- [x] `src/components/EntityDrawer.tsx` — Drawer+Form antd avec mapping erreurs serveur → champs
+- [x] `src/pages/RoomsPage.tsx`, `src/pages/ModulesPage.tsx`, `src/pages/PlaceholderPage.tsx`
+- [x] `src/main.tsx` — react-router routes + ConfigProvider fr
+- [x] `src/i18n/fr.json` — toutes les chaînes UI nouvelles
+- [x] `tests/referentiels.test.ts` — Vitest : CRUD salle+module, doublon refusé, suppression liée refusée, audit écrit avec old/new, profils seedés, `setCurrentProfile`
 
 **Acceptance Criteria:**
 - Étant donné l'app lancée, quand je crée « Salle 2 » capacité 30, alors elle apparaît dans la table et `audit_log` contient CREATE avec new_values JSON
@@ -88,9 +88,40 @@ context:
 
 ## Implementation Notes
 
+- Revue 3 couches : ~22 findings patchés (voir Review Triage Log). Points notables : db=null après échec init, COLLATE NOCASE doublons, reset drawer corrigé, migration 0002 index perf, flag seam requireRole (BR-24) ajouté au guard IPC.
+- Migration 0002 appliquera automatiquement au prochain démarrage (PRE_MIGRATION backup).
+- api.audit.list exposé sans consommateur (page audit = phase Sauvegardes/Historique).
+
 ## Spec Change Log
 
 ## Review Triage Log
+
+| Finding | Verdict | Route |
+|---|---|---|
+| db non-null après init échouée -> mutations sur schéma cassé | high | patch: null db + guard startupError |
+| EntityDrawer reset saisie au re-render parent | high | patch: dep primitive/memo initialValues |
+| Doublons insensibles casse (room.name, module.code/name) | high | patch: COLLATE NOCASE validation |
+| Régression affichage erreur dashboard (catch discard) | medium | patch: état erreur visible |
+| Profils inactifs listés/getCurrentProfile ignore is_active | medium | patch: filtre + fallback |
+| Seed app_user non atomique ; aucun ADMIN garanti | medium | patch: transaction + ensure ADMIN actif |
+| rooms:setActive arg non booléen -> désactivation silencieuse | medium | patch: validation type |
+| counts.demo sans student.is_demo | medium | patch: ajouter student |
+| Bandeau DÉMO promet purge inexistante | medium | patch: reformuler i18n |
+| Double modale suppression liée (count>0 connu client) | medium | patch: court-circuit vers refus/désactivation |
+| Aucune seam de rôle dans guard IPC (BR-24) | medium | patch: option requireRole + commentaire |
+| Audit UPDATE no-op (old==new) | low | patch: skip insert si identique |
+| guard fuit err.message brut en UI | medium | patch: message générique + log serveur |
+| withAudit: fn void sans rowid pour CREATE ; tx imbriquée | medium | patch: assert id + assert !isTransaction |
+| listAuditLog sans plafond | low | patch: clamp 1000 |
+| Pagination CrudTable non reset après recherche | medium | patch: reset page on search |
+| switchProfile sans try/catch | low | patch |
+| Index manquants pour counts corrélés | medium | patch: migration 0002 (ix_session_room, ix_mm_module) |
+| @ant-design/icons v6 vs antd5 bundle | low | patch: pin ^5 |
+| form.setFields as never masque erreurs champ inconnu | low | patch: fallback globalError |
+| Tests manquants (appContext, counts.demo, auditLog, guard, currentUserId, not-found) | medium | patch tests |
+| api.audit.list sans consommateur | defer | par design, consommé plus tard |
+| Bandeau DÉMO stale après suppression demo | defer | mineur, refetch au prochain rendu |
+
 
 ## Design Notes
 

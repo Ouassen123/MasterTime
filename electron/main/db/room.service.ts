@@ -44,7 +44,7 @@ function validateRoom(
   } else {
     const dup = get<{ id: number }>(
       db,
-      'SELECT id FROM room WHERE name = ? AND id != ?',
+      'SELECT id FROM room WHERE name = ? COLLATE NOCASE AND id != ?',
       name,
       excludeId ?? -1,
     );

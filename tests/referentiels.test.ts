@@ -19,6 +19,7 @@ import { seedDemo } from '../electron/main/db/seed-demo';
 import {
   ensureProfiles,
   getCurrentProfile,
+  listAllProfiles,
   listProfiles,
   setCurrentProfile,
 } from '../electron/main/db/profile.service';
@@ -35,7 +36,10 @@ import {
   listModules,
   updateModule,
 } from '../electron/main/db/module.service';
-import { withAudit } from '../electron/main/db/audit.service';
+import { listAuditLog, withAudit } from '../electron/main/db/audit.service';
+import { collectAppContext, collectDbStatus } from '../electron/main/db/status';
+import { currentUserId, guard } from '../electron/main/ipc/helpers';
+import { apiErr } from '../shared/types';
 import type { AppUser } from '../shared/types';
 
 const MIGRATIONS_DIR = path.resolve(
@@ -114,7 +118,7 @@ describe('profils (app_user)', () => {
     expect(listProfiles(db)).toHaveLength(2);
   });
 
-  it('ne ré-seede pas si app_user contient déjà des profils', () => {
+  it('ne ré-seede pas si app_user non vide, mais garantit un ADMIN actif', () => {
     const db = openDatabase(':memory:');
     dbs.push(db);
     runMigrations(db, { migrations: loadMigrationsFromDir(MIGRATIONS_DIR) });
@@ -122,11 +126,36 @@ describe('profils (app_user)', () => {
       "INSERT INTO app_user (display_name, role) VALUES ('Fatima', 'GESTIONNAIRE')",
     ).run();
     ensureProfiles(db);
-    const profiles = listProfiles(db);
-    expect(profiles).toHaveLength(1);
-    expect(profiles[0].display_name).toBe('Fatima');
-    // …et le profil courant pointe sur l'existant
-    expect(getCurrentProfile(db)?.display_name).toBe('Fatima');
+    // Fatima conservée + Administrateur ajouté (aucun ADMIN actif — sinon
+    // les entrées réservées deviendraient inaccessibles, BR-24).
+    const all = listAllProfiles(db);
+    expect(all).toHaveLength(2);
+    expect(all.map((p) => p.display_name)).toEqual([
+      'Fatima',
+      'Administrateur',
+    ]);
+    // Le profil courant retombe sur l'ADMIN actif
+    const current = getCurrentProfile(db);
+    expect(current?.display_name).toBe('Administrateur');
+    expect(current?.role).toBe('ADMIN');
+  });
+
+  it('profil courant désactivé → retombe sur le premier actif et répare', () => {
+    const db = freshDb();
+    const gest = listProfiles(db).find((p) => p.role === 'GESTIONNAIRE')!;
+    setCurrentProfile(db, gest.id);
+    db.prepare('UPDATE app_user SET is_active = 0 WHERE id = ?').run(gest.id);
+    // listProfiles n'expose que les actifs
+    expect(listProfiles(db).map((p) => p.id)).not.toContain(gest.id);
+    const current = getCurrentProfile(db);
+    expect(current?.is_active).toBe(1);
+    expect(current?.role).toBe('ADMIN');
+    // Le setting a été réparé
+    const stored = get<{ value: string }>(
+      db,
+      "SELECT value FROM setting WHERE key = 'current_profile_id'",
+    );
+    expect(Number(stored!.value)).toBe(current!.id);
   });
 
   it('setCurrentProfile bascule et persiste ; id invalide refusé', () => {
@@ -178,6 +207,10 @@ describe('salles (room)', () => {
     expect(dup.fields).toEqual([
       { field: 'name', message: expect.any(String) },
     ]);
+    // Casse ignorée : 'amphi 7' ne doit pas cohabiter avec 'Amphi 7'.
+    const dupCase = createRoom(db, uid, { name: 'amphi 7' });
+    expect(dupCase.ok).toBe(false);
+    if (!dupCase.ok) expect(dupCase.fields?.[0].field).toBe('name');
     expect(
       listRooms(db).filter((r) => r.name === 'Amphi 7'),
     ).toHaveLength(1);
@@ -310,6 +343,11 @@ describe('modules (module)', () => {
     expect(dupName.ok).toBe(false);
     if (!dupName.ok) expect(dupName.fields?.[0].field).toBe('name');
 
+    // Casse ignorée sur code et nom.
+    const dupCodeCase = createModule(db, uid, { code: 'gl101', name: 'Autre' });
+    expect(dupCodeCase.ok).toBe(false);
+    if (!dupCodeCase.ok) expect(dupCodeCase.fields?.[0].field).toBe('code');
+
     const empty = createModule(db, uid, { code: '', name: '' });
     expect(empty.ok).toBe(false);
     if (!empty.ok) {
@@ -389,5 +427,178 @@ describe('audit transactionnel (AD-6)', () => {
     expect(res.ok).toBe(true);
     const log = auditRows(db, 'room');
     expect(log[0].user_id).toBe(gest.id);
+  });
+
+  it('UPDATE sans effet (old == new) : aucune ligne audit superflue', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const created = createRoom(db, uid, { name: 'Salle S', capacity: 20 });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const res = updateRoom(db, uid, created.data.id, {
+      name: 'Salle S',
+      capacity: 20,
+    });
+    expect(res.ok).toBe(true);
+    // Seul le CREATE est tracé — le no-op UPDATE n'écrit rien.
+    const log = auditRows(db, 'room');
+    expect(log).toHaveLength(1);
+    expect(log[0].action).toBe('CREATE');
+  });
+
+  it('withAudit refuse de s\'exécuter dans une transaction déjà ouverte', () => {
+    const db = freshDb();
+    db.exec('BEGIN IMMEDIATE;');
+    expect(() =>
+      withAudit(db, null, 'CREATE', 'room', null, () => 1),
+    ).toThrow(/transaction déjà ouverte/);
+    db.exec('ROLLBACK;');
+  });
+
+  it('CREATE dont fn ne retourne aucun id : erreur descriptive, rollback', () => {
+    const db = freshDb();
+    expect(() =>
+      withAudit(db, null, 'CREATE', 'room', null, () => {
+        db.prepare('INSERT INTO room (name) VALUES (?)').run('SansId');
+      }),
+    ).toThrow(/identifiant/);
+    expect(listRooms(db)).toHaveLength(0);
+    expect(auditRows(db)).toHaveLength(0);
+  });
+});
+
+describe('collectAppContext / counts.demo', () => {
+  it('base seedée : année « 2026-2027 », semestre « S1 »', () => {
+    const db = freshDb({ seed: true });
+    const ctx = collectAppContext(db);
+    expect(ctx.academicYear).toBe('2026-2027');
+    expect(ctx.semester).toBe('S1');
+  });
+
+  it('db null : champs null', () => {
+    expect(collectAppContext(null)).toEqual({
+      academicYear: null,
+      semester: null,
+    });
+  });
+
+  it('counts.demo > 0 sur base seedée, 0 sur base vide', () => {
+    const dbSeeded = freshDb({ seed: true });
+    const statusSeeded = collectDbStatus(dbSeeded, ':memory:', null);
+    expect(statusSeeded.counts.demo).toBeGreaterThan(0);
+
+    const dbEmpty = freshDb();
+    const statusEmpty = collectDbStatus(dbEmpty, ':memory:', null);
+    expect(statusEmpty.counts.demo).toBe(0);
+  });
+});
+
+describe('listAuditLog', () => {
+  it('joint le nom du profil, ordre DESC, limite clampée', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    createRoom(db, uid, { name: 'Salle A' });
+    createRoom(db, uid, { name: 'Salle B' });
+
+    const rows = listAuditLog(db);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].id).toBeGreaterThan(rows[1].id); // DESC
+    expect(rows[0].user_name).toBe('Administrateur');
+    expect(rows[0].entity).toBe('room');
+
+    expect(listAuditLog(db, 1)).toHaveLength(1);
+    // limites bornées : 0 → 1, > 1000 → toutes les lignes existantes (2)
+    expect(listAuditLog(db, 0)).toHaveLength(1);
+    expect(listAuditLog(db, 5000)).toHaveLength(2);
+  });
+});
+
+describe('guard (ipc/helpers)', () => {
+  it('db null → ok:false « Base de données non initialisée »', () => {
+    const res = guard(
+      () => null,
+      () => 42,
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/initialisée/);
+  });
+
+  it('ApiResult retourné par fn est passé tel quel', () => {
+    const db = freshDb();
+    const res = guard(
+      () => db,
+      () => apiErr<number>('échec métier'),
+    );
+    expect(res).toEqual({ ok: false, error: 'échec métier' });
+  });
+
+  it('valeur brute enveloppée { ok:true, data }', () => {
+    const db = freshDb();
+    expect(
+      guard(
+        () => db,
+        () => 42,
+      ),
+    ).toEqual({ ok: true, data: 42 });
+  });
+
+  it('fn qui lève → ok:false, message générique (pas de fuite SQLite)', () => {
+    const db = freshDb();
+    const res = guard(
+      () => db,
+      () => {
+        throw new Error('SQLITE_CONSTRAINT_FOREIGNKEY: failed');
+      },
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).not.toContain('SQLITE');
+      expect(res.error).toBe('Une erreur interne est survenue.');
+    }
+  });
+
+  it('requireRole ADMIN : refusé en GESTIONNAIRE, accepté en ADMIN', () => {
+    const db = freshDb();
+    const gest = listProfiles(db).find((p) => p.role === 'GESTIONNAIRE')!;
+    setCurrentProfile(db, gest.id);
+    const denied = guard(
+      () => db,
+      () => 1,
+      { requireRole: 'ADMIN' },
+    );
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error).toMatch(/Administrateur/);
+
+    setCurrentProfile(db, admin(db).id);
+    const allowed = guard(
+      () => db,
+      () => 1,
+      { requireRole: 'ADMIN' },
+    );
+    expect(allowed).toEqual({ ok: true, data: 1 });
+  });
+});
+
+describe('currentUserId', () => {
+  it('résout l\'id du profil courant via getCurrentProfile', () => {
+    const db = freshDb();
+    const gest = listProfiles(db).find((p) => p.role === 'GESTIONNAIRE')!;
+    setCurrentProfile(db, gest.id);
+    expect(currentUserId(db)).toBe(gest.id);
+  });
+});
+
+describe('branches « introuvable » (pas d\'audit)', () => {
+  it('update/delete/setActive sur id inexistant → ok:false, 0 ligne audit', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    expect(updateRoom(db, uid, 9999, { name: 'x' }).ok).toBe(false);
+    expect(deleteRoom(db, uid, 9999).ok).toBe(false);
+    expect(setRoomActive(db, uid, 9999, false).ok).toBe(false);
+    expect(
+      updateModule(db, uid, 9999, { code: 'x', name: 'y' }).ok,
+    ).toBe(false);
+    expect(deleteModule(db, uid, 9999).ok).toBe(false);
+    expect(auditRows(db)).toHaveLength(0);
   });
 });

@@ -3,7 +3,8 @@
  * Toute mutation passe par le service (audit + BR-22 dans la même TX).
  */
 import { ipcMain } from 'electron';
-import type { RoomInput } from '../../../shared/types';
+import type { Room, RoomInput } from '../../../shared/types';
+import { apiErr } from '../../../shared/types';
 import {
   createRoom,
   deleteRoom,
@@ -29,6 +30,9 @@ export function registerRoomHandlers(getDb: DbGetter): void {
   );
 
   ipcMain.handle('rooms:setActive', (_e, id: number, active: boolean) =>
-    guard(getDb, (db) => setRoomActive(db, currentUserId(db), id, active)),
+    // L'arg arrive sérialisé depuis le renderer — vérifie le type réel.
+    typeof active !== 'boolean'
+      ? apiErr<Room>('Paramètre invalide.')
+      : guard(getDb, (db) => setRoomActive(db, currentUserId(db), id, active)),
   );
 }

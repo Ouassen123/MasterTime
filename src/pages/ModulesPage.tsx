@@ -33,7 +33,10 @@ export function ModulesPage(): React.JSX.Element {
   const [drawerKey, setDrawerKey] = useState(0);
 
   const reload = useCallback(async (): Promise<void> => {
-    if (!hasApi()) return;
+    if (!hasApi()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await api().modules.list();
@@ -74,15 +77,18 @@ export function ModulesPage(): React.JSX.Element {
   };
 
   const confirmDelete = (row: Module): void => {
+    if (row.masterModuleCount > 0) {
+      // BR-22 : la suppression serait refusée — refus chiffré direct,
+      // sans tentative inutile (pas de is_active : pas d'alternative).
+      Modal.error({
+        title: t('modules.deleteRefused'),
+        content: t('modules.refusedBody', { count: row.masterModuleCount }),
+      });
+      return;
+    }
     Modal.confirm({
       title: t('modules.deleteTitle'),
-      content:
-        row.masterModuleCount > 0
-          ? t('modules.deleteConfirm', {
-              name: row.name,
-              count: row.masterModuleCount,
-            })
-          : t('modules.deleteConfirmFree', { name: row.name }),
+      content: t('modules.deleteConfirmFree', { name: row.name }),
       okText: t('common.delete'),
       okButtonProps: { danger: true },
       cancelText: t('common.cancel'),
@@ -92,7 +98,6 @@ export function ModulesPage(): React.JSX.Element {
           void message.success(t('modules.deleted'));
           void reload();
         } else {
-          // BR-22 : refus chiffré — pas d'alternative (pas de is_active).
           Modal.error({
             title: t('modules.deleteRefused'),
             content: errorMessage(res),
@@ -165,6 +170,7 @@ export function ModulesPage(): React.JSX.Element {
         }
         onSubmit={submit}
         onClose={() => setDrawerOpen(false)}
+        fieldNames={['code', 'name']}
       >
         <Form.Item
           name="code"

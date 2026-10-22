@@ -61,6 +61,9 @@ app.whenReady().then(() => {
     initDatabase();
   } catch (err) {
     // Erreur bloquante : l'app démarre quand même et l'UI affiche l'état.
+    // db = null : les handlers IPC (guard) refusent proprement toute mutation
+    // sur un schéma potentiellement incomplet.
+    db = null;
     startupError = err instanceof Error ? err.message : String(err);
     console.error('[db] Échec d’initialisation :', err);
   }

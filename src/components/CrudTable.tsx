@@ -34,6 +34,7 @@ export function CrudTable<T extends { id: number }>(
 ): React.JSX.Element {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -118,7 +119,10 @@ export function CrudTable<T extends { id: number }>(
           allowClear
           placeholder={t('common.search')}
           style={{ maxWidth: 320 }}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1); // sinon la recherche sur une page >1 affiche une page vide
+          }}
         />
         {props.toolbar}
       </Space>
@@ -133,7 +137,12 @@ export function CrudTable<T extends { id: number }>(
             ? 'row-inactive'
             : ''
         }
-        pagination={{ pageSize: 15, showSizeChanger: false }}
+        pagination={{
+          pageSize: 15,
+          showSizeChanger: false,
+          current: page,
+          onChange: setPage,
+        }}
         locale={{ emptyText: t('common.empty') }}
       />
     </Space>

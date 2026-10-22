@@ -31,70 +31,122 @@ function toAppUser(row: UserRow): AppUser {
   };
 }
 
-/** Seed idempotent : 2 profils par défaut si la table est vide + profil courant valide. */
+/** Premier profil de repli : ADMIN actif d'abord, sinon premier actif. */
+function firstActiveProfile(db: DatabaseSync): UserRow | undefined {
+  return (
+    get<UserRow>(
+      db,
+      `SELECT id, display_name, role, is_active FROM app_user
+        WHERE is_active = 1 AND role = 'ADMIN' ORDER BY id LIMIT 1`,
+    ) ??
+    get<UserRow>(
+      db,
+      `SELECT id, display_name, role, is_active FROM app_user
+        WHERE is_active = 1 ORDER BY id LIMIT 1`,
+    )
+  );
+}
+
+function persistCurrentProfile(db: DatabaseSync, id: number): void {
+  run(
+    db,
+    `INSERT INTO setting (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    CURRENT_PROFILE_KEY,
+    String(id),
+  );
+}
+
+/**
+ * Seed idempotent et atomique : 2 profils par défaut si `app_user` est vide,
+ * un Administrateur ajouté s'il n'en reste aucun actif (BR-24 : sinon les
+ * entrées admin deviennent inaccessibles), puis profil courant valide.
+ */
 export function ensureProfiles(db: DatabaseSync): void {
-  if (countRows(db, 'app_user') === 0) {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
     const ins = db.prepare(
       'INSERT INTO app_user (display_name, role, is_active) VALUES (?, ?, 1)',
     );
-    ins.run('Administrateur', 'ADMIN');
-    ins.run('Gestionnaire', 'GESTIONNAIRE');
-  }
+    if (countRows(db, 'app_user') === 0) {
+      ins.run('Administrateur', 'ADMIN');
+      ins.run('Gestionnaire', 'GESTIONNAIRE');
+    } else {
+      const activeAdmin = get<{ id: number }>(
+        db,
+        "SELECT id FROM app_user WHERE role = 'ADMIN' AND is_active = 1 LIMIT 1",
+      );
+      if (!activeAdmin) ins.run('Administrateur', 'ADMIN');
+    }
 
-  // Garantit un profil courant valide (défaut : premier profil ADMIN, sinon premier actif).
-  const stored = get<{ value: string }>(
-    db,
-    'SELECT value FROM setting WHERE key = ?',
-    CURRENT_PROFILE_KEY,
-  );
-  const storedId = stored ? Number(stored.value) : NaN;
-  const currentValid =
-    Number.isInteger(storedId) &&
-    get(db, 'SELECT id FROM app_user WHERE id = ? AND is_active = 1', storedId);
-  if (currentValid) return;
-
-  const fallback =
-    get<{ id: number }>(
+    // Garantit un profil courant valide (défaut : ADMIN actif, sinon actif quelconque).
+    const stored = get<{ value: string }>(
       db,
-      "SELECT id FROM app_user WHERE role = 'ADMIN' AND is_active = 1 ORDER BY id LIMIT 1",
-    ) ??
-    get<{ id: number }>(
-      db,
-      'SELECT id FROM app_user WHERE is_active = 1 ORDER BY id LIMIT 1',
-    );
-  if (fallback) {
-    run(
-      db,
-      `INSERT INTO setting (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      'SELECT value FROM setting WHERE key = ?',
       CURRENT_PROFILE_KEY,
-      String(fallback.id),
     );
+    const storedId = stored ? Number(stored.value) : NaN;
+    const currentValid =
+      Number.isInteger(storedId) &&
+      get(
+        db,
+        'SELECT id FROM app_user WHERE id = ? AND is_active = 1',
+        storedId,
+      );
+    if (!currentValid) {
+      const fallback = firstActiveProfile(db);
+      if (fallback) persistCurrentProfile(db, fallback.id);
+    }
+    db.exec('COMMIT;');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK;');
+    } catch {
+      // connexion possiblement hors transaction — l'erreur d'origine prime
+    }
+    throw err;
   }
 }
 
+/** Profils actifs — utilisé par le sélecteur de la topbar. */
 export function listProfiles(db: DatabaseSync): AppUser[] {
+  return all<UserRow>(
+    db,
+    'SELECT id, display_name, role, is_active FROM app_user WHERE is_active = 1 ORDER BY id',
+  ).map(toAppUser);
+}
+
+/** Tous les profils, actifs ou non (administration future). */
+export function listAllProfiles(db: DatabaseSync): AppUser[] {
   return all<UserRow>(
     db,
     'SELECT id, display_name, role, is_active FROM app_user ORDER BY id',
   ).map(toAppUser);
 }
 
-/** Profil courant (persisté dans `setting.current_profile_id`), null si absent. */
+/**
+ * Profil courant (persisté dans `setting.current_profile_id`), null si aucun
+ * profil actif. Si le profil stocké est absent ou désactivé, retombe sur le
+ * premier profil actif et répare le paramètre.
+ */
 export function getCurrentProfile(db: DatabaseSync): AppUser | null {
   const stored = get<{ value: string }>(
     db,
     'SELECT value FROM setting WHERE key = ?',
     CURRENT_PROFILE_KEY,
   );
-  if (!stored) return null;
-  const id = Number(stored.value);
-  if (!Number.isInteger(id)) return null;
-  const row = get<UserRow>(
-    db,
-    'SELECT id, display_name, role, is_active FROM app_user WHERE id = ?',
-    id,
-  );
+  const id = stored ? Number(stored.value) : NaN;
+  let row = Number.isInteger(id)
+    ? get<UserRow>(
+        db,
+        'SELECT id, display_name, role, is_active FROM app_user WHERE id = ? AND is_active = 1',
+        id,
+      )
+    : undefined;
+  if (!row) {
+    row = firstActiveProfile(db);
+    if (row) persistCurrentProfile(db, row.id);
+  }
   return row ? toAppUser(row) : null;
 }
 
@@ -111,12 +163,6 @@ export function setCurrentProfile(
   if (!row || row.is_active !== 1) {
     return apiErr('Profil introuvable ou inactif.');
   }
-  run(
-    db,
-    `INSERT INTO setting (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    CURRENT_PROFILE_KEY,
-    String(row.id),
-  );
+  persistCurrentProfile(db, row.id);
   return apiOk(toAppUser(row));
 }

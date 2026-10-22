@@ -34,7 +34,10 @@ export function RoomsPage(): React.JSX.Element {
   const [drawerKey, setDrawerKey] = useState(0);
 
   const reload = useCallback(async (): Promise<void> => {
-    if (!hasApi()) return;
+    if (!hasApi()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await api().rooms.list();
@@ -86,16 +89,36 @@ export function RoomsPage(): React.JSX.Element {
     }
   };
 
+  /** BR-22 : suppression refusée (séances liées) → propose la désactivation. */
+  const showDeleteRefused = (row: Room, serverError?: string): void => {
+    Modal.confirm({
+      title: t('rooms.deleteRefused'),
+      content:
+        serverError ?? t('rooms.refusedBody', { count: row.sessionCount }),
+      okText: t('common.deactivate'),
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        const deact = await api().rooms.setActive(row.id, false);
+        if (deact.ok) {
+          void message.success(t('rooms.deactivated'));
+          void reload();
+        } else {
+          void message.error(errorMessage(deact));
+        }
+      },
+    });
+  };
+
   const confirmDelete = (row: Room): void => {
+    if (row.sessionCount > 0) {
+      // La suppression serait refusée (BR-22) — court-circuit vers le refus
+      // chiffré + proposition de désactivation, sans tentative inutile.
+      showDeleteRefused(row);
+      return;
+    }
     Modal.confirm({
       title: t('rooms.deleteTitle'),
-      content:
-        row.sessionCount > 0
-          ? t('rooms.deleteConfirm', {
-              name: row.name,
-              count: row.sessionCount,
-            })
-          : t('rooms.deleteConfirmFree', { name: row.name }),
+      content: t('rooms.deleteConfirmFree', { name: row.name }),
       okText: t('common.delete'),
       okButtonProps: { danger: true },
       cancelText: t('common.cancel'),
@@ -105,22 +128,8 @@ export function RoomsPage(): React.JSX.Element {
           void message.success(t('rooms.deleted'));
           void reload();
         } else {
-          // BR-22 : refus chiffré + proposition de désactivation.
-          Modal.confirm({
-            title: t('rooms.deleteRefused'),
-            content: `${errorMessage(res)} ${t('rooms.deactivateOffer')}`,
-            okText: t('common.deactivate'),
-            cancelText: t('common.cancel'),
-            onOk: async () => {
-              const deact = await api().rooms.setActive(row.id, false);
-              if (deact.ok) {
-                void message.success(t('rooms.deactivated'));
-                void reload();
-              } else {
-                void message.error(errorMessage(deact));
-              }
-            },
-          });
+          // Refus serveur (ex. séances liées apparues entre-temps).
+          showDeleteRefused(row, errorMessage(res));
         }
       },
     });
@@ -192,6 +201,7 @@ export function RoomsPage(): React.JSX.Element {
         }
         onSubmit={submit}
         onClose={() => setDrawerOpen(false)}
+        fieldNames={['name', 'capacity']}
       >
         <Form.Item
           name="name"
