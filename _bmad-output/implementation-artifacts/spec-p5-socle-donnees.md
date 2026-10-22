@@ -56,19 +56,19 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `package.json` — scripts `dev` (electron-vite dev), `build`, `test` (vitest), deps épinglées ci-dessus
-- [ ] `electron.vite.config.ts` + `tsconfig.json` + `tsconfig.node.json` — build main/preload/renderer
-- [ ] `electron/main/db/connection.ts` — `getDb()` singleton : ouvre/crée `userData/mastertime.db` (fallback `:memory:` en test), WAL, FK, wrapper fin typé
-- [ ] `electron/main/db/migrations/0001_init.sql` — DDL verbatim de DATA-MODEL.md
-- [ ] `electron/main/db/migrate.ts` — runner : liste fichiers, lit `schema_migrations`, transaction par migration, backup `PRE_MIGRATION` si base existante non vide
-- [ ] `electron/main/db/seed-demo.ts` — insère le jeu DÉMO décrit dans Never si `master` vide ; idempotent
-- [ ] `electron/main/index.ts` — BrowserWindow, `app.getPath('userData')`, appelle migrate+seed au démarrage, garde l'erreur DB bloquante visible
-- [ ] `electron/main/preload.ts` — `contextBridge` expose `api.appInfo()` (versions, chemin DB) + `api.dbStatus()`
-- [ ] `shared/types.ts` — enums statuts (`PREVUE|REALISEE|ANNULEE|REPORTEE`, `NON_ENCORE_REALISEE` dérivé), types IPC `AppInfo`
-- [ ] `src/` — renderer minimal : `main.tsx`, `App.tsx` affichant statut DB (nb tables, chemin, nb de lignes seed) via `window.api`, `ConfigProvider` antd `fr_FR`, i18next stub `src/i18n/fr.json`, `index.html`
-- [ ] `tests/db.test.ts` — Vitest : migration sur DB temp → 23 tables + index ; seed → compteurs > 0, `is_demo=1` partout ; FK ON ; idempotence migrate+seed ; transaction rollback sur migration défectueuse
-- [ ] `AGENTS.md` — commandes dev/test/build du projet
-- [ ] `.gitignore` + `git init` — node_modules, dist, out, *.db (le brief exige Git dès le départ pour l'historique)
+- [x] `package.json` — scripts `dev` (electron-vite dev), `build`, `test` (vitest), deps épinglées ci-dessus
+- [x] `electron.vite.config.ts` + `tsconfig.json` + `tsconfig.node.json` — build main/preload/renderer
+- [x] `electron/main/db/connection.ts` — `getDb()` singleton : ouvre/crée `userData/mastertime.db` (fallback `:memory:` en test), WAL, FK, wrapper fin typé
+- [x] `electron/main/db/migrations/0001_init.sql` — DDL verbatim de DATA-MODEL.md
+- [x] `electron/main/db/migrate.ts` — runner : liste fichiers, lit `schema_migrations`, transaction par migration, backup `PRE_MIGRATION` si base existante non vide
+- [x] `electron/main/db/seed-demo.ts` — insère le jeu DÉMO décrit dans Never si `master` vide ; idempotent
+- [x] `electron/main/index.ts` — BrowserWindow, `app.getPath('userData')`, appelle migrate+seed au démarrage, garde l'erreur DB bloquante visible
+- [x] `electron/main/preload.ts` — `contextBridge` expose `api.appInfo()` (versions, chemin DB) + `api.dbStatus()`
+- [x] `shared/types.ts` — enums statuts (`PREVUE|REALISEE|ANNULEE|REPORTEE`, `NON_ENCORE_REALISEE` dérivé), types IPC `AppInfo`
+- [x] `src/` — renderer minimal : `main.tsx`, `App.tsx` affichant statut DB (nb tables, chemin, nb de lignes seed) via `window.api`, `ConfigProvider` antd `fr_FR`, i18next stub `src/i18n/fr.json`, `index.html`
+- [x] `tests/db.test.ts` — Vitest : migration sur DB temp → 23 tables + index ; seed → compteurs > 0, `is_demo=1` partout ; FK ON ; idempotence migrate+seed ; transaction rollback sur migration défectueuse
+- [x] `AGENTS.md` — commandes dev/test/build du projet
+- [x] `.gitignore` + `git init` — node_modules, dist, out, *.db (le brief exige Git dès le départ pour l'historique)
 
 **Acceptance Criteria:**
 - Étant donné un checkout frais, quand `npm install` puis `npm run dev`, alors Electron démarre et affiche le statut DB réel (23 tables, chemin userData)
@@ -77,6 +77,13 @@ context:
 - Étant donné la DB seedée, quand on interroge `SELECT is_demo FROM master`, alors toutes les lignes = 1
 
 ## Implementation Notes
+
+- **Correction post-subagent** : le seed initial créait des chevauchements (i=0/i=6, i=1/i=7 → même salle+date+créneau). Décalage d'une semaine ajouté + test anti-chevauchement permanent.
+- **npm install** : le postinstall d'Electron n'a pas téléchargé le binaire — corrigé par `node node_modules/electron/install.js`.
+- **Env quirk** : `ELECTRON_RUN_AS_NODE=1` dans le shell casse le lancement Electron ; unset requis.
+- schema_migrations créé dans 0001 (DDL verbatim) ; runner détecte via sqlite_master.
+- Backup ignoré sur `:memory:` (pas de fichier à copier) — choix assumé.
+- npm audit : 3 vulnérabilités transitives non corrigées (audit fix --force = breaking).
 
 ## Spec Change Log
 

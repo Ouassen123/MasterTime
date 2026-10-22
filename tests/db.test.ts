@@ -198,6 +198,21 @@ describe('seed DÉMO', () => {
     expect(countRows(db, 'professor')).toBe(8);
   });
 
+  it('seed : aucun chevauchement de salle ni de Master entre séances', () => {
+    const db = openMemoryDb();
+    runMigrations(db, { migrations: bundledMigrations() });
+    seedDemo(db);
+    const overlap = get<{ c: number }>(
+      db,
+      `SELECT count(*) AS c FROM session a
+         JOIN session b ON a.id < b.id AND a.date = b.date
+         AND a.start_min < b.end_min AND a.end_min > b.start_min
+         AND (a.room_id = b.room_id OR a.professor_id = b.professor_id
+              OR a.master_module_id = b.master_module_id)`,
+    )!.c;
+    expect(overlap).toBe(0);
+  });
+
   it('cycle complet sur :memory: — migrate + seed + status dérivé', () => {
     const db = openMemoryDb();
     runMigrations(db, { migrations: bundledMigrations() });

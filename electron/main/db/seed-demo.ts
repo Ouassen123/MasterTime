@@ -154,11 +154,16 @@ export function seedDemo(db: DatabaseSync): SeedResult {
       const mmId = mmIds[i % mmIds.length];
       const weekday = i % 6; // lun–sam
       const [start, end] = slots[i % slots.length];
+      // Décalage d'une semaine par cycle de 6 jours : évite tout chevauchement
+      // salle/master entre séances seedées (i=0 et i=6 partageraient sinon
+      // la même date, le même créneau et la même salle).
+      const date = nextWeekday(weekday);
+      date.setDate(date.getDate() + 7 * Math.floor(i / 6));
       insSession.run(
         mmId,
         profIds[i % profIds.length],
         roomIds[i % roomIds.length],
-        isoDate(nextWeekday(weekday)),
+        isoDate(date),
         start,
         end,
       );
