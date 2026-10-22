@@ -2,7 +2,7 @@
 title: 'P5 — Socle Electron + base de données et migrations'
 type: 'feature'
 created: '2026-10-22'
-status: 'in-review'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: 'NO_VCS'
