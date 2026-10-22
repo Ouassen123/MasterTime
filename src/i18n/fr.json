@@ -1,0 +1,35 @@
+{
+  "app": {
+    "title": "MasterTime Tanger",
+    "subtitle": "Socle technique — Phase 5 : base de données et migrations"
+  },
+  "db": {
+    "statusTitle": "État de la base de données",
+    "ok": "Base opérationnelle",
+    "error": "Erreur bloquante de la base de données",
+    "path": "Fichier de données",
+    "tableCount": "Tables",
+    "migrations": "Migrations appliquées",
+    "seedTitle": "Jeu de données (DÉMO marqué is_demo=1)",
+    "loading": "Chargement de l'état de la base…",
+    "unavailable": "API non disponible — l'application doit tourner sous Electron."
+  },
+  "counts": {
+    "academicYear": "Année universitaire",
+    "semester": "Semestres",
+    "timeSlot": "Créneaux horaires",
+    "room": "Salles",
+    "master": "Masters",
+    "professor": "Professeurs",
+    "module": "Modules",
+    "masterModule": "Master-Modules",
+    "session": "Séances"
+  },
+  "info": {
+    "title": "Environnement",
+    "appVersion": "Version de l'application",
+    "electron": "Electron",
+    "chrome": "Chrome",
+    "node": "Node"
+  }
+}

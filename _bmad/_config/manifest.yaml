@@ -1,0 +1,49 @@
+installation:
+  version: 6.12.4
+  installDate: 2026-10-22T11:10:42.000Z
+  lastUpdated: 2026-10-22T11:10:42.000Z
+  installShims: false
+modules:
+  - name: core
+    version: 6.12.4
+    installDate: 2026-10-22T11:10:40.615Z
+    lastUpdated: 2026-10-22T11:10:41.938Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmm
+    version: 6.12.4
+    installDate: 2026-10-22T11:10:41.028Z
+    lastUpdated: 2026-10-22T11:10:41.949Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmad-loop
+    version: v0.13.2
+    installDate: 2026-10-22T11:10:41.090Z
+    lastUpdated: 2026-10-22T11:10:41.974Z
+    source: external
+    npmPackage: null
+    repoUrl: https://github.com/bmad-code-org/bmad-loop
+    channel: stable
+    sha: 4a5c45390ff46c0fc28d316004ffe0ed7c8eea60
+  - name: cis
+    version: v0.3.2
+    installDate: 2026-10-22T11:10:41.202Z
+    lastUpdated: 2026-10-22T11:10:41.987Z
+    source: external
+    npmPackage: bmad-creative-intelligence-suite
+    repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
+    channel: pinned
+    sha: 97298b22fee1c7e482710d3a8414adb5cfccccd9
+  - name: bmb
+    version: v2.2.2
+    installDate: 2026-10-22T11:10:41.535Z
+    lastUpdated: 2026-10-22T11:10:41.999Z
+    source: external
+    npmPackage: bmad-builder
+    repoUrl: https://github.com/bmad-code-org/bmad-builder
+    channel: stable
+    sha: 4a1422274a2acb0fb0ec0511753da6263948f072
+ides:
+  - windsurf
