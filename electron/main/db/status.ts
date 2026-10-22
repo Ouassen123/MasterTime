@@ -3,9 +3,9 @@
  * nombre de tables, chemin, migrations appliquées, compteurs du jeu de données.
  */
 import { DatabaseSync } from 'node:sqlite';
-import { all, countRows } from './connection';
+import { all, countRows, get } from './connection';
 import { userTableCount } from './migrate';
-import type { DbStatus } from '../../../shared/types';
+import type { AppContext, DbStatus } from '../../../shared/types';
 
 export function collectDbStatus(
   db: DatabaseSync | null,
@@ -22,6 +22,7 @@ export function collectDbStatus(
       counts: {
         academicYear: 0, semester: 0, timeSlot: 0, room: 0,
         master: 0, professor: 0, module: 0, masterModule: 0, session: 0,
+        demo: 0,
       },
     };
   }
@@ -52,6 +53,42 @@ export function collectDbStatus(
       module: countRows(db, 'module'),
       masterModule: countRows(db, 'master_module'),
       session: countRows(db, 'session'),
+      demo: countDemoRows(db),
     },
+  };
+}
+
+/** Total des lignes `is_demo=1` — pilote le bandeau DÉMO (AD-11). */
+function countDemoRows(db: DatabaseSync): number {
+  let total = 0;
+  for (const table of ['master', 'professor', 'module', 'session']) {
+    total += get<{ c: number }>(
+      db,
+      `SELECT count(*) AS c FROM "${table}" WHERE is_demo = 1`,
+    )?.c ?? 0;
+  }
+  return total;
+}
+
+/**
+ * Contexte global de la topbar : année universitaire courante
+ * (`is_current=1`) et son premier semestre (ordinal le plus bas).
+ */
+export function collectAppContext(db: DatabaseSync | null): AppContext {
+  if (!db) return { academicYear: null, semester: null };
+  const year = get<{ id: number; label: string }>(
+    db,
+    'SELECT id, label FROM academic_year WHERE is_current = 1 ORDER BY id LIMIT 1',
+  );
+  const semester = year
+    ? get<{ label: string }>(
+        db,
+        'SELECT label FROM semester WHERE academic_year_id = ? ORDER BY ordinal LIMIT 1',
+        year.id,
+      )
+    : undefined;
+  return {
+    academicYear: year?.label ?? null,
+    semester: semester?.label ?? null,
   };
 }

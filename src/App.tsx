@@ -1,125 +1,24 @@
-import { useEffect, useState } from 'react';
-import { Alert, Card, Descriptions, Layout, Space, Statistic, Tag, Typography } from 'antd';
-import { useTranslation } from 'react-i18next';
-import type { AppInfo, DbStatus } from '../shared/types';
-
-const { Header, Content } = Layout;
-const { Title, Text } = Typography;
-
-const COUNT_KEYS = [
-  'academicYear', 'semester', 'timeSlot', 'room',
-  'master', 'professor', 'module', 'masterModule', 'session',
-] as const;
+/**
+ * Routes — layout AppShell (sidebar 13 entrées + topbar). Actives en P6a :
+ * Dashboard (placeholder), Salles, Modules ; le reste tombe sur
+ * PlaceholderPage (entrées désactivées dans la sidebar).
+ */
+import { Route, Routes } from 'react-router-dom';
+import { AppShell } from './components/AppShell';
+import { DashboardPage } from './pages/DashboardPage';
+import { ModulesPage } from './pages/ModulesPage';
+import { PlaceholderPage } from './pages/PlaceholderPage';
+import { RoomsPage } from './pages/RoomsPage';
 
 export default function App(): React.JSX.Element {
-  const { t } = useTranslation();
-  const [status, setStatus] = useState<DbStatus | null>(null);
-  const [info, setInfo] = useState<AppInfo | null>(null);
-  const [apiMissing, setApiMissing] = useState(false);
-
-  useEffect(() => {
-    if (!window.api) {
-      setApiMissing(true);
-      return;
-    }
-    const ipcError = (err: unknown): void => {
-      setStatus({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        dbPath: '',
-        tableCount: 0,
-        appliedMigrations: [],
-        counts: {
-          academicYear: 0, semester: 0, timeSlot: 0, room: 0,
-          master: 0, professor: 0, module: 0, masterModule: 0, session: 0,
-        },
-      });
-    };
-    void window.api.dbStatus().then(setStatus).catch(ipcError);
-    void window.api.appInfo().then(setInfo).catch(ipcError);
-  }, []);
-
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header>
-        <Title level={3} style={{ color: '#fff', margin: '14px 0 0' }}>
-          {t('app.title')}
-        </Title>
-      </Header>
-      <Content style={{ padding: 24 }}>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Text type="secondary">{t('app.subtitle')}</Text>
-
-          {apiMissing && (
-            <Alert type="error" showIcon message={t('db.unavailable')} />
-          )}
-
-          {status && !status.ok && (
-            <Alert
-              type="error"
-              showIcon
-              message={t('db.error')}
-              description={status.error}
-            />
-          )}
-
-          {!status && !apiMissing && (
-            <Alert type="info" message={t('db.loading')} />
-          )}
-
-          {status?.ok && (
-            <Card title={t('db.statusTitle')}>
-              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                <Space wrap>
-                  <Tag color="green">{t('db.ok')}</Tag>
-                  <Statistic title={t('db.tableCount')} value={status.tableCount} />
-                </Space>
-                <Descriptions column={1} size="small" bordered>
-                  <Descriptions.Item label={t('db.path')}>
-                    {status.dbPath}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t('db.migrations')}>
-                    {status.appliedMigrations.join(', ') || '—'}
-                  </Descriptions.Item>
-                </Descriptions>
-              </Space>
-            </Card>
-          )}
-
-          {status?.ok && (
-            <Card title={t('db.seedTitle')}>
-              <Space wrap size="large">
-                {COUNT_KEYS.map((key) => (
-                  <Statistic
-                    key={key}
-                    title={t(`counts.${key}`)}
-                    value={status.counts[key]}
-                  />
-                ))}
-              </Space>
-            </Card>
-          )}
-
-          {info && (
-            <Card title={t('info.title')} size="small">
-              <Descriptions column={2} size="small">
-                <Descriptions.Item label={t('info.appVersion')}>
-                  {info.appVersion}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('info.electron')}>
-                  {info.electronVersion}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('info.chrome')}>
-                  {info.chromeVersion}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('info.node')}>
-                  {info.nodeVersion}
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
-          )}
-        </Space>
-      </Content>
-    </Layout>
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="modules" element={<ModulesPage />} />
+        <Route path="salles" element={<RoomsPage />} />
+        <Route path="*" element={<PlaceholderPage />} />
+      </Route>
+    </Routes>
   );
 }

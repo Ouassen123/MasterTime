@@ -11,6 +11,8 @@ import { closeDb, getDb } from './db/connection';
 import { bundledMigrations, runMigrations } from './db/migrate';
 import { seedDemo } from './db/seed-demo';
 import { collectDbStatus } from './db/status';
+import { ensureProfiles } from './db/profile.service';
+import { registerIpcHandlers } from './ipc';
 import type { AppInfo } from '../../shared/types';
 
 let db: DatabaseSync | null = null;
@@ -27,6 +29,7 @@ function initDatabase(): void {
     backupDir: path.join(userData, 'backups'),
     dbPath,
   });
+  ensureProfiles(db); // profils par défaut + profil courant (avant tout usage)
   seedDemo(db);
 }
 
@@ -71,6 +74,10 @@ app.whenReady().then(() => {
   }));
 
   ipcMain.handle('db:status', () => collectDbStatus(db, dbPath, startupError));
+
+  // Handlers métier typés (rooms/modules/profile/audit/context) — retournent
+  // toujours ApiResult<T> ; fonctionnent même si la DB a échoué (erreur propre).
+  registerIpcHandlers(() => db);
 
   createWindow();
 

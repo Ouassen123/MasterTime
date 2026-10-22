@@ -1,0 +1,12 @@
+/* Styles globaux — P6a. */
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+}
+
+/* Ligne de référentiel désactivée (is_active = 0) — grisée, toujours lisible. */
+.row-inactive td {
+  color: #9ca3af;
+  background: #fafafa;
+}

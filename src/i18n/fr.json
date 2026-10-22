@@ -1,7 +1,100 @@
 {
   "app": {
     "title": "MasterTime Tanger",
-    "subtitle": "Socle technique — Phase 5 : base de données et migrations"
+    "subtitle": "Gestion des emplois du temps des Masters — Université Abdelmalek Essaâdi"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "masters": "Masters",
+    "professors": "Professeurs",
+    "modules": "Modules",
+    "rooms": "Salles",
+    "schedule": "Emplois du temps",
+    "generation": "Génération",
+    "sessions": "Séances",
+    "absences": "Absences",
+    "reports": "Rapports",
+    "importExport": "Import/Export",
+    "settings": "Paramètres",
+    "backups": "Sauvegardes",
+    "later": "Phase ultérieure"
+  },
+  "topbar": {
+    "profile": "Profil",
+    "context": "{{year}} · {{semester}}",
+    "contextEmpty": "Contexte non défini"
+  },
+  "demo": {
+    "banner": "Données de démonstration présentes dans la base (marquées DÉMO). Purge disponible dans Paramètres (profil Administrateur)."
+  },
+  "common": {
+    "search": "Rechercher…",
+    "create": "Créer",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "deactivate": "Désactiver",
+    "activate": "Activer",
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "actions": "Actions",
+    "ok": "OK",
+    "empty": "Aucune donnée",
+    "loading": "Chargement…",
+    "required": "Ce champ est obligatoire.",
+    "inactive": "Inactive",
+    "active": "Active",
+    "yes": "Oui",
+    "no": "Non"
+  },
+  "rooms": {
+    "title": "Salles",
+    "name": "Nom",
+    "capacity": "Capacité",
+    "status": "Statut",
+    "linkedSessions": "Séances liées",
+    "createTitle": "Créer une salle",
+    "editTitle": "Modifier la salle",
+    "created": "Salle créée.",
+    "updated": "Salle mise à jour.",
+    "deleted": "Salle supprimée.",
+    "activated": "Salle activée.",
+    "deactivated": "Salle désactivée.",
+    "deleteTitle": "Supprimer la salle",
+    "deleteConfirm": "Supprimer « {{name}} » ? Cette salle est utilisée par {{count}} séance(s).",
+    "deleteConfirmFree": "Supprimer « {{name}} » ? Aucune séance ne l'utilise.",
+    "deleteRefused": "Suppression refusée",
+    "deactivateOffer": "La suppression est impossible. Voulez-vous désactiver la salle à la place ?",
+    "capacityPlaceholder": "ex. 30"
+  },
+  "modules": {
+    "title": "Modules",
+    "code": "Code",
+    "name": "Nom",
+    "linked": "Master-modules liés",
+    "isDemo": "Origine",
+    "demoTag": "DÉMO",
+    "realTag": "Réel",
+    "createTitle": "Créer un module",
+    "editTitle": "Modifier le module",
+    "created": "Module créé.",
+    "updated": "Module mis à jour.",
+    "deleted": "Module supprimé.",
+    "deleteTitle": "Supprimer le module",
+    "deleteConfirm": "Supprimer « {{name}} » ? Ce module est utilisé par {{count}} master-module(s) lié(s).",
+    "deleteConfirmFree": "Supprimer « {{name}} » ? Aucun master-module ne l'utilise.",
+    "deleteRefused": "Suppression refusée"
+  },
+  "placeholder": {
+    "title": "Fonctionnalité à venir",
+    "body": "Cette section sera disponible dans une phase ultérieure du projet."
+  },
+  "profile": {
+    "changed": "Profil actif : {{name}}"
+  },
+  "form": {
+    "serverError": "Le serveur a refusé l'enregistrement.",
+    "discardTitle": "Abandonner les modifications ?",
+    "discardBody": "Les modifications non enregistrées seront perdues."
   },
   "db": {
     "statusTitle": "État de la base de données",
@@ -10,7 +103,7 @@
     "path": "Fichier de données",
     "tableCount": "Tables",
     "migrations": "Migrations appliquées",
-    "seedTitle": "Jeu de données (DÉMO marqué is_demo=1)",
+    "seedTitle": "Jeu de données",
     "loading": "Chargement de l'état de la base…",
     "unavailable": "API non disponible — l'application doit tourner sous Electron."
   },
@@ -23,7 +116,8 @@
     "professor": "Professeurs",
     "module": "Modules",
     "masterModule": "Master-Modules",
-    "session": "Séances"
+    "session": "Séances",
+    "demo": "Lignes DÉMO"
   },
   "info": {
     "title": "Environnement",
