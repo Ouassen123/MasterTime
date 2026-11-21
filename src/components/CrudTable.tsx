@@ -24,6 +24,8 @@ export interface CrudTableProps<T extends { id: number }> {
   onDelete?: (row: T) => void;
   /** Si fourni : bouton activer/désactiver (lit `is_active` sur la ligne). */
   onToggleActive?: (row: T) => void;
+  /** Si fourni : clic sur une ligne (ex. ouverture d'une fiche de suivi). */
+  onRowClick?: (row: T) => void;
   /** Désactive visuellement les lignes inactives (`is_active === 0`). */
   dimInactive?: boolean;
   toolbar?: React.ReactNode;
@@ -60,7 +62,10 @@ export function CrudTable<T extends { id: number }>(
               size="small"
               icon={<EditOutlined />}
               aria-label={t('common.edit')}
-              onClick={() => props.onEdit?.(row)}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onEdit?.(row);
+              }}
             />
           </Tooltip>
         )}
@@ -86,7 +91,10 @@ export function CrudTable<T extends { id: number }>(
                   ? t('common.activate')
                   : t('common.deactivate')
               }
-              onClick={() => props.onToggleActive?.(row)}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onToggleActive?.(row);
+              }}
             />
           </Tooltip>
         )}
@@ -97,7 +105,10 @@ export function CrudTable<T extends { id: number }>(
               danger
               icon={<DeleteOutlined />}
               aria-label={t('common.delete')}
-              onClick={() => props.onDelete?.(row)}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onDelete?.(row);
+              }}
             />
           </Tooltip>
         )}
@@ -137,6 +148,10 @@ export function CrudTable<T extends { id: number }>(
             ? 'row-inactive'
             : ''
         }
+        onRow={(row) => ({
+          onClick: () => props.onRowClick?.(row),
+          style: props.onRowClick ? { cursor: 'pointer' } : undefined,
+        })}
         pagination={{
           pageSize: 15,
           showSizeChanger: false,

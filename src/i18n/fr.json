@@ -83,6 +83,90 @@
     "deleteRefused": "Suppression refusée",
     "refusedBody": "Ce module est utilisé par {{count}} master-module(s) lié(s) : suppression impossible."
   },
+  "weekdays": ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"],
+  "sessionStatus": {
+    "PREVUE": "Prévue",
+    "REALISEE": "Réalisée",
+    "ANNULEE": "Annulée",
+    "REPORTEE": "Reportée",
+    "NON_ENCORE_REALISEE": "Non réalisée"
+  },
+  "professors": {
+    "title": "Professeurs",
+    "name": "Nom",
+    "internalRef": "Référence interne",
+    "email": "Email",
+    "phone": "Téléphone",
+    "active": "Actif",
+    "masters": "Masters enseignés",
+    "teachings": "Enseignements",
+    "sessionsDone": "Réalisées",
+    "sessionsLeft": "Restantes",
+    "sessionsCancelled": "Annulées",
+    "hoursTaught": "Heures enseignées",
+    "status": "Statut",
+    "createTitle": "Créer un professeur",
+    "editTitle": "Modifier le professeur",
+    "detailTitle": "Fiche de suivi — {{name}}",
+    "created": "Professeur créé.",
+    "updated": "Professeur mis à jour.",
+    "deleted": "Professeur supprimé.",
+    "activated": "Professeur activé.",
+    "deactivated": "Professeur désactivé.",
+    "deleteTitle": "Supprimer le professeur",
+    "deleteConfirmFree": "Supprimer « {{name}} » ? Aucune donnée ne le référence.",
+    "deleteRefused": "Suppression refusée",
+    "refusedBody": "Ce professeur est lié à {{count}} donnée(s) : suppression impossible. Voulez-vous le désactiver à la place ?",
+    "tabs": {
+      "sessions": "Séances",
+      "availabilities": "Disponibilités",
+      "absences": "Absences",
+      "counters": "Compteurs"
+    },
+    "session": {
+      "date": "Date",
+      "time": "Horaire",
+      "module": "Module",
+      "master": "Master",
+      "room": "Salle",
+      "status": "Statut",
+      "empty": "Aucune séance à venir"
+    },
+    "availability": {
+      "weekday": "Jour",
+      "from": "Début",
+      "to": "Fin",
+      "dispo": "Disponible",
+      "indispo": "Indisponible",
+      "add": "Ajouter",
+      "added": "Disponibilité ajoutée.",
+      "removed": "Disponibilité supprimée.",
+      "empty": "Aucune disponibilité déclarée"
+    },
+    "absence": {
+      "reason": "Motif",
+      "add": "Déclarer l'absence",
+      "added": "Absence déclarée.",
+      "removed": "Absence supprimée.",
+      "empty": "Aucune absence déclarée",
+      "impacted": "{{count}} séance(s) prévue(s) impactée(s) — aucune annulation automatique : la résolution se fera ultérieurement.",
+      "noImpacted": "Aucune séance prévue dans cette période.",
+      "resolutions": {
+        "A_TRAITER": "À traiter",
+        "PARTIELLE": "Partielle",
+        "RESOLUE": "Résolue"
+      }
+    },
+    "counters": {
+      "realisees": "Séances réalisées",
+      "restantes": "Séances restantes",
+      "nonRealisees": "Non réalisées (passées)",
+      "annulees": "Annulées",
+      "reportees": "Reportées",
+      "heures": "Heures enseignées",
+      "absences": "Absences déclarées"
+    }
+  },
   "placeholder": {
     "title": "Fonctionnalité à venir",
     "body": "Cette section sera disponible dans une phase ultérieure du projet."

@@ -4,14 +4,22 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AbsenceInput,
+  AbsenceRow,
   ApiResult,
   AppContext,
   AppInfo,
   AppUser,
   AuditEntry,
+  AvailabilityInput,
+  AvailabilityRow,
   DbStatus,
+  ImpactedSession,
   Module,
   ModuleInput,
+  ProfessorDetail,
+  ProfessorInput,
+  ProfessorRow,
   Room,
   RoomInput,
   WindowApi,
@@ -41,6 +49,45 @@ const api: WindowApi = {
       ipcRenderer.invoke('modules:update', id, input),
     remove: (id: number): Promise<ApiResult<null>> =>
       ipcRenderer.invoke('modules:remove', id),
+  },
+  professors: {
+    list: (search?: string): Promise<ApiResult<ProfessorRow[]>> =>
+      ipcRenderer.invoke('professors:list', search),
+    get: (id: number): Promise<ApiResult<ProfessorDetail>> =>
+      ipcRenderer.invoke('professors:get', id),
+    create: (input: ProfessorInput): Promise<ApiResult<ProfessorRow>> =>
+      ipcRenderer.invoke('professors:create', input),
+    update: (
+      id: number,
+      input: ProfessorInput,
+    ): Promise<ApiResult<ProfessorRow>> =>
+      ipcRenderer.invoke('professors:update', id, input),
+    remove: (id: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('professors:remove', id),
+    setActive: (id: number, active: boolean): Promise<ApiResult<ProfessorRow>> =>
+      ipcRenderer.invoke('professors:setActive', id, active),
+    availability: {
+      list: (professorId: number): Promise<ApiResult<AvailabilityRow[]>> =>
+        ipcRenderer.invoke('professors:availability:list', professorId),
+      add: (
+        professorId: number,
+        input: AvailabilityInput,
+      ): Promise<ApiResult<AvailabilityRow>> =>
+        ipcRenderer.invoke('professors:availability:add', professorId, input),
+      remove: (id: number): Promise<ApiResult<null>> =>
+        ipcRenderer.invoke('professors:availability:remove', id),
+    },
+    absence: {
+      list: (professorId: number): Promise<ApiResult<AbsenceRow[]>> =>
+        ipcRenderer.invoke('professors:absence:list', professorId),
+      add: (
+        professorId: number,
+        input: AbsenceInput,
+      ): Promise<ApiResult<{ absence: AbsenceRow; impacted: ImpactedSession[] }>> =>
+        ipcRenderer.invoke('professors:absence:add', professorId, input),
+      remove: (id: number): Promise<ApiResult<null>> =>
+        ipcRenderer.invoke('professors:absence:remove', id),
+    },
   },
   profile: {
     list: (): Promise<ApiResult<AppUser[]>> => ipcRenderer.invoke('profile:list'),

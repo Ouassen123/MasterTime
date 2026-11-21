@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Layout, Menu, Select, Space, Tooltip, Typography, message } from 'antd';
+import { TeamOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -26,13 +27,20 @@ interface NavEntry {
   path: string;
   enabled: boolean;
   adminOnly?: boolean;
+  icon?: React.ReactNode;
 }
 
-/** Ordre exact du brief (DESIGN note) — actives : Dashboard, Modules, Salles. */
+/** Ordre exact du brief (DESIGN note) — actives : Dashboard, Modules,
+ *  Professeurs, Salles. */
 const NAV: NavEntry[] = [
   { key: 'dashboard', path: '/', enabled: true },
   { key: 'masters', path: '/masters', enabled: false },
-  { key: 'professors', path: '/professeurs', enabled: false },
+  {
+    key: 'professors',
+    path: '/professeurs',
+    enabled: true,
+    icon: <TeamOutlined />,
+  },
   { key: 'modules', path: '/modules', enabled: true },
   { key: 'rooms', path: '/salles', enabled: true },
   { key: 'schedule', path: '/emplois-du-temps', enabled: false },
@@ -98,6 +106,7 @@ export function AppShell(): React.JSX.Element {
     return NAV.filter((e) => !e.adminOnly || isAdmin).map((e) => ({
       key: e.path,
       disabled: !e.enabled,
+      icon: e.icon,
       label: e.enabled ? (
         t(`nav.${e.key}`)
       ) : (

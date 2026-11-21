@@ -8,11 +8,13 @@ import { collectAppContext } from '../db/status';
 import { guard, type DbGetter } from './helpers';
 import { registerRoomHandlers } from './rooms';
 import { registerModuleHandlers } from './modules';
+import { registerProfessorHandlers } from './professors';
 import { registerProfileHandlers } from './profile';
 
 export function registerIpcHandlers(getDb: DbGetter): void {
   registerRoomHandlers(getDb);
   registerModuleHandlers(getDb);
+  registerProfessorHandlers(getDb);
   registerProfileHandlers(getDb);
 
   ipcMain.handle('app:context', () =>
