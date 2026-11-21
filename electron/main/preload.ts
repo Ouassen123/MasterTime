@@ -13,8 +13,18 @@ import type {
   AuditEntry,
   AvailabilityInput,
   AvailabilityRow,
+  ContextSemesters,
   DbStatus,
+  DeleteResult,
+  GroupInput,
   ImpactedSession,
+  MasterDetail,
+  MasterInput,
+  MasterListFilter,
+  MasterModuleInput,
+  MasterModuleRow,
+  MasterRow,
+  MasterStatus,
   Module,
   ModuleInput,
   ProfessorDetail,
@@ -22,6 +32,7 @@ import type {
   ProfessorRow,
   Room,
   RoomInput,
+  StudentGroupRow,
   WindowApi,
 } from '../../shared/types';
 
@@ -30,6 +41,49 @@ const api: WindowApi = {
   dbStatus: (): Promise<DbStatus> => ipcRenderer.invoke('db:status'),
   appContext: (): Promise<ApiResult<AppContext>> =>
     ipcRenderer.invoke('app:context'),
+  contextSemesters: (): Promise<ApiResult<ContextSemesters>> =>
+    ipcRenderer.invoke('context:semesters'),
+  masters: {
+    list: (filter?: MasterListFilter): Promise<ApiResult<MasterRow[]>> =>
+      ipcRenderer.invoke('masters:list', filter),
+    get: (id: number): Promise<ApiResult<MasterDetail>> =>
+      ipcRenderer.invoke('masters:get', id),
+    create: (input: MasterInput): Promise<ApiResult<MasterRow>> =>
+      ipcRenderer.invoke('masters:create', input),
+    update: (id: number, input: MasterInput): Promise<ApiResult<MasterRow>> =>
+      ipcRenderer.invoke('masters:update', id, input),
+    setStatus: (
+      id: number,
+      status: MasterStatus,
+    ): Promise<ApiResult<MasterRow>> =>
+      ipcRenderer.invoke('masters:setStatus', id, status),
+    remove: (id: number): Promise<DeleteResult> =>
+      ipcRenderer.invoke('masters:remove', id),
+    addGroup: (
+      masterId: number,
+      input: GroupInput,
+    ): Promise<ApiResult<StudentGroupRow>> =>
+      ipcRenderer.invoke('masters:addGroup', masterId, input),
+    renameGroup: (
+      id: number,
+      input: GroupInput,
+    ): Promise<ApiResult<StudentGroupRow>> =>
+      ipcRenderer.invoke('masters:renameGroup', id, input),
+    removeGroup: (id: number): Promise<DeleteResult> =>
+      ipcRenderer.invoke('masters:removeGroup', id),
+    attachModule: (
+      masterId: number,
+      input: MasterModuleInput,
+    ): Promise<ApiResult<MasterModuleRow>> =>
+      ipcRenderer.invoke('masters:attachModule', masterId, input),
+    updateModule: (
+      id: number,
+      input: MasterModuleInput,
+    ): Promise<ApiResult<MasterModuleRow>> =>
+      ipcRenderer.invoke('masters:updateModule', id, input),
+    detachModule: (id: number): Promise<DeleteResult> =>
+      ipcRenderer.invoke('masters:detachModule', id),
+  },
   rooms: {
     list: (): Promise<ApiResult<Room[]>> => ipcRenderer.invoke('rooms:list'),
     create: (input: RoomInput): Promise<ApiResult<Room>> =>

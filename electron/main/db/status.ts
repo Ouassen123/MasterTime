@@ -5,7 +5,13 @@
 import { DatabaseSync } from 'node:sqlite';
 import { all, countRows, get } from './connection';
 import { userTableCount } from './migrate';
-import type { AppContext, DbStatus } from '../../../shared/types';
+import type {
+  AcademicYearRef,
+  AppContext,
+  ContextSemesters,
+  DbStatus,
+  SemesterRef,
+} from '../../../shared/types';
 
 export function collectDbStatus(
   db: DatabaseSync | null,
@@ -92,4 +98,24 @@ export function collectAppContext(db: DatabaseSync | null): AppContext {
     academicYear: year?.label ?? null,
     semester: semester?.label ?? null,
   };
+}
+
+/**
+ * Références années/semestres exposées via `context:semesters` (P6c) —
+ * alimente les Select `academic_year_id`/`semester_id` des formulaires.
+ */
+export function collectContextSemesters(
+  db: DatabaseSync | null,
+): ContextSemesters {
+  if (!db) return { academicYears: [], semesters: [] };
+  const academicYears = all<AcademicYearRef>(
+    db,
+    'SELECT id, label, is_current FROM academic_year ORDER BY id',
+  );
+  const semesters = all<SemesterRef>(
+    db,
+    'SELECT id, academic_year_id, label, ordinal FROM semester' +
+      ' ORDER BY academic_year_id, ordinal',
+  );
+  return { academicYears, semesters };
 }

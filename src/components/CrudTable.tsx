@@ -26,6 +26,12 @@ export interface CrudTableProps<T extends { id: number }> {
   onDelete?: (row: T) => void;
   /** Si fourni : bouton activer/désactiver (lit `is_active` sur la ligne). */
   onToggleActive?: (row: T) => void;
+  /**
+   * Prédicat « actif » pour l'icône du toggle et `dimInactive`
+   * (défaut : `is_active !== 0` — surcharger pour les entités à statut,
+   * ex. `master.status === 'ACTIF'`).
+   */
+  isRowActive?: (row: T) => boolean;
   /** Si fourni : clic sur une ligne (ex. ouverture d'une fiche de suivi). */
   onRowClick?: (row: T) => void;
   /** Désactive visuellement les lignes inactives (`is_active === 0`). */
@@ -39,6 +45,9 @@ export function CrudTable<T extends { id: number }>(
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const isRowActive =
+    props.isRowActive ??
+    ((row: T) => (row as { is_active?: number }).is_active !== 0);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -81,24 +90,20 @@ export function CrudTable<T extends { id: number }>(
         {props.onToggleActive && (
           <Tooltip
             title={
-              (row as { is_active?: number }).is_active === 0
-                ? t('common.activate')
-                : t('common.deactivate')
+              isRowActive(row) ? t('common.deactivate') : t('common.activate')
             }
           >
             <Button
               size="small"
               icon={
-                (row as { is_active?: number }).is_active === 0 ? (
-                  <PlayCircleOutlined />
-                ) : (
+                isRowActive(row) ? (
                   <PauseCircleOutlined />
+                ) : (
+                  <PlayCircleOutlined />
                 )
               }
               aria-label={
-                (row as { is_active?: number }).is_active === 0
-                  ? t('common.activate')
-                  : t('common.deactivate')
+                isRowActive(row) ? t('common.deactivate') : t('common.activate')
               }
               onClick={(e) => {
                 e.stopPropagation();
@@ -153,9 +158,7 @@ export function CrudTable<T extends { id: number }>(
         columns={columns}
         dataSource={filtered}
         rowClassName={(row) =>
-          props.dimInactive && (row as { is_active?: number }).is_active === 0
-            ? 'row-inactive'
-            : ''
+          props.dimInactive && !isRowActive(row) ? 'row-inactive' : ''
         }
         onRow={(row) => ({
           onClick: () => props.onRowClick?.(row),

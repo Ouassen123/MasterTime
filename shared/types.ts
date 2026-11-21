@@ -52,7 +52,7 @@ export interface DbStatus {
   /** Message d'erreur bloquant si l'initialisation DB a échoué. */
   error: string | null;
   dbPath: string;
-  /** Nombre de tables utilisateur (attendu : 23 après 0001). */
+  /** Nombre de tables utilisateur (attendu : 25 après 0005). */
   tableCount: number;
   /** Versions de migrations appliquées (ex. ['0001']). */
   appliedMigrations: string[];
@@ -230,6 +230,170 @@ export interface ProfessorDetail {
   upcoming: ImpactedSession[];
 }
 
+// ---------------------------------------------------------------------------
+// P6c — Masters, groupes d'étudiants et master-modules
+// ---------------------------------------------------------------------------
+
+/** Statut d'un master (CHECK en base). */
+export const MASTER_STATUSES = ['ACTIF', 'ARCHIVE'] as const;
+export type MasterStatus = (typeof MASTER_STATUSES)[number];
+
+/** Filtre de la liste Masters (`status` omis ou 'TOUS' = tous les statuts). */
+export interface MasterListFilter {
+  search?: string;
+  status?: MasterStatus | 'TOUS';
+}
+
+/** Ligne de la liste Masters : référentiel + compteurs + protection BR-22. */
+export interface MasterRow {
+  id: number;
+  code: string;
+  name: string;
+  filiere: string | null;
+  department: string | null;
+  responsible_name: string | null;
+  academic_year_id: number;
+  academic_year_label: string;
+  semester_id: number | null;
+  semester_label: string | null;
+  status: MasterStatus;
+  is_demo: number;
+  /** master_module distincts rattachés. */
+  nb_modules: number;
+  nb_groupes: number;
+  /** Séances via master_module, toutes statuts sauf ANNULEE. */
+  nb_seances: number;
+  /** Σ volume_min des master-modules. */
+  volume_prevu_min: number;
+  /** Liens bloquant la suppression (BR-22 : groupes + mm + séances + étudiants). */
+  linkedCount: number;
+}
+
+export interface MasterInput {
+  code: string;
+  name: string;
+  filiere?: string | null;
+  department?: string | null;
+  responsible_name?: string | null;
+  academic_year_id: number;
+  semester_id?: number | null;
+  status?: MasterStatus;
+}
+
+/** Compteurs de suivi par master — mêmes règles AD-7 que les professeurs. */
+export interface MasterCounters {
+  nb_realisees: number;
+  nb_restantes: number;
+  nb_non_realisees: number;
+  nb_annulees: number;
+  nb_reportees: number;
+  heures_enseignees_min: number;
+}
+
+/** Groupe d'étudiants rattaché à un master + protection BR-22. */
+export interface StudentGroupRow {
+  id: number;
+  master_id: number;
+  name: string;
+  size: number | null;
+  /** mm.student_group_id + students + session_group liés. */
+  linkedCount: number;
+}
+
+export interface GroupInput {
+  name: string;
+  size?: number | null;
+}
+
+/** master_module enrichi des libellés joints (module/prof/semestre/groupe). */
+export interface MasterModuleRow {
+  id: number;
+  master_id: number;
+  module_id: number;
+  module_code: string;
+  module_name: string;
+  semester_id: number;
+  semester_label: string;
+  professor_id: number;
+  professor_name: string;
+  student_group_id: number | null;
+  group_name: string | null;
+  volume_min: number;
+  session_duration_min: number;
+  planned_sessions: number;
+  sched_start: string;
+  sched_end: string;
+  distribution_rule: string | null;
+  /** Séances réelles non annulées rattachées. */
+  nb_seances: number;
+  /** Toutes les séances référençant le master-module (blocage BR-22). */
+  session_count: number;
+}
+
+export interface MasterModuleInput {
+  module_id: number;
+  semester_id: number;
+  professor_id: number;
+  student_group_id?: number | null;
+  volume_min: number;
+  session_duration_min: number;
+  planned_sessions: number;
+  sched_start: string;
+  sched_end: string;
+  /** JSON libre (règles de répartition), null si absent. */
+  distribution_rule?: string | null;
+}
+
+/** Séance d'un master (onglet « Séances » de la fiche). */
+export interface MasterSession extends ImpactedSession {
+  professor_name: string;
+  group_name: string | null;
+}
+
+/** Fiche master : master + compteurs, groupes, master-modules, 20 prochaines. */
+export interface MasterDetail {
+  master: MasterRow & MasterCounters;
+  groups: StudentGroupRow[];
+  modules: MasterModuleRow[];
+  upcoming: MasterSession[];
+}
+
+/**
+ * Refus de suppression enrichi (BR-22) — le `linkedCount` chiffre les
+ * données liées et `suggest` propose l'alternative ('ARCHIVE' pour un
+ * master ; absent pour groupe/master-module qui n'ont pas de statut).
+ */
+export type DeleteResult =
+  | { ok: true; data: null }
+  | {
+      ok: false;
+      error: string;
+      fields?: FieldError[];
+      linkedCount?: number;
+      suggest?: 'ARCHIVE';
+    };
+
+/** Référence année universitaire (Select du renderer). */
+export interface AcademicYearRef {
+  id: number;
+  label: string;
+  is_current: number;
+}
+
+/** Référence semestre (Select du renderer). */
+export interface SemesterRef {
+  id: number;
+  academic_year_id: number;
+  label: string;
+  ordinal: number;
+}
+
+/** Années + semestres exposés via `context:semesters` (formulaires P6c). */
+export interface ContextSemesters {
+  academicYears: AcademicYearRef[];
+  semesters: SemesterRef[];
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -264,6 +428,33 @@ export interface WindowApi {
   appInfo(): Promise<AppInfo>;
   dbStatus(): Promise<DbStatus>;
   appContext(): Promise<ApiResult<AppContext>>;
+  contextSemesters(): Promise<ApiResult<ContextSemesters>>;
+  masters: {
+    list(filter?: MasterListFilter): Promise<ApiResult<MasterRow[]>>;
+    get(id: number): Promise<ApiResult<MasterDetail>>;
+    create(input: MasterInput): Promise<ApiResult<MasterRow>>;
+    update(id: number, input: MasterInput): Promise<ApiResult<MasterRow>>;
+    setStatus(id: number, status: MasterStatus): Promise<ApiResult<MasterRow>>;
+    remove(id: number): Promise<DeleteResult>;
+    addGroup(
+      masterId: number,
+      input: GroupInput,
+    ): Promise<ApiResult<StudentGroupRow>>;
+    renameGroup(
+      id: number,
+      input: GroupInput,
+    ): Promise<ApiResult<StudentGroupRow>>;
+    removeGroup(id: number): Promise<DeleteResult>;
+    attachModule(
+      masterId: number,
+      input: MasterModuleInput,
+    ): Promise<ApiResult<MasterModuleRow>>;
+    updateModule(
+      id: number,
+      input: MasterModuleInput,
+    ): Promise<ApiResult<MasterModuleRow>>;
+    detachModule(id: number): Promise<DeleteResult>;
+  };
   rooms: {
     list(): Promise<ApiResult<Room[]>>;
     create(input: RoomInput): Promise<ApiResult<Room>>;

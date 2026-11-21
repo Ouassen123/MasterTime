@@ -129,6 +129,14 @@ CREATE TABLE session (
   CHECK (start_min < end_min));
 -- NB: 'NON_ENCORE_REALISEE' non stocké — dérivé (AD-7)
 
+-- Séances multi-groupes (ajoutée en migration 0005, P6c) : une séance peut
+-- réunir plusieurs groupes sans compter comme N occupations de salle.
+-- Remplie par la génération/édition (Phase 7+).
+CREATE TABLE session_group (
+  session_id INTEGER NOT NULL REFERENCES session(id),
+  student_group_id INTEGER NOT NULL REFERENCES student_group(id),
+  PRIMARY KEY (session_id, student_group_id));
+
 CREATE TABLE session_status_history (
   id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES session(id),
   old_status TEXT, new_status TEXT NOT NULL,
@@ -187,6 +195,9 @@ CREATE INDEX ix_audit_at             ON audit_log(at);
 -- ajoutés en migration 0002 (compteurs corrélés des référentiels)
 CREATE INDEX ix_session_room         ON session(room_id);
 CREATE INDEX ix_master_module_module ON master_module(module_id);
+-- ajoutés en migration 0005 (P6c : session_group + compteurs du service Masters)
+CREATE INDEX ix_sg_group             ON session_group(student_group_id);
+CREATE INDEX ix_master_module_master ON master_module(master_id);
 ```
 
 ## Points d'intégrité notables

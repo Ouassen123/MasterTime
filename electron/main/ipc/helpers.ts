@@ -64,3 +64,13 @@ export function guard<T>(
 export function currentUserId(db: DatabaseSync): number | null {
   return getCurrentProfile(db)?.id ?? null;
 }
+
+/** Garde de payload IPC : objet sérialisé (pas tableau, pas null). */
+export function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Garde de payload IPC : identifiant entier strictement positif. */
+export function isId(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0;
+}

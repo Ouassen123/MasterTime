@@ -26,15 +26,7 @@ import {
   setProfessorActive,
   updateProfessor,
 } from '../db/professor.service';
-import { currentUserId, guard, type DbGetter } from './helpers';
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function isId(v: unknown): v is number {
-  return typeof v === 'number' && Number.isInteger(v) && v > 0;
-}
+import { currentUserId, guard, isId, isObject, type DbGetter } from './helpers';
 
 export function registerProfessorHandlers(getDb: DbGetter): void {
   ipcMain.handle('professors:list', (_e, search?: string) =>
