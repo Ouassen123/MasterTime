@@ -9,7 +9,7 @@
  * (780 min, 1px/min), colonnes Lun→Dim. Les séances qui se chevauchent
  * sont réparties en « voies » côte à côte dans la colonne.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -133,13 +133,18 @@ function computeLanes(sessions: SessionRow[]): Lane[] {
 function SessionBlock(props: {
   session: Lane;
   highlight: boolean;
+  highlightColor: string;
   onClick: () => void;
-}): React.JSX.Element {
-  const { session: s, highlight, onClick } = props;
+}): React.JSX.Element | null {
+  const { session: s, highlight, highlightColor, onClick } = props;
   const { t } = useTranslation();
   const color = STATUS_COLORS[s.effective_status];
-  const top = Math.max(0, s.start_min - DAY_START);
-  const height = Math.max(18, s.end_min - s.start_min);
+  // Clip à l'axe 07:00–20:00 (séance débordante ou hors axe).
+  const startC = Math.max(s.start_min, DAY_START);
+  const endC = Math.min(s.end_min, DAY_END);
+  if (endC - startC <= 0) return null;
+  const top = startC - DAY_START;
+  const height = Math.max(18, endC - startC);
   const widthPct = 100 / s.lanes;
   return (
     <div
@@ -164,7 +169,7 @@ function SessionBlock(props: {
         cursor: 'pointer',
         fontSize: 11,
         lineHeight: 1.25,
-        outline: highlight ? `2px solid ${KIND_COLORS.ROOM}` : 'none',
+        outline: highlight ? `2px solid ${highlightColor}` : 'none',
         zIndex: highlight ? 3 : 1,
       }}
     >
@@ -185,7 +190,7 @@ function SessionBlock(props: {
       >
         {s.module.name}
       </div>
-      <div style={{ color: '#4B5563' }}>
+      <div dir="auto" style={{ color: '#4B5563' }}>
         {s.room.name} · {s.professor.full_name}
       </div>
       {s.lanes === 1 && height >= 50 && (
@@ -203,12 +208,17 @@ function SessionBlock(props: {
   );
 }
 
-function OccupancyBlock(props: { occ: OccupancyRow }): React.JSX.Element {
+function OccupancyBlock(props: { occ: OccupancyRow }): React.JSX.Element | null {
   const { occ } = props;
-  const top = Math.max(0, occ.start_min - DAY_START);
-  const height = Math.max(16, occ.end_min - occ.start_min);
+  const startC = Math.max(occ.start_min, DAY_START);
+  const endC = Math.min(occ.end_min, DAY_END);
+  if (endC - startC <= 0) return null;
+  const top = startC - DAY_START;
+  const height = Math.max(16, endC - startC);
   return (
-    <Tooltip title={`${occ.label} · ${occ.module ?? ''}`}>
+    <Tooltip
+      title={<span dir="auto">{`${occ.label} · ${occ.module ?? ''}`}</span>}
+    >
       <div
         style={{
           position: 'absolute',
@@ -259,6 +269,7 @@ export function TimetablePage(): React.JSX.Element {
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [conflictsOpen, setConflictsOpen] = useState(true);
   const [conflictIds, setConflictIds] = useState<Set<number>>(new Set());
+  const [conflictKind, setConflictKind] = useState<ConflictKind | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -270,6 +281,7 @@ export function TimetablePage(): React.JSX.Element {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailReq = useRef(0);
 
   const weekStartIso = weekStart.format('YYYY-MM-DD');
 
@@ -351,7 +363,10 @@ export function TimetablePage(): React.JSX.Element {
           const res = await api().timetable.annual({ academicYearId: yearId });
           if (cancelled) return;
           if (res.ok) setAnnual(res.data);
-          else setError(errorMessage(res));
+          else {
+            setAnnual([]);
+            setError(errorMessage(res));
+          }
           return;
         }
         if (scope === 'month') {
@@ -362,7 +377,10 @@ export function TimetablePage(): React.JSX.Element {
           });
           if (cancelled) return;
           if (res.ok) setSessions(res.data);
-          else setError(errorMessage(res));
+          else {
+            setSessions([]);
+            setError(errorMessage(res));
+          }
           return;
         }
         // Portées à grille hebdo : week + master/professor/room.
@@ -386,15 +404,25 @@ export function TimetablePage(): React.JSX.Element {
         ]);
         if (cancelled) return;
         if (sessRes.ok) setSessions(sessRes.data);
-        else setError(errorMessage(sessRes));
+        else {
+          setSessions([]);
+          setError(errorMessage(sessRes));
+        }
         if (occRes) {
           if (occRes.ok) setOccupancy(occRes.data);
-          else void message.error(errorMessage(occRes));
+          else {
+            setOccupancy([]);
+            void message.error(errorMessage(occRes));
+          }
         } else {
           setOccupancy([]);
         }
       } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) {
+          setSessions([]);
+          setOccupancy([]);
+          setError(errorMessage(err));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -408,34 +436,43 @@ export function TimetablePage(): React.JSX.Element {
     entityFilter, statuses, moduleId,
   ]);
 
+  /** Vide le surlignage conflit (navigation, changement d'entité…). */
+  const clearHighlight = (): void => {
+    setConflictIds(new Set());
+    setConflictKind(null);
+  };
+
   const openSession = async (id: number): Promise<void> => {
+    // Request-id : les réponses obsolètes (clic rapide sur un autre
+    // bloc) sont ignorées — le drawer affiche toujours la dernière.
+    const req = ++detailReq.current;
     setDetailOpen(true);
     setDetailLoading(true);
+    setDetail(null);
     try {
       const res = await api().sessions.get(id);
+      if (req !== detailReq.current) return;
       if (res.ok) setDetail(res.data);
       else {
         void message.error(errorMessage(res));
         setDetail(null);
       }
     } catch (err) {
+      if (req !== detailReq.current) return;
       void message.error(errorMessage(err));
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (req === detailReq.current) setDetailLoading(false);
     }
   };
 
-  /** Clic sur un conflit : naviguer vers sa semaine + surligner les blocs. */
+  /** Clic sur un conflit : toujours basculer en portée 'week' + surligner. */
   const jumpToConflict = (c: ConflictItem): void => {
-    const monday = mondayOf(dayjs(c.date));
     setConflictIds(new Set(c.sessions.map((s) => s.id)));
-    if (scope === 'week' || scope === 'master' || scope === 'professor' || scope === 'room') {
-      setWeekStart(monday);
-    } else {
-      setScope('week');
-      setWeekStart(monday);
-    }
+    setConflictKind(c.kind);
+    setScope('week');
+    setEntityId(undefined);
+    setWeekStart(mondayOf(dayjs(c.date)));
   };
 
   const weekdays = t('weekdays', { returnObjects: true }) as unknown as string[];
@@ -524,6 +561,7 @@ export function TimetablePage(): React.JSX.Element {
                 position: 'relative',
                 height: DAY_END - DAY_START,
                 borderLeft: '1px solid #E5E7EB',
+                overflow: 'hidden',
                 background:
                   'repeating-linear-gradient(to bottom, #fff 0, #fff 59px, #F4F5F7 59px, #F4F5F7 60px)',
               }}
@@ -536,6 +574,9 @@ export function TimetablePage(): React.JSX.Element {
                   key={s.id}
                   session={s}
                   highlight={conflictIds.has(s.id)}
+                  highlightColor={
+                    conflictKind ? KIND_COLORS[conflictKind] : KIND_COLORS.ROOM
+                  }
                   onClick={() => void openSession(s.id)}
                 />
               ))}
@@ -561,6 +602,7 @@ export function TimetablePage(): React.JSX.Element {
   const monthView = (
     <Card size="small">
       <Calendar
+        mode="month"
         value={monthValue}
         onChange={(d) => setMonthValue(d)}
         onSelect={(d, { source }) => {
@@ -611,7 +653,18 @@ export function TimetablePage(): React.JSX.Element {
 
   const annualView = useMemo(() => {
     if (scope !== 'year') return null;
-    const weeks = [...new Set(annual.map((r) => r.weekStart))].sort();
+    // Toutes les semaines entre la première et la dernière renseignées —
+    // les semaines sans séance gardent une colonne vide.
+    const weeks: string[] = [];
+    const ws = [...new Set(annual.map((r) => r.weekStart))].sort();
+    if (ws.length > 0) {
+      let d = dayjs(ws[0]);
+      const last = dayjs(ws[ws.length - 1]);
+      while (!d.isAfter(last)) {
+        weeks.push(d.format('YYYY-MM-DD'));
+        d = d.add(7, 'day');
+      }
+    }
     const mastersRows = new Map<
       number,
       { code: string; name: string; cells: Map<string, AnnualRow> }
@@ -797,7 +850,10 @@ export function TimetablePage(): React.JSX.Element {
           placeholder={t('timetable.entity.master')}
           style={{ minWidth: 260 }}
           value={entityId}
-          onChange={setEntityId}
+          onChange={(v) => {
+            clearHighlight();
+            setEntityId(v);
+          }}
           options={masters.map((m) => ({
             value: m.id,
             label: `${m.code} — ${m.name}`,
@@ -813,7 +869,10 @@ export function TimetablePage(): React.JSX.Element {
           placeholder={t('timetable.entity.professor')}
           style={{ minWidth: 240 }}
           value={entityId}
-          onChange={setEntityId}
+          onChange={(v) => {
+            clearHighlight();
+            setEntityId(v);
+          }}
           options={professors.map((p) => ({ value: p.id, label: p.full_name }))}
         />
       );
@@ -826,7 +885,10 @@ export function TimetablePage(): React.JSX.Element {
           placeholder={t('timetable.entity.room')}
           style={{ minWidth: 200 }}
           value={entityId}
-          onChange={setEntityId}
+          onChange={(v) => {
+            clearHighlight();
+            setEntityId(v);
+          }}
           options={rooms.map((r) => ({ value: r.id, label: r.name }))}
         />
       );
@@ -852,14 +914,25 @@ export function TimetablePage(): React.JSX.Element {
     <Space>
       <Button
         icon={<LeftOutlined />}
-        onClick={() => setWeekStart((w) => w.subtract(7, 'day'))}
+        onClick={() => {
+          clearHighlight();
+          setWeekStart((w) => w.subtract(7, 'day'));
+        }}
       />
-      <Button onClick={() => setWeekStart(mondayOf(dayjs()))}>
+      <Button
+        onClick={() => {
+          clearHighlight();
+          setWeekStart(mondayOf(dayjs()));
+        }}
+      >
         {t('timetable.week.today')}
       </Button>
       <Button
         icon={<RightOutlined />}
-        onClick={() => setWeekStart((w) => w.add(7, 'day'))}
+        onClick={() => {
+          clearHighlight();
+          setWeekStart((w) => w.add(7, 'day'));
+        }}
       />
       <Text strong>
         {t('timetable.week.label', {
@@ -888,7 +961,7 @@ export function TimetablePage(): React.JSX.Element {
           onChange={(v) => {
             setScope(v);
             setEntityId(undefined);
-            setConflictIds(new Set());
+            clearHighlight();
           }}
           style={{ minWidth: 200 }}
           options={(
@@ -900,19 +973,21 @@ export function TimetablePage(): React.JSX.Element {
       <Space wrap>
         {entitySelect()}
         {weekNav}
-        <Select
-          mode="multiple"
-          allowClear
-          placeholder={t('timetable.filters.status')}
-          style={{ minWidth: 260 }}
-          value={statuses}
-          onChange={setStatuses}
-          options={EFFECTIVE_SESSION_STATUSES.map((st) => ({
-            value: st,
-            label: t(`sessionStatus.${st}`),
-          }))}
-          maxTagCount={2}
-        />
+        {scope !== 'year' && (
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder={t('timetable.filters.status')}
+            style={{ minWidth: 260 }}
+            value={statuses}
+            onChange={setStatuses}
+            options={EFFECTIVE_SESSION_STATUSES.map((st) => ({
+              value: st,
+              label: t(`sessionStatus.${st}`),
+            }))}
+            maxTagCount={2}
+          />
+        )}
         {scope === 'week' && (
           <Select
             showSearch
@@ -1014,9 +1089,11 @@ export function TimetablePage(): React.JSX.Element {
                   ` (${detail.session.room.capacity})`}
               </Descriptions.Item>
               <Descriptions.Item label={t('timetable.detail.group')}>
-                {detail.groups.length > 0
-                  ? detail.groups.map((g) => g.name).join(', ')
-                  : t('groups.wholeMaster')}
+                <span dir="auto">
+                  {detail.groups.length > 0
+                    ? detail.groups.map((g) => g.name).join(', ')
+                    : t('groups.wholeMaster')}
+                </span>
               </Descriptions.Item>
               {detail.session.comment && (
                 <Descriptions.Item label={t('timetable.detail.comment')}>
@@ -1053,8 +1130,16 @@ export function TimetablePage(): React.JSX.Element {
                         <br />
                         <Text type="secondary" style={{ fontSize: 11 }}>
                           {h.changed_at}
-                          {h.user_name ? ` · ${h.user_name}` : ''}
-                          {h.reason ? ` — ${h.reason}` : ''}
+                          {h.user_name ? (
+                            <span dir="auto"> · {h.user_name}</span>
+                          ) : (
+                            ''
+                          )}
+                          {h.reason ? (
+                            <span dir="auto"> — {h.reason}</span>
+                          ) : (
+                            ''
+                          )}
                         </Text>
                         {h.new_date && (
                           <>
@@ -1081,7 +1166,9 @@ export function TimetablePage(): React.JSX.Element {
               )}
             </div>
           </Space>
-        ) : null}
+        ) : (
+          <Empty description={t('common.empty')} />
+        )}
       </Drawer>
     </Space>
   );

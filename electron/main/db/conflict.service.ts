@@ -180,22 +180,31 @@ export function detectConflicts(
     items.push(pairItem('MASTER', r));
   }
 
-  // GROUP — deux séances distinctes partageant un groupe (session_group).
-  // Fusion par paire : même séance liée à plusieurs groupes communs →
-  // une seule entrée, libellés de groupes concaténés.
-  const groupByPair = new Map<string, ConflictItem>();
+  // GROUP — groupes d'une séance = mm.student_group_id UNION session_group
+  // (même définition que group_name de SESSION_SELECT), des DEUX côtés :
+  // deux séances dont le même groupe vient de chemins différents
+  // (mm d'un côté, session_group de l'autre) produisent bien un conflit.
+  // Fusion par paire : plusieurs groupes communs → une seule entrée,
+  // entityLabel et detail listent tous les groupes.
+  const SESSION_GROUPS = `SELECT s.id AS sid, g.id AS gid,
+            g.name || ' (' || gm.name || ')' AS glabel
+       FROM session s
+       JOIN master_module mmx ON mmx.id = s.master_module_id
+      JOIN student_group g ON g.id = mmx.student_group_id
+       JOIN master gm ON gm.id = g.master_id
+      UNION
+      SELECT sg.session_id, g2.id, g2.name || ' (' || gm2.name || ')'
+       FROM session_group sg
+       JOIN student_group g2 ON g2.id = sg.student_group_id
+       JOIN master gm2 ON gm2.id = g2.master_id`;
+  const groupByPair = new Map<string, { item: ConflictItem; base: string }>();
   for (const r of all<PairRow>(
     db,
-    `SELECT${PAIR_COLS},
-            g.name || ' (' || gm.name || ')' AS entity
-       FROM session_group sga
-       JOIN session_group sgb
-         ON sgb.student_group_id = sga.student_group_id
-       JOIN session a ON a.id = sga.session_id
-       JOIN session b ON b.id = sgb.session_id
-                     AND b.id > a.id AND b.date = a.date
-       JOIN student_group g ON g.id = sga.student_group_id
-       JOIN master gm ON gm.id = g.master_id${PAIR_JOINS}
+    `SELECT${PAIR_COLS}, ga.glabel AS entity
+       FROM session a
+       JOIN session b ON b.date = a.date AND b.id > a.id
+       JOIN (${SESSION_GROUPS}) ga ON ga.sid = a.id
+       JOIN (${SESSION_GROUPS}) gb ON gb.sid = b.id AND gb.gid = ga.gid${PAIR_JOINS}
       WHERE a.status != 'ANNULEE' AND b.status != 'ANNULEE'
         AND a.start_min < b.end_min AND b.start_min < a.end_min${range.clause}`,
     ...range.params,
@@ -203,12 +212,16 @@ export function detectConflicts(
     const key = `${r.a_id}:${r.b_id}`;
     const prev = groupByPair.get(key);
     if (prev) {
-      prev.entityLabel = `${prev.entityLabel}, ${r.entity}`;
+      prev.item.entityLabel = `${prev.item.entityLabel}, ${r.entity}`;
+      prev.item.detail = `${prev.base} — ${prev.item.entityLabel}`;
     } else {
-      groupByPair.set(key, pairItem('GROUP', r));
+      const item = pairItem('GROUP', r);
+      const base = item.detail;
+      item.detail = `${base} — ${r.entity}`;
+      groupByPair.set(key, { item, base });
     }
   }
-  items.push(...groupByPair.values());
+  for (const { item } of groupByPair.values()) items.push(item);
 
   // EXTERNAL — séance ↔ blocage Licence même salle, weekday récurrent.
   const extRange = dateRange('s', filter);
@@ -241,7 +254,9 @@ export function detectConflicts(
        JOIN master_module mm ON mm.id = s.master_module_id
        JOIN master ma ON ma.id = mm.master_id
        JOIN module mo ON mo.id = mm.module_id
-      WHERE s.status != 'ANNULEE'${extRange.clause}`,
+      WHERE s.status != 'ANNULEE'
+        AND (eo.academic_year_id IS NULL
+             OR eo.academic_year_id = ma.academic_year_id)${extRange.clause}`,
     ...extRange.params,
   )) {
     const entity = `Licence — ${r.program}${r.groupe ? ` · ${r.groupe}` : ''}`;

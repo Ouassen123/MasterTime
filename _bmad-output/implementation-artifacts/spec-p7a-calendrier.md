@@ -114,3 +114,45 @@ drag&drop (P7b), génération (Phase 8), `session_group` remplissage (P7b).
 `npx vitest run` vert · `npm run typecheck` clean · `npm run build` OK ·
 sur la base réelle : `conflictSummary` retourne les conflits importés
 connus (≥6 Master↔Master, ≥10 EXTERNAL).
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. `detectConflicts` EXTERNAL : joindre `external_occupancy.academic_year_id`
+   à l'année du master via mm (NULL = toutes années). Idem dans
+   `listOccupancyWeek` (param `academicYearId?` ou jointure par date).
+2. `detectConflicts` GROUP : l'appartenance au groupe = UNION de
+   `mm.student_group_id` et `session_group`, des DEUX côtés de la paire
+   (comme `group_name` de SESSION_SELECT).
+3. Filtre `statuses` : expansion effective — 'PREVUE' → status='PREVUE'
+   AND date>=today ; 'NON_ENCORE_REALISEE' → status='PREVUE' AND
+   date<today ; autres statuts tels quels.
+4. Grille hebdo : clipper les blocs (`min(end,DAY_END)-max(start,DAY_START)`)
+   + `overflow:hidden` sur la colonne.
+5. `jumpToConflict` : basculer systématiquement en portée 'week' ;
+   vider `conflictIds` dans les handlers ‹ › / Aujourd'hui et changements
+   d'entité. Couleur de surlignage = `KIND_COLORS[c.kind]` (pas ROOM fixe).
+6. Calendar antd : `mode="month"` forcé (le mode année casse le rendu).
+7. `openSession` : request-id (useRef) pour ignorer les réponses obsolètes ;
+   échec `sessions:get` → corps drawer `<Empty/>` (ou fermeture).
+8. `dir="auto"` ajoutés : ligne salle·prof du bloc, `detail.groups` joint,
+   `h.user_name`/`h.reason` Timeline, tooltip OccupancyBlock.
+9. Vue Année : masquer le Select statuts (mort) ; colonnes = toutes les
+   semaines entre min et max (pas seulement non vides).
+10. Fetch erreur : vider `sessions`/`occupancy`. Dashboard : `message.error`
+    si `timetable.summary()` échoue.
+11. `listOccupancyWeek` : `roomId` non-entier → `apiErr` (pas silencieux).
+    `getSessionDetail` : remplacer le `.replace` sur SESSION_SELECT par un
+    builder partagé. Merge GROUP : `detail` inclut tous les groupes.
+12. Tests : `freshDb + seedReal + conflictSummary` assertant
+    `byKind.MASTER >= 6` ET `byKind.EXTERNAL >= 10` (vrai critère) ;
+    filtres combinés (masterId+statuses) ; semaine 2026-12-28→2027-01-03 ;
+    année sans sessions ; merge GROUP 2 groupes ; statuses ['PREVUE']
+    n'inclut pas les dérivées passées ; occupancy roomId forgé.
+
+Différé/noté : portées en Select plutôt que Tabs à icônes (équivalent
+fonctionnel) ; `session.date` GLOB permissif → verrouiller à l'écriture
+en P7b ; virtualisation panneau conflits ; libellé « Licence — Licence »
+redondant ; REPORTEE comptée en conflit (choix conservateur, à revoir
+avec la gestion du report en P7b).

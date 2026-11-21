@@ -444,6 +444,8 @@ export interface ConflictFilter {
 export interface OccupancyFilter {
   weekStart: string; // lundi ISO — détermine la date affichée par weekday
   roomId?: number;
+  /** Restreint aux blocages de cette année (NULL inclus = toutes années). */
+  academicYearId?: number;
 }
 
 /** Séance enrichie pour les vues calendrier (jointures + statut dérivé). */

@@ -15,6 +15,7 @@ import {
   runMigrations,
 } from '../electron/main/db/migrate';
 import { ensureProfiles } from '../electron/main/db/profile.service';
+import { seedReal } from '../electron/main/db/seed-real';
 import {
   getSessionDetail,
   listAnnual,
@@ -342,8 +343,9 @@ describe('listSessionsWeek', () => {
     addSession(db, f, { date: MON }); // M-T passé → NON_ENCORE_REALISEE
     addSession(db, f, {
       date: TUE, mmId: f.mm2Id, profId: f.prof2Id, roomId: f.room2Id,
-    }); // M-U futur
+    }); // M-U passé → NON_ENCORE_REALISEE
     addSession(db, f, { date: TUE, status: 'ANNULEE' }); // M-T annulée
+    addSession(db, f, { date: SAT }); // M-T futur → PREVUE (effective)
 
     const week = (extra: object = {}): number => {
       const r = listSessionsWeek(
@@ -353,15 +355,24 @@ describe('listSessionsWeek', () => {
       );
       return r.ok ? r.data.length : -1;
     };
-    expect(week({ masterId: f.masterId })).toBe(2);
+    expect(week({ masterId: f.masterId })).toBe(3);
     expect(week({ masterId: f.master2Id })).toBe(1);
     expect(week({ professorId: f.prof2Id })).toBe(1);
     expect(week({ roomId: f.room2Id })).toBe(1);
     expect(week({ moduleId: f.mod2Id })).toBe(1);
-    // MON et TUE sont tous deux < TODAY : les deux PREVUE sont dérivées.
+    // Expansion effective (patch 3) : 'PREVUE' = à venir seulement,
+    // les dérivées passées sont exclues du filtre 'PREVUE'.
+    expect(week({ statuses: ['PREVUE'] })).toBe(1);
     expect(week({ statuses: ['NON_ENCORE_REALISEE'] })).toBe(2);
+    // Les deux ensemble = toutes les PREVUE stockées (passées + futures).
+    expect(week({ statuses: ['PREVUE', 'NON_ENCORE_REALISEE'] })).toBe(3);
     expect(week({ statuses: ['ANNULEE'] })).toBe(1);
-    expect(week({ statuses: ['PREVUE', 'ANNULEE'] })).toBe(3);
+    expect(week({ statuses: ['PREVUE', 'ANNULEE'] })).toBe(2);
+    // Filtre combiné : entité + statuts effectifs.
+    expect(week({ masterId: f.masterId, statuses: ['PREVUE'] })).toBe(1);
+    expect(
+      week({ masterId: f.masterId, statuses: ['NON_ENCORE_REALISEE'] }),
+    ).toBe(1);
   });
 
   it('weekStart invalide ou non-lundi → erreur propre', () => {
@@ -379,6 +390,23 @@ describe('listSessionsWeek', () => {
     expect(
       listSessionsWeek(db, { weekStart: 42 } as never, TODAY).ok,
     ).toBe(false);
+  });
+
+  it('semaine à cheval sur deux années : 2026-12-28 → 2027-01-03', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    addSession(db, f, { date: '2026-12-28' }); // lundi
+    addSession(db, f, { date: '2027-01-01' }); // vendredi, année suivante
+    addSession(db, f, { date: '2027-01-03' }); // dimanche, borne incluse
+    addSession(db, f, { date: '2027-01-04' }); // lundi suivant → exclu
+    const res = listSessionsWeek(db, { weekStart: '2026-12-28' }, TODAY);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.map((s) => s.date)).toEqual([
+      '2026-12-28',
+      '2027-01-01',
+      '2027-01-03',
+    ]);
   });
 });
 
@@ -441,11 +469,21 @@ describe('listAnnual', () => {
     expect(res.data.every((r) => r.weekStart !== SUN)).toBe(true);
   });
 
-  it('année inexistante → erreur', () => {
+  it('année inexistante → erreur ; année sans séance → []', () => {
     const db = freshDb();
-    seedFixture(db);
+    const f = seedFixture(db);
     expect(listAnnual(db, { academicYearId: 9999 }).ok).toBe(false);
     expect(listAnnual(db, { academicYearId: -1 }).ok).toBe(false);
+    const year2 = Number(
+      run(
+        db,
+        "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2027-2028', '2027-09-01', '2028-08-31', 0)",
+      ).lastInsertRowid,
+    );
+    addSession(db, f, { date: MON });
+    const res = listAnnual(db, { academicYearId: year2 });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.data).toEqual([]);
   });
 });
 
@@ -518,6 +556,39 @@ describe('listOccupancyWeek', () => {
     });
     expect(filtered.ok).toBe(true);
     if (filtered.ok) expect(filtered.data).toHaveLength(1);
+  });
+
+  it('filtre par année + roomId/academicYearId forgés → erreur propre', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    addOccupancy(db, f, { weekday: 0, start: 480, end: 600 });
+    // academicYearId NULL : visible sur toute année (déjà couvert).
+    // Ici : l'occupation appartient à yearId → filtre explicite OK.
+    const ok = listOccupancyWeek(db, {
+      weekStart: MON, academicYearId: f.yearId,
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.data).toHaveLength(1);
+    const other = Number(
+      run(
+        db,
+        "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2027-2028', '2027-09-01', '2028-08-31', 0)",
+      ).lastInsertRowid,
+    );
+    const wrongYear = listOccupancyWeek(db, {
+      weekStart: MON, academicYearId: other,
+    });
+    expect(wrongYear.ok).toBe(true);
+    if (wrongYear.ok) expect(wrongYear.data).toHaveLength(0);
+    // Payloads forgés → apiErr, pas de filtre silencieusement ignoré.
+    expect(
+      listOccupancyWeek(db, { weekStart: MON, roomId: 'abc' as never }).ok,
+    ).toBe(false);
+    expect(
+      listOccupancyWeek(db, {
+        weekStart: MON, academicYearId: 'x' as never,
+      }).ok,
+    ).toBe(false);
   });
 });
 
@@ -620,7 +691,7 @@ describe('detectConflicts', () => {
     expect(ext[0].detail).toContain('Salle A');
   });
 
-  it('GROUP : deux séances distinctes partageant un groupe session_group', () => {
+  it('GROUP : appartenance = mm.student_group_id UNION session_group (chemins croisés)', () => {
     const db = freshDb();
     const f = seedFixture(db);
     const s1 = addSession(db, f, {
@@ -630,20 +701,20 @@ describe('detectConflicts', () => {
       date: TUE, start: 540, end: 660, roomId: f.room2Id, mmId: f.mm2Id,
       profId: f.prof2Id,
     });
-    // Sans session_group : pas de conflit GROUP.
+    // s1 a G1 via mm.student_group_id ; s2 n'a aucun groupe → 0 conflit.
     let res = detectConflicts(db);
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.data.filter((c) => c.kind === 'GROUP')).toHaveLength(0);
     }
-    for (const sid of [s1, s2]) {
-      run(
-        db,
-        'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
-        sid,
-        f.groupId,
-      );
-    }
+    // s2 liée à G1 via session_group : même groupe, chemins différents
+    // (mm d'un côté, session_group de l'autre) → conflit détecté.
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      s2,
+      f.groupId,
+    );
     res = detectConflicts(db);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -651,6 +722,49 @@ describe('detectConflicts', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].entityLabel).toBe('G1 (Master T)');
     expect(groups[0].sessions.map((s) => s.id)).toEqual([s1, s2]);
+  });
+
+  it('GROUP : paire partageant 2 groupes fusionnée — entityLabel + detail complets', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const g2 = Number(
+      run(
+        db,
+        "INSERT INTO student_group (master_id, name) VALUES (?, 'G2')",
+        f.masterId,
+      ).lastInsertRowid,
+    );
+    const s1 = addSession(db, f, {
+      date: TUE, start: 480, end: 600, roomId: f.roomId,
+    });
+    const s2 = addSession(db, f, {
+      date: TUE, start: 540, end: 660, roomId: f.room2Id, mmId: f.mm2Id,
+      profId: f.prof2Id,
+    });
+    // s1 : G1 via mm + G2 via session_group ; s2 : G1 + G2 via session_group.
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      s1,
+      g2,
+    );
+    for (const gid of [f.groupId, g2]) {
+      run(
+        db,
+        'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+        s2,
+        gid,
+      );
+    }
+    const res = detectConflicts(db);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const groups = res.data.filter((c) => c.kind === 'GROUP');
+    // Une seule entrée pour la paire, les deux groupes listés.
+    expect(groups).toHaveLength(1);
+    expect(groups[0].entityLabel).toBe('G1 (Master T), G2 (Master T)');
+    expect(groups[0].detail).toContain('G1 (Master T)');
+    expect(groups[0].detail).toContain('G2 (Master T)');
   });
 
   it('plage de dates : filtre inclusif, plage vide → []', () => {
@@ -692,11 +806,12 @@ describe('detectConflicts', () => {
     expect(sum.total).toBe(3);
   });
 
-  it('cas réel FSJP : Salle 6 samedi 12h–14h, deux masters réels détectés', () => {
+  it('fixture : deux masters distincts en collision même salle/créneau', () => {
     const db = freshDb();
     const f = seedFixture(db);
-    // Rejoue REAL_SESSIONS : M-02 (idx 1) et M-04 (idx 3) occupent tous
-    // deux 'Salle 6' le samedi (weekday 5) 12h–14h → conflits ROOM.
+    // Rejoue le motif de la collision officielle Salle 6 (samedi 12h–14h,
+    // deux masters) sur fixture synthétique — la version réelle est
+    // couverte par le test seedReal ci-dessous.
     addSession(db, f, {
       date: SAT, start: 720, end: 840, roomId: f.roomId, // 'Salle A' tient lieu de Salle 6
     });
@@ -712,6 +827,28 @@ describe('detectConflicts', () => {
     expect(room[0].date).toBe(SAT);
     const names = room[0].sessions.map((s) => s.masterName).sort();
     expect(names).toEqual(['Master T', 'Master U']);
+  });
+
+  it('acceptation — seedReal : ≥6 MASTER, ≥10 EXTERNAL, Salle 6 le samedi', () => {
+    const db = freshDb();
+    seedReal(db);
+    const sum = conflictSummary(db);
+    expect(sum.byKind.MASTER).toBeGreaterThanOrEqual(6);
+    expect(sum.byKind.EXTERNAL).toBeGreaterThanOrEqual(10);
+    const res = detectConflicts(db);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // La vraie collision officielle : 'Salle 6' occupée par deux masters
+    // (M-02 ↔ M-04) le samedi 12h–14h — doit produire des ROOM samedis.
+    const s6 = res.data.filter(
+      (c) =>
+        c.kind === 'ROOM' &&
+        c.entityLabel === 'Salle 6' &&
+        new Date(`${c.date}T00:00:00Z`).getUTCDay() === 6,
+    );
+    expect(s6.length).toBeGreaterThanOrEqual(1);
+    expect(s6[0].startMin).toBe(720);
+    expect(s6[0].endMin).toBe(840);
   });
 });
 

@@ -54,6 +54,12 @@ export function DashboardPage(): React.JSX.Element {
         conflictRes.value.ok
       ) {
         setConflicts(conflictRes.value.data);
+      } else {
+        void message.error(
+          conflictRes.status === 'fulfilled'
+            ? errorMessage(conflictRes.value)
+            : errorMessage(conflictRes.reason),
+        );
       }
       setLoading(false);
     });

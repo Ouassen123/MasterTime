@@ -52,8 +52,16 @@ function addDays(iso: string, days: number): string {
  * group_name : nom du groupe mm.student_group_id UNION les groupes de
  * session_group (séance multi-groupes, migration 0005) — ', '-joinés.
  */
-const SESSION_SELECT = `
-  SELECT s.id, s.date, s.start_min, s.end_min, s.status, s.comment,
+/**
+ * SELECT partagé des séances enrichies — `extraCols` (liste de colonnes
+ * `s.*` séparées par des virgules, sans virgule terminale) permet à
+ * `getSessionDetail` de récupérer les colonnes brutes supplémentaires
+ * sans dupliquer les jointures.
+ */
+function sessionSelectSql(extraCols = ''): string {
+  return `
+  SELECT s.id,${extraCols ? `\n         ${extraCols},` : ''}
+         s.date, s.start_min, s.end_min, s.status, s.comment,
          m.id AS master_id, m.code AS master_code, m.name AS master_name,
          mo.id AS module_id, mo.code AS module_code, mo.name AS module_name,
          p.id AS professor_id, p.full_name AS professor_name,
@@ -72,6 +80,9 @@ const SESSION_SELECT = `
     JOIN module mo ON mo.id = mm.module_id
     JOIN professor p ON p.id = s.professor_id
     JOIN room r ON r.id = s.room_id`;
+}
+
+const SESSION_SELECT = sessionSelectSql();
 
 interface SessionSqlRow {
   id: number;
@@ -116,9 +127,12 @@ function isId(v: unknown): v is number {
 }
 
 /**
- * Filtres ids + statuts effectifs. 'NON_ENCORE_REALISEE' (dérivé, jamais
- * stocké) se traduit en `status='PREVUE' AND date < today` ; les valeurs
- * forges hors liste sont ignorées (payload IPC non fiable).
+ * Filtres ids + statuts EFFECTIFS (AD-7). 'PREVUE' affiché = prévue à
+ * venir (`status='PREVUE' AND date >= today`) ; 'NON_ENCORE_REALISEE'
+ * (dérivé, jamais stocké) = `status='PREVUE' AND date < today` ; les
+ * deux ensemble = `status='PREVUE'` sans borne. Les autres statuts
+ * (REALISEE/ANNULEE/REPORTEE) filtrent tels quels. Valeurs forgées hors
+ * liste : ignorées (payload IPC non fiable).
  */
 function buildFilter(
   filter: SessionFilter | undefined,
@@ -146,13 +160,23 @@ function buildFilter(
     const valid = filter.statuses.filter((st): st is EffectiveSessionStatus =>
       (EFFECTIVE_SESSION_STATUSES as readonly string[]).includes(st as string),
     );
-    const stored = valid.filter((st) => st !== 'NON_ENCORE_REALISEE');
+    const hasPrevue = valid.includes('PREVUE');
+    const hasNonReal = valid.includes('NON_ENCORE_REALISEE');
+    const stored = valid.filter(
+      (st) => st !== 'PREVUE' && st !== 'NON_ENCORE_REALISEE',
+    );
     const ors: string[] = [];
     if (stored.length > 0) {
       ors.push(`s.status IN (${stored.map(() => '?').join(', ')})`);
       params.push(...stored);
     }
-    if (valid.includes('NON_ENCORE_REALISEE')) {
+    if (hasPrevue && hasNonReal) {
+      // PREVUE à venir + dérivée passée = toutes les PREVUE stockées.
+      ors.push(`s.status = 'PREVUE'`);
+    } else if (hasPrevue) {
+      ors.push(`(s.status = 'PREVUE' AND s.date >= ?)`);
+      params.push(today);
+    } else if (hasNonReal) {
       ors.push(`(s.status = 'PREVUE' AND s.date < ?)`);
       params.push(today);
     }
@@ -316,10 +340,9 @@ export function getSessionDetail(
     }
   >(
     db,
-    SESSION_SELECT.replace(
-      's.id, s.date,',
-      `s.id, s.master_module_id, s.actual_date, s.actual_start_min,
-       s.actual_end_min, s.generation_id, s.is_demo, s.updated_at, s.date,`,
+    sessionSelectSql(
+      `s.master_module_id, s.actual_date, s.actual_start_min,
+       s.actual_end_min, s.generation_id, s.is_demo, s.updated_at`,
     ) + ' WHERE s.id = ?',
     id,
   );
@@ -393,11 +416,36 @@ export function listOccupancyWeek(
   if (!isValidIsoDate(weekStart) || weekdayOf(weekStart) !== 0) {
     return apiErr('Le début de semaine doit être un lundi (AAAA-MM-JJ).');
   }
+  if (filter.roomId != null && !isId(filter.roomId)) {
+    return apiErr('Salle invalide.');
+  }
+  if (filter.academicYearId != null && !isId(filter.academicYearId)) {
+    return apiErr('Année universitaire invalide.');
+  }
   const clauses: string[] = [];
   const params: (string | number)[] = [weekStart];
   if (isId(filter.roomId)) {
     clauses.push(' AND eo.room_id = ?');
     params.push(filter.roomId);
+  }
+  // Année : param explicite, sinon celle qui contient weekStart (les
+  // blocages NULL s'appliquent à toutes les années — BR-25).
+  let yearId: number | null = isId(filter.academicYearId)
+    ? filter.academicYearId
+    : null;
+  if (yearId == null) {
+    yearId =
+      get<{ id: number }>(
+        db,
+        'SELECT id FROM academic_year WHERE ? BETWEEN start_date AND end_date',
+        weekStart,
+      )?.id ?? null;
+  }
+  if (yearId != null) {
+    clauses.push(
+      ' AND (eo.academic_year_id IS NULL OR eo.academic_year_id = ?)',
+    );
+    params.push(yearId);
   }
   const rows = all<{
     id: number;
