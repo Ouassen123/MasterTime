@@ -67,8 +67,10 @@ function admin(db: DatabaseSync): AppUser {
 
 interface Fixture {
   yearId: number;
+  year2Id: number;
   semId: number;
   sem2Id: number;
+  year2SemId: number;
   profId: number;
   prof2Id: number;
   modId: number;
@@ -81,14 +83,21 @@ interface Fixture {
 }
 
 /**
- * Référentiel minimal : année, 2 semestres, 2 masters (M-T a un groupe
- * « G1 » et un master_module), 2 modules, 2 profs, 1 salle.
+ * Référentiel minimal : 2 années (2026-2027 courante + 2027-2028),
+ * 2 semestres sur l'année 1 + 1 sur l'année 2, 2 masters (M-T a un
+ * groupe « G1 » et un master_module), 2 modules, 2 profs, 1 salle.
  */
 function seedFixture(db: DatabaseSync): Fixture {
   const yearId = Number(
     run(
       db,
       "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2026-2027', '2026-09-01', '2027-08-31', 1)",
+    ).lastInsertRowid,
+  );
+  const year2Id = Number(
+    run(
+      db,
+      "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2027-2028', '2027-09-01', '2028-08-31', 0)",
     ).lastInsertRowid,
   );
   const semId = Number(
@@ -103,6 +112,13 @@ function seedFixture(db: DatabaseSync): Fixture {
       db,
       "INSERT INTO semester (academic_year_id, label, ordinal) VALUES (?, 'S2', 2)",
       yearId,
+    ).lastInsertRowid,
+  );
+  const year2SemId = Number(
+    run(
+      db,
+      "INSERT INTO semester (academic_year_id, label, ordinal) VALUES (?, 'S1', 1)",
+      year2Id,
     ).lastInsertRowid,
   );
   const masterId = Number(
@@ -163,8 +179,10 @@ function seedFixture(db: DatabaseSync): Fixture {
   );
   return {
     yearId,
+    year2Id,
     semId,
     sem2Id,
+    year2SemId,
     profId,
     prof2Id,
     modId,
@@ -181,6 +199,7 @@ function addSession(
   db: DatabaseSync,
   f: Fixture,
   opts: {
+    mmId?: number;
     date: string;
     status?: string;
     start?: number;
@@ -196,7 +215,7 @@ function addSession(
          (master_module_id, professor_id, room_id, date, start_min, end_min,
           status, actual_start_min, actual_end_min)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      f.mmId,
+      opts.mmId ?? f.mmId,
       f.profId,
       f.roomId,
       opts.date,
@@ -279,9 +298,16 @@ describe('masters — liste', () => {
   it('compteurs corrects : nb_modules, nb_groupes, nb_seances (hors ANNULEE), Σ volume', () => {
     const db = freshDb();
     const f = seedFixture(db);
-    addSession(db, f, { date: '2026-10-20' });
+    const sid = addSession(db, f, { date: '2026-10-20' });
     addSession(db, f, { date: '2026-10-21' });
     addSession(db, f, { date: '2026-10-22', status: 'ANNULEE' });
+    // session_group rattaché au groupe du master → compté dans linkedCount.
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      sid,
+      f.groupId,
+    );
 
     const rows = listMasters(db);
     expect(rows).toHaveLength(2);
@@ -293,8 +319,8 @@ describe('masters — liste', () => {
     expect(m.status).toBe('ACTIF');
     expect(m.academic_year_label).toBe('2026-2027');
     expect(m.semester_label).toBe('S1');
-    // linkedCount : 1 groupe + 1 mm + 3 séances.
-    expect(m.linkedCount).toBe(5);
+    // linkedCount : 1 groupe + 1 mm + 3 séances + 1 session_group.
+    expect(m.linkedCount).toBe(6);
     const u = rows.find((r) => r.id === f.master2Id)!;
     expect(u.nb_modules).toBe(0);
     expect(u.nb_seances).toBe(0);
@@ -315,7 +341,12 @@ describe('masters — liste', () => {
     expect(listMasters(db, { search: 'M-U' })).toHaveLength(1);
     expect(listMasters(db, { search: 'informatique' })).toHaveLength(1);
     expect(listMasters(db, { search: 'inexistant' })).toHaveLength(0);
+    // Jokers LIKE échappés : '%', '_' et '\' restent littéraux.
     expect(listMasters(db, { search: '%' })).toHaveLength(0);
+    expect(listMasters(db, { search: '_' })).toHaveLength(0);
+    expect(listMasters(db, { search: '\\' })).toHaveLength(0);
+    // Payload forgé : search non-string ignoré (pas de TypeError).
+    expect(listMasters(db, { search: 42 } as never)).toHaveLength(3);
     const names = listMasters(db).map((r) => r.name);
     expect(names).toEqual(['Master T', 'Master U', 'Zzz Alpha']);
   });
@@ -403,6 +434,19 @@ describe('masters — CRUD', () => {
     });
     expect(badSem.ok).toBe(false);
     if (!badSem.ok) expect(badSem.fields?.[0].field).toBe('semester_id');
+
+    // Semestre existant mais rattaché à une AUTRE année → refusé.
+    const wrongYear = createMaster(db, uid, {
+      code: 'M-Y',
+      name: 'Master Y',
+      academic_year_id: f.yearId,
+      semester_id: f.year2SemId,
+    });
+    expect(wrongYear.ok).toBe(false);
+    if (!wrongYear.ok) {
+      expect(wrongYear.fields?.[0].field).toBe('semester_id');
+      expect(wrongYear.fields?.[0].message).toMatch(/année/);
+    }
 
     const badStatus = createMaster(db, uid, {
       code: 'M-Y',
@@ -593,7 +637,8 @@ describe('masters — groupes', () => {
       ),
     ).toHaveLength(1);
 
-    const noop = renameGroup(db, uid, f.groupId, { name: 'Groupe 1' });
+    // No-op : mêmes valeurs → aucune trace superflue.
+    const noop = renameGroup(db, uid, f.groupId, { name: 'Groupe 1', size: 32 });
     expect(noop.ok).toBe(true);
     expect(
       all(
@@ -601,6 +646,19 @@ describe('masters — groupes', () => {
         "SELECT id FROM audit_log WHERE entity = 'student_group' AND action = 'UPDATE'",
       ),
     ).toHaveLength(1);
+
+    // size : NULL explicite effaçable (pas de COALESCE) — l'effectif
+    // déclaré repasse à NULL avec audit.
+    const erased = renameGroup(db, uid, f.groupId, { name: 'Groupe 1' });
+    expect(erased.ok).toBe(true);
+    if (!erased.ok) return;
+    expect(erased.data.size).toBeNull();
+    expect(
+      all(
+        db,
+        "SELECT id FROM audit_log WHERE entity = 'student_group' AND action = 'UPDATE'",
+      ),
+    ).toHaveLength(2);
 
     addGroup(db, uid, f.masterId, { name: 'G9' });
     const dup = renameGroup(db, uid, f.groupId, { name: 'g9' });
@@ -625,7 +683,7 @@ describe('masters — groupes', () => {
       ),
     ).toHaveLength(1);
 
-    // Lié par master_module.student_group_id → refus.
+    // Lié par master_module.student_group_id → refus chiffré, message « lié ».
     run(
       db,
       'UPDATE master_module SET student_group_id = ? WHERE id = ?',
@@ -636,6 +694,7 @@ describe('masters — groupes', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.linkedCount).toBe(1);
+      expect(res.error).toMatch(/lié à 1 donnée/);
       expect(res.error).toMatch(/suppression impossible/);
     }
     run(
@@ -703,15 +762,17 @@ describe('masters — master_modules', () => {
     expect(
       attachModule(db, uid, f.masterId, mmInput(f, { semester_id: f.sem2Id })).ok,
     ).toBe(true);
-    // Même module même semestre mais groupe différent → autorisé.
-    expect(
-      attachModule(
-        db,
-        uid,
-        f.masterId,
-        mmInput(f, { student_group_id: f.groupId }),
-      ).ok,
-    ).toBe(true);
+    // Même module même semestre mais groupe différent → autorisé,
+    // group_name joint et non null.
+    const grouped = attachModule(
+      db,
+      uid,
+      f.masterId,
+      mmInput(f, { student_group_id: f.groupId }),
+    );
+    expect(grouped.ok).toBe(true);
+    if (!grouped.ok) return;
+    expect(grouped.data.group_name).toBe('G1');
   });
 
   it('groupe d’un autre master refusé ; refs inexistantes rejetées', () => {
@@ -735,6 +796,20 @@ describe('masters — master_modules', () => {
     if (!wrong.ok) {
       expect(wrong.fields?.[0].field).toBe('student_group_id');
       expect(wrong.fields?.[0].message).toMatch(/n'appartient pas/);
+    }
+
+    // Semestre existant mais d'une AUTRE année que celle du master → refusé
+    // (même contrôle que validateMaster).
+    const wrongYear = attachModule(
+      db,
+      uid,
+      f.masterId,
+      mmInput(f, { semester_id: f.year2SemId }),
+    );
+    expect(wrongYear.ok).toBe(false);
+    if (!wrongYear.ok) {
+      expect(wrongYear.fields?.[0].field).toBe('semester_id');
+      expect(wrongYear.fields?.[0].message).toMatch(/année/);
     }
 
     for (const [key, val] of [
@@ -784,9 +859,32 @@ describe('masters — master_modules', () => {
     expect(badDate.ok).toBe(false);
     if (!badDate.ok) expect(badDate.fields?.[0].field).toBe('sched_start');
 
-    const v0 = attachModule(db, uid, f.masterId, mmInput(f, { volume_min: 0 }));
-    expect(v0.ok).toBe(false);
-    if (!v0.ok) expect(v0.fields?.[0].field).toBe('volume_min');
+    // Volumes : 0, négatif et non-entier refusés.
+    for (const volume_min of [0, -90, 2.5]) {
+      const bad = attachModule(db, uid, f.masterId, mmInput(f, { volume_min }));
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.fields?.[0].field).toBe('volume_min');
+    }
+    for (const session_duration_min of [0, -30, 1.5]) {
+      const bad = attachModule(
+        db,
+        uid,
+        f.masterId,
+        mmInput(f, { session_duration_min }),
+      );
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.fields?.[0].field).toBe('session_duration_min');
+    }
+    for (const planned_sessions of [0, -2, 3.5]) {
+      const bad = attachModule(
+        db,
+        uid,
+        f.masterId,
+        mmInput(f, { planned_sessions }),
+      );
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.fields?.[0].field).toBe('planned_sessions');
+    }
 
     const d0 = attachModule(
       db,
@@ -825,6 +923,31 @@ describe('masters — master_modules', () => {
     );
     expect(badJson.ok).toBe(false);
     if (!badJson.ok) expect(badJson.fields?.[0].field).toBe('distribution_rule');
+
+    // JSON valide mais non-objet (scalaire, 'null') : refusé aussi.
+    for (const rule of ['42', '"texte"', 'null']) {
+      const scalar = attachModule(
+        db,
+        uid,
+        f.masterId,
+        mmInput(f, { semester_id: f.sem2Id, distribution_rule: rule }),
+      );
+      expect(scalar.ok).toBe(false);
+      if (!scalar.ok)
+        expect(scalar.fields?.[0].field).toBe('distribution_rule');
+    }
+    // Objet JSON valide → accepté.
+    const goodJson = attachModule(
+      db,
+      uid,
+      f.masterId,
+      mmInput(f, {
+        semester_id: f.sem2Id,
+        student_group_id: f.groupId,
+        distribution_rule: '{"pref":"matin"}',
+      }),
+    );
+    expect(goodJson.ok).toBe(true);
   });
 
   it('update partiel : UPDATE + audit ; doublon vers un mm existant refusé', () => {
@@ -882,6 +1005,29 @@ describe('masters — master_modules', () => {
       get(db, 'SELECT id FROM master_module WHERE id = ?', f.mmId),
     ).toBeDefined();
 
+    // BR-22 porte sur TOUTES les séances, y compris ANNULEE : un mm dont la
+    // seule séance est annulée reste bloqué (historique à préserver).
+    const mm2 = attachModule(
+      db,
+      uid,
+      f.masterId,
+      mmInput(f, { semester_id: f.sem2Id }),
+    );
+    expect(mm2.ok).toBe(true);
+    if (!mm2.ok) return;
+    addSession(db, f, {
+      mmId: mm2.data.id,
+      date: '2026-10-23',
+      status: 'ANNULEE',
+    });
+    const onlyCancelled = detachModule(db, uid, mm2.data.id);
+    expect(onlyCancelled.ok).toBe(false);
+    if (!onlyCancelled.ok) {
+      expect(onlyCancelled.linkedCount).toBe(1);
+      expect(onlyCancelled.error).toMatch(/supprimez d'abord/);
+    }
+    run(db, 'DELETE FROM session WHERE master_module_id = ?', mm2.data.id);
+
     const free = attachModule(db, uid, f.masterId, mmInput(f));
     expect(free.ok).toBe(true);
     if (!free.ok) return;
@@ -893,6 +1039,67 @@ describe('masters — master_modules', () => {
       ),
     ).toHaveLength(1);
     expect(detachModule(db, uid, 9999).ok).toBe(false);
+  });
+});
+
+describe('masters — mutations refusées sur master ARCHIVE', () => {
+  it('les 6 mutations groupes/master_modules refusées avec erreur champ status', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const f = seedFixture(db);
+    setMasterStatus(db, uid, f.masterId, 'ARCHIVE');
+
+    // Groupe libre et mm libre (créés directement) pour les cas update/delete.
+    const freeGroup = Number(
+      run(
+        db,
+        "INSERT INTO student_group (master_id, name) VALUES (?, 'Libre')",
+        f.masterId,
+      ).lastInsertRowid,
+    );
+
+    const add = addGroup(db, uid, f.masterId, { name: 'Nouveau' });
+    expect(add.ok).toBe(false);
+    if (!add.ok) {
+      expect(add.fields?.[0].field).toBe('status');
+      expect(add.error).toMatch(/archivé/);
+    }
+
+    const rename = renameGroup(db, uid, f.groupId, { name: 'Autre nom' });
+    expect(rename.ok).toBe(false);
+    if (!rename.ok) expect(rename.fields?.[0].field).toBe('status');
+
+    const rem = removeGroup(db, uid, freeGroup);
+    expect(rem.ok).toBe(false);
+    if (!rem.ok) expect(rem.fields?.[0].field).toBe('status');
+
+    const att = attachModule(db, uid, f.masterId, mmInput(f));
+    expect(att.ok).toBe(false);
+    if (!att.ok) expect(att.fields?.[0].field).toBe('status');
+
+    const upd = updateMasterModule(db, uid, f.mmId, {
+      module_id: f.modId,
+      semester_id: f.semId,
+      professor_id: f.profId,
+      volume_min: 600,
+      session_duration_min: 90,
+      planned_sessions: 5,
+      sched_start: '2026-09-01',
+      sched_end: '2027-01-31',
+    });
+    expect(upd.ok).toBe(false);
+    if (!upd.ok) expect(upd.fields?.[0].field).toBe('status');
+
+    const det = detachModule(db, uid, f.mmId);
+    expect(det.ok).toBe(false);
+    if (!det.ok) expect(det.fields?.[0].field).toBe('status');
+
+    // Rien n'a été écrit.
+    expect(all(db, 'SELECT id FROM audit_log')).toHaveLength(1); // le setStatus seul
+    // Réactivation → les mutations repassent.
+    setMasterStatus(db, uid, f.masterId, 'ACTIF');
+    expect(addGroup(db, uid, f.masterId, { name: 'Nouveau' }).ok).toBe(true);
+    expect(attachModule(db, uid, f.masterId, mmInput(f)).ok).toBe(true);
   });
 });
 
@@ -982,9 +1189,11 @@ describe('masters — context:semesters', () => {
     const ctx = collectContextSemesters(db);
     expect(ctx.academicYears).toEqual([
       { id: f.yearId, label: '2026-2027', is_current: 1 },
+      { id: f.year2Id, label: '2027-2028', is_current: 0 },
     ]);
-    expect(ctx.semesters.map((s) => s.label)).toEqual(['S1', 'S2']);
+    expect(ctx.semesters.map((s) => s.label)).toEqual(['S1', 'S2', 'S1']);
     expect(ctx.semesters[0].academic_year_id).toBe(f.yearId);
+    expect(ctx.semesters[2].academic_year_id).toBe(f.year2Id);
   });
 });
 
@@ -994,6 +1203,16 @@ describe('masters — garde IPC (composition des handlers)', () => {
     const f = seedFixture(db);
     const gest = listProfiles(db).find((p) => p.role === 'GESTIONNAIRE')!;
     const adminUser = admin(db);
+    // Cibles libres pour les mutations update/delete de groupes/mm.
+    const freeGroupId = Number(
+      run(
+        db,
+        "INSERT INTO student_group (master_id, name) VALUES (?, 'G9')",
+        f.masterId,
+      ).lastInsertRowid,
+    );
+    let attachedMmId = 0;
+    // Les 10 mutations du handler `masters:*` : chacune doit exiger ADMIN.
     const mutations: ((
       d: DatabaseSync,
     ) => ApiResult<unknown> | DeleteResult)[] = [
@@ -1011,11 +1230,22 @@ describe('masters — garde IPC (composition des handlers)', () => {
         }),
       (d: DatabaseSync) =>
         setMasterStatus(d, currentUserId(d), f.master2Id, 'ARCHIVE'),
-      (d: DatabaseSync) => deleteMaster(d, currentUserId(d), f.master2Id),
       (d: DatabaseSync) =>
         addGroup(d, currentUserId(d), f.masterId, { name: 'GR' }),
       (d: DatabaseSync) =>
-        attachModule(d, currentUserId(d), f.masterId, mmInput(f)),
+        renameGroup(d, currentUserId(d), freeGroupId, { name: 'G9b' }),
+      (d: DatabaseSync) =>
+        removeGroup(d, currentUserId(d), freeGroupId),
+      (d: DatabaseSync) => {
+        const r = attachModule(d, currentUserId(d), f.masterId, mmInput(f));
+        if (r.ok) attachedMmId = r.data.id;
+        return r;
+      },
+      (d: DatabaseSync) =>
+        updateMasterModule(d, currentUserId(d), attachedMmId, mmInput(f)),
+      (d: DatabaseSync) =>
+        detachModule(d, currentUserId(d), attachedMmId),
+      (d: DatabaseSync) => deleteMaster(d, currentUserId(d), f.master2Id),
     ];
 
     setCurrentProfile(db, gest.id);

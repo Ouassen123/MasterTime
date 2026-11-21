@@ -82,8 +82,8 @@ describe('migrations', () => {
       db,
       "SELECT count(*) AS c FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
     )!.c;
-    // 14 (0001→0003) + ix_sg_group + ix_master_module_master (0005)
-    expect(indexCount).toBe(16);
+    // 14 (0001→0003) + ix_sg_group (0005)
+    expect(indexCount).toBe(15);
 
     const versions = db
       .prepare('SELECT version FROM schema_migrations')

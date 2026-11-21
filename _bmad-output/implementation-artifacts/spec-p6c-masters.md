@@ -114,3 +114,40 @@ Remplissage de `session_group` (Phase 7 édition séances), import registre
 ## Vérification
 `npx vitest run` tout vert · `npm run typecheck` clean · `npm run build` OK ·
 migration 0005 vérifiée sur copie de la base réelle.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. `validateMasterModule` : refuser un `semester_id` dont `academic_year_id`
+   diffère de celle du master (même contrôle que `validateMaster`) + Select
+   semestre de ModulesTab filtré par l'année du master + label option
+   incluant l'année (ex. « S1 · 2026-2027 »).
+2. `renameGroup` : `size = ?` (NULL explicite effaçable), pas COALESCE.
+3. `MASTER_LIST_SELECT.linkedCount` : + session_group via groupes du master.
+   Tag groupe : clé i18n dédiée « Donnée(s) liée(s) » (pas « Séances »).
+4. `isConstraintViolation` → matcher `/unique/i` (pas toute contrainte).
+5. `masters:list` : `filter.search` non-string → ignoré, pas TypeError.
+6. `distribution_rule` : JSON parsé doit être un objet non-null.
+7. Mutations groupes/master_module refusées si `master.status='ARCHIVE'`
+   (message explicite ; archiver = geler, réversible via setStatus).
+8. Select professeur ModulesTab : filtrer `is_active=1`, suffixe
+   « (désactivé) » si le mm existant pointe un inactif.
+9. Formulaire master : reset `semester_id` au changement d'année.
+   Drawer fiche : `destroyOnClose`.
+10. `0005` amendé : supprimer `ix_master_module_master` (redondant —
+    master_id est déjà préfixe de ux_master_module) ; `db.test` → 15 index ;
+    erratum dans ce spec + DATA-MODEL ajusté.
+11. `shared/types.ts` : interface `SessionGroup` exposée.
+12. Tests : requireRole étendu aux 10 mutations ; fixture +2e année/semestre
+    et cas « semestre d'une autre année » (master ET master_module) ;
+    detachModule bloqué par séance ANNULEE seule ; `group_name` non null
+    asserté ; volumes négatifs/non-entiers ; LIKE `_` et `\` échappés ;
+    groupe lié → `groups.linked` message ; mutation sur ARCHIVE refusée.
+
+Différé/noté : cohérence `planned_sessions × duration` vs `volume_min`
+(warning produit Phase 8 — pas de refus sec, les données réelles peuvent
+différer) ; asymétrie `updateMaster.semester_id` (payload forgé
+uniquement) ; COALESCE→0 (id=0 impossible via service) ; `session_group`
+dans les listes de séances (Phase 7) ; `academic_year_id` pré-rempli si
+contexte tardif (trivia UX).

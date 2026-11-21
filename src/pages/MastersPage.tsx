@@ -160,18 +160,22 @@ const MM_FIELD_NAMES = [
 
 function ModulesTab({
   masterId,
+  academicYearId,
   groups,
   rows,
   refs,
   onChanged,
 }: {
   masterId: number;
+  /** Année du master — le Select semestre est restreint à cette année. */
+  academicYearId: number;
   groups: StudentGroupRow[];
   rows: MasterModuleRow[];
   refs: {
     modules: Module[];
     professors: ProfessorRow[];
     semesters: ContextSemesters['semesters'];
+    academicYears: ContextSemesters['academicYears'];
   };
   onChanged: () => void;
 }): React.JSX.Element {
@@ -367,7 +371,17 @@ function ModulesTab({
           <Select
             showSearch
             optionFilterProp="label"
-            options={refs.professors.map((p) => ({ value: p.id, label: p.full_name }))}
+            options={refs.professors
+              // Profs actifs uniquement ; le prof déjà rattaché (inactif)
+              // reste sélectionnable, marqué « (désactivé) ».
+              .filter((p) => p.is_active === 1 || p.id === editing?.professor_id)
+              .map((p) => ({
+                value: p.id,
+                label:
+                  p.is_active === 1
+                    ? p.full_name
+                    : `${p.full_name} ${t('masterModules.inactiveSuffix')}`,
+              }))}
           />
         </Form.Item>
         <Form.Item
@@ -376,7 +390,17 @@ function ModulesTab({
           rules={[{ required: true, message: t('common.required') }]}
         >
           <Select
-            options={refs.semesters.map((s) => ({ value: s.id, label: s.label }))}
+            options={refs.semesters
+              .filter((s) => s.academic_year_id === academicYearId)
+              .map((s) => {
+                const year = refs.academicYears.find(
+                  (y) => y.id === s.academic_year_id,
+                );
+                return {
+                  value: s.id,
+                  label: year ? `${s.label} · ${year.label}` : s.label,
+                };
+              })}
           />
         </Form.Item>
         <Form.Item name="student_group_id" label={t('masterModules.group')}>
@@ -532,7 +556,9 @@ function GroupsTab({
               <span dir="auto">{g.name}</span>
               {g.size != null && <Text type="secondary">({g.size})</Text>}
               {g.linkedCount > 0 && (
-                <Tag>{t('masters.nbSeances')} : {g.linkedCount}</Tag>
+                <Tag>
+                  {t('groups.linked')} : {g.linkedCount}
+                </Tag>
               )}
             </Space>
           </List.Item>
@@ -919,30 +945,41 @@ export function MastersPage(): React.JSX.Element {
           <Input dir="auto" />
         </Form.Item>
         <Form.Item
-          name="academic_year_id"
-          label={t('masters.academicYear')}
-          rules={[{ required: true, message: t('common.required') }]}
-        >
-          <Select
-            options={context.academicYears.map((y) => ({
-              value: y.id,
-              label: y.label,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item
           noStyle
           shouldUpdate={(prev, cur) => prev.academic_year_id !== cur.academic_year_id}
         >
-          {({ getFieldValue }) => (
-            <Form.Item name="semester_id" label={t('masters.semester')}>
-              <Select
-                allowClear
-                options={context.semesters
-                  .filter((s) => s.academic_year_id === getFieldValue('academic_year_id'))
-                  .map((s) => ({ value: s.id, label: s.label }))}
-              />
-            </Form.Item>
+          {(form) => (
+            <>
+              <Form.Item
+                name="academic_year_id"
+                label={t('masters.academicYear')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <Select
+                  options={context.academicYears.map((y) => ({
+                    value: y.id,
+                    label: y.label,
+                  }))}
+                  // Changer d'année invalide le semestre choisi (il
+                  // appartient à l'ancienne année) → reset explicite.
+                  onChange={() =>
+                    form.setFieldsValue({ semester_id: null })
+                  }
+                />
+              </Form.Item>
+              <Form.Item name="semester_id" label={t('masters.semester')}>
+                <Select
+                  allowClear
+                  options={context.semesters
+                    .filter(
+                      (s) =>
+                        s.academic_year_id ===
+                        form.getFieldValue('academic_year_id'),
+                    )
+                    .map((s) => ({ value: s.id, label: s.label }))}
+                />
+              </Form.Item>
+            </>
           )}
         </Form.Item>
         <Form.Item name="status" label={t('masters.status')}>
@@ -958,6 +995,7 @@ export function MastersPage(): React.JSX.Element {
         key={detailId ?? 'closed'}
         open={detailOpen}
         width={760}
+        destroyOnHidden
         title={
           m ? (
             <span dir="auto">{t('masters.detailTitle', { name: m.name })}</span>
@@ -1040,12 +1078,14 @@ export function MastersPage(): React.JSX.Element {
                 children: (
                   <ModulesTab
                     masterId={detailId}
+                    academicYearId={m.academic_year_id}
                     groups={detail.groups}
                     rows={detail.modules}
                     refs={{
                       modules: refModules,
                       professors: refProfessors,
                       semesters: context.semesters,
+                      academicYears: context.academicYears,
                     }}
                     onChanged={() => void reloadDetail(detailId)}
                   />

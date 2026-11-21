@@ -344,6 +344,16 @@ export interface MasterModuleInput {
   distribution_rule?: string | null;
 }
 
+/**
+ * Lien séance ↔ groupe (migration 0005) : séances partagées multi-groupes.
+ * Rempli par la génération/édition (Phase 7+) — exposé pour les contrats
+ * futurs (édition de séance, comptage d'occupation).
+ */
+export interface SessionGroup {
+  session_id: number;
+  student_group_id: number;
+}
+
 /** Séance d'un master (onglet « Séances » de la fiche). */
 export interface MasterSession extends ImpactedSession {
   professor_name: string;

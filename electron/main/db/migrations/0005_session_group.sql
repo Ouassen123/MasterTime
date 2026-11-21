@@ -8,7 +8,3 @@ CREATE TABLE session_group (
   PRIMARY KEY (session_id, student_group_id));
 
 CREATE INDEX ix_sg_group ON session_group(student_group_id);
-
--- Index de performance pour les compteurs corrélés du service Masters
--- (même pattern que 0002) : nb_modules / nb_seances / fiche par master.
-CREATE INDEX ix_master_module_master ON master_module(master_id);

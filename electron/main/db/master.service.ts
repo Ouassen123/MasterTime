@@ -60,7 +60,10 @@ const MASTER_LIST_SELECT = `
              WHERE mm5.master_id = m.id)
         + (SELECT count(*) FROM student st
              JOIN student_group g3 ON g3.id = st.student_group_id
-             WHERE g3.master_id = m.id) AS linkedCount
+             WHERE g3.master_id = m.id)
+        + (SELECT count(*) FROM session_group sg
+             JOIN student_group g4 ON g4.id = sg.student_group_id
+             WHERE g4.master_id = m.id) AS linkedCount
     FROM master m
     JOIN academic_year y ON y.id = m.academic_year_id
     LEFT JOIN semester sem ON sem.id = m.semester_id`;
@@ -81,7 +84,9 @@ export function listMasters(
     clauses.push('m.status = ?');
     params.push(status);
   }
-  const q = filter?.search?.trim();
+  // Payload forgé : un search non-string est ignoré, jamais de TypeError.
+  const q =
+    typeof filter?.search === 'string' ? filter.search.trim() : '';
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     clauses.push(
@@ -540,8 +545,12 @@ export function addGroup(
   masterId: number,
   input: GroupInput,
 ): ApiResult<StudentGroupRow> {
-  if (!getMasterRow(db, masterId)) {
+  const master = getMasterRow(db, masterId);
+  if (!master) {
     return apiErr('Master introuvable.');
+  }
+  if (isArchived(master)) {
+    return apiErr(MASTER_ARCHIVED[0].message, MASTER_ARCHIVED);
   }
   const errors = validateGroup(db, masterId, input, null);
   if (errors.length > 0) {
@@ -561,6 +570,22 @@ export function addGroup(
   return apiOk(getGroupRow(db, id!)!);
 }
 
+/**
+ * Master gelé (ARCHIVE) : les mutations groupes / master-modules sont
+ * refusées — l'archivage gèle le référentiel (réversible via setStatus).
+ */
+const MASTER_ARCHIVED: FieldError[] = [
+  {
+    field: 'status',
+    message:
+      'Ce master est archivé : réactivez-le avant toute modification.',
+  },
+];
+
+function isArchived(master: MasterRow | undefined): boolean {
+  return master?.status === 'ARCHIVE';
+}
+
 export function renameGroup(
   db: DatabaseSync,
   userId: number | null,
@@ -571,6 +596,9 @@ export function renameGroup(
   if (!group) {
     return apiErr('Groupe introuvable.');
   }
+  if (isArchived(getMasterRow(db, group.master_id))) {
+    return apiErr(MASTER_ARCHIVED[0].message, MASTER_ARCHIVED);
+  }
   const errors = validateGroup(db, group.master_id, input, id);
   if (errors.length > 0) {
     return apiErr('Validation impossible : corrigez les champs signalés.', errors);
@@ -578,8 +606,8 @@ export function renameGroup(
   withAudit(db, userId, 'UPDATE', 'student_group', id, () => {
     run(
       db,
-      `UPDATE student_group SET name = ?,
-         size = COALESCE(?, size) WHERE id = ?`,
+      // size : NULL explicite efface l'effectif déclaré (pas de COALESCE).
+      'UPDATE student_group SET name = ?, size = ? WHERE id = ?',
       input.name.trim(),
       input.size ?? null,
       id,
@@ -600,6 +628,13 @@ export function removeGroup(
   const group = getGroupRow(db, id);
   if (!group) {
     return { ok: false, error: 'Groupe introuvable.' };
+  }
+  if (isArchived(getMasterRow(db, group.master_id))) {
+    return {
+      ok: false,
+      error: MASTER_ARCHIVED[0].message,
+      fields: MASTER_ARCHIVED,
+    };
   }
   if (group.linkedCount > 0) {
     return {
@@ -629,7 +664,7 @@ function refExists(
 
 function validateMasterModule(
   db: DatabaseSync,
-  masterId: number,
+  master: MasterRow,
   input: MasterModuleInput,
 ): FieldError[] {
   const errors: FieldError[] = [];
@@ -643,8 +678,22 @@ function validateMasterModule(
       field: 'semester_id',
       message: 'Le semestre est obligatoire.',
     });
-  } else if (!refExists(db, 'semester', input.semester_id)) {
-    errors.push({ field: 'semester_id', message: 'Semestre inexistant.' });
+  } else {
+    const sem = get<{ academic_year_id: number }>(
+      db,
+      'SELECT academic_year_id FROM semester WHERE id = ?',
+      input.semester_id,
+    );
+    if (!sem) {
+      errors.push({ field: 'semester_id', message: 'Semestre inexistant.' });
+    } else if (sem.academic_year_id !== master.academic_year_id) {
+      // Même contrôle que validateMaster : le semestre doit appartenir
+      // à l'année universitaire du master.
+      errors.push({
+        field: 'semester_id',
+        message: "Ce semestre n'appartient pas à l'année du master.",
+      });
+    }
   }
   if (!Number.isInteger(input.professor_id) || input.professor_id <= 0) {
     errors.push({
@@ -664,7 +713,7 @@ function validateMasterModule(
       errors.push({ field: 'student_group_id', message: 'Groupe invalide.' });
     } else if (!g) {
       errors.push({ field: 'student_group_id', message: 'Groupe inexistant.' });
-    } else if (g.master_id !== masterId) {
+    } else if (g.master_id !== master.id) {
       errors.push({
         field: 'student_group_id',
         message: "Ce groupe n'appartient pas à ce master.",
@@ -721,12 +770,23 @@ function validateMasterModule(
         message: 'Règle de répartition invalide.',
       });
     } else if (input.distribution_rule.trim() !== '') {
+      // JSON « libre » mais nécessairement un objet (règles/prefs nommées)
+      // — '42', '"x"' ou 'null' ne sont pas des règles exploitables.
+      let parsed: unknown;
       try {
-        JSON.parse(input.distribution_rule);
+        parsed = JSON.parse(input.distribution_rule);
       } catch {
+        parsed = undefined;
+      }
+      if (
+        parsed === undefined ||
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed)
+      ) {
         errors.push({
           field: 'distribution_rule',
-          message: 'La règle de répartition doit être un JSON valide.',
+          message: 'La règle de répartition doit être un objet JSON valide.',
         });
       }
     }
@@ -735,7 +795,9 @@ function validateMasterModule(
 }
 
 function isConstraintViolation(err: unknown): boolean {
-  return err instanceof Error && /constraint/i.test(err.message);
+  // Seule l'unicité signale un doublon métier (ux_master_module) — une
+  // violation FK/CHECK inattendue doit remonter en erreur interne.
+  return err instanceof Error && /unique/i.test(err.message);
 }
 
 const DUPLICATE_MM_FIELDS: FieldError[] = [
@@ -752,10 +814,14 @@ export function attachModule(
   masterId: number,
   input: MasterModuleInput,
 ): ApiResult<MasterModuleRow> {
-  if (!getMasterRow(db, masterId)) {
+  const master = getMasterRow(db, masterId);
+  if (!master) {
     return apiErr('Master introuvable.');
   }
-  const errors = validateMasterModule(db, masterId, input);
+  if (isArchived(master)) {
+    return apiErr(MASTER_ARCHIVED[0].message, MASTER_ARCHIVED);
+  }
+  const errors = validateMasterModule(db, master, input);
   if (errors.length > 0) {
     return apiErr('Validation impossible : corrigez les champs signalés.', errors);
   }
@@ -808,7 +874,11 @@ export function updateMasterModule(
   if (!existing) {
     return apiErr('Master-module introuvable.');
   }
-  const errors = validateMasterModule(db, existing.master_id, input);
+  const master = getMasterRow(db, existing.master_id);
+  if (isArchived(master)) {
+    return apiErr(MASTER_ARCHIVED[0].message, MASTER_ARCHIVED);
+  }
+  const errors = validateMasterModule(db, master!, input);
   if (errors.length > 0) {
     return apiErr('Validation impossible : corrigez les champs signalés.', errors);
   }
@@ -859,6 +929,13 @@ export function detachModule(
   const mm = getMasterModuleRow(db, id);
   if (!mm) {
     return { ok: false, error: 'Master-module introuvable.' };
+  }
+  if (isArchived(getMasterRow(db, mm.master_id))) {
+    return {
+      ok: false,
+      error: MASTER_ARCHIVED[0].message,
+      fields: MASTER_ARCHIVED,
+    };
   }
   if (mm.session_count > 0) {
     return {

@@ -233,7 +233,8 @@
     "removeTitle": "Supprimer le groupe",
     "removeConfirm": "Supprimer le groupe « {{name}} » ? Aucune donnée ne le référence.",
     "empty": "Aucun groupe",
-    "wholeMaster": "Master entier"
+    "wholeMaster": "Master entier",
+    "linked": "Donnée(s) liée(s)"
   },
   "masterModules": {
     "attach": "Rattacher un module",
@@ -255,7 +256,8 @@
     "schedStart": "Début",
     "schedEnd": "Fin",
     "period": "Période",
-    "empty": "Aucun module rattaché"
+    "empty": "Aucun module rattaché",
+    "inactiveSuffix": "(désactivé)"
   },
   "placeholder": {
     "title": "Fonctionnalité à venir",

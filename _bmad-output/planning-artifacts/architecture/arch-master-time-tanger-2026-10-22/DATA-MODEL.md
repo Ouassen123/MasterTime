@@ -195,10 +195,15 @@ CREATE INDEX ix_audit_at             ON audit_log(at);
 -- ajoutés en migration 0002 (compteurs corrélés des référentiels)
 CREATE INDEX ix_session_room         ON session(room_id);
 CREATE INDEX ix_master_module_module ON master_module(module_id);
--- ajoutés en migration 0005 (P6c : session_group + compteurs du service Masters)
+-- ajouté en migration 0003 (occupations externes par salle/jour)
+CREATE INDEX ix_ext_occ_room         ON external_occupancy(room_id, weekday, start_min);
+-- ajouté en migration 0005 (P6c : session_group)
 CREATE INDEX ix_sg_group             ON session_group(student_group_id);
-CREATE INDEX ix_master_module_master ON master_module(master_id);
 ```
+
+> Total : **15 index** hors `sqlite_*` (11 en 0001, 2 en 0002, 1 en 0003,
+> 1 en 0005). Pas d'`ix_master_module_master` : `master_id` est déjà
+> préfixe de `ux_master_module`.
 
 ## Points d'intégrité notables
 
