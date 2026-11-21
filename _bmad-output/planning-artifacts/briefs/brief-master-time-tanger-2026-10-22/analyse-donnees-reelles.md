@@ -94,3 +94,49 @@ Ces cas réels seront de **parfaits jeux de test** pour le détecteur de conflit
 
 - `pdf-extract/*.txt` — texte extrait des 14 PDF (source analysée)
 - `sessions-s3-2026.csv` — 98 séances normalisées (master, module, prof, jour, début, fin, salle) — prête pour tester l'import
+
+---
+
+# Annexe — Analyse Licences (occupation des salles, 21/11/2026)
+
+## A. Corpus
+
+24 EDT **Licence** récupérés depuis `a.fsjest.ma` (script utilisateur, dossier `scipt/` — mal classés `02_Master`, **ce sont des Licences** : tronc commun S1/S3 + filières S5, arabe + français, groupes A–D). 168 séances normalisées → `occupation-licence-2026.csv`.
+
+Structure Licence : S1/S3 tronc commun droit privé (4 groupes) + droit public (1–2 groupes) — cours en **amphis** ; S5 filières (5 ar, 4 fr) — mix amphis/salles. **Les EDT Licence S2/S4/S6 (semestre pair) n'existent pas encore** (session d'automne seule) — occupation semestre pair à redemander plus tard.
+
+## B. Détection mécanique : 43 collisions de salle sur 265 séances
+
+Après déduplication des **séances partagées multi-groupes** (même prof+module+créneau listé dans plusieurs groupes — ex. Anglais بوشتى العبوبي pour 3 filières S5 en même amphi) :
+
+### Conflits RÉELS Master↔Licence (12)
+| Jour | Créneau | Salle | Licence | Master |
+|---|---|---|---|---|
+| Lun | 10–12 | Salle 7 | S1 fr (droits privé+public, partagée) | القانون المقارن — منازعات الأعمال |
+| Lun | 12–14 | Salle 5 | S5 ETAF fr | القانون المقارن — قانون التجارة الدولية |
+| Lun | 14–16 | Salle 7 | S3 public fr — Droit social | المدني — القضاء التجاري |
+| Mar | 14–16 | Salle 7 | **S5 siyasia + S5 ETAF fr (triple)** | العقار — الرقمنة |
+| Mar | 16–18 | Salle 2 | S5 EPI fr | السياسة الجنائية — الأنماط الحديثة |
+| Mer | 10–12 | Salle 1 | S1 public ar — تاريخ الوقائع | المهن — المسطرة الجنائية |
+| Mer | 12–14 | Salle 6 | S1 privé fr — Intro économie | السياسة الجنائية — الخدمة الاجتماعية |
+| Jeu | 10–12 | Salle 2 | S5 siyasia — قانون دولي إنساني | القانون المقارن — اقتصاد التنمية |
+| Jeu | 12–14 | Salle 7 | S5 MJ fr — droit maritime | الإداري — الاستراتيجيات المحلية |
+| Jeu | 16–18 | Salle 8 | S5 EPI fr — analyse politique | **العدالة الرقمية + المساطر (triple)** |
+| Ven | 10–12 | Salle 6 | S5 siyasia — المنظمات الدولية | المهن — المهن المساعدة للقضاء |
+| Ven | 14–16 | Salle 6 | S5 EPI fr — droit parlementaire | الاستثمار — قانون الشغل |
+
+### Conflits RÉELS Master↔Master (6 — incl. les 3 déjà signalés)
+C1 Sam 12–14 S6 (مدني/سياسة) · C2 Jeu 16–18 S8 (عدالة/مساطر) · C3 Jeu 16–18 S1 (عقدية ×2) · **C4 Mer 10–12 S7 (عقار/منازعات)** · **C5 Jeu 12–14 S5 (عقار/مقارن)** · **C6 Mar 16–18 S6 (استثمار/تجارة)**
+
+### Conflits Licence↔Licence non partagés (~4)
+Amphi 6 Lun 14–16 (S1C privé vs anglais S5 partagé ×3) · Amphi 2 Lun 16–18 (anglais S5 partagé vs français S3fr partagé) · Salle 6 Jeu 14–16 · Salle 7 Jeu 10–12
+
+### Doublons « partagés » confirmés (6 cas)
+Anglais S5 (3 fil., même prof) · sociologie S1 A+B · droit musulman S1fr · droit famille S3fr · français S3fr · contrats/écologie S5fr — **modèle : `session` ↔ `student_group` en N-N** (1 séance peut réunir plusieurs groupes) ; dédup à l'import = prof+module+créneau+salle identiques → groupes fusionnés.
+
+## C. Conséquences
+
+1. **BR-25 (external_occupancy) validée et chiffrée** : les 168 séances Licence sont la baseline d'occupation ; le moteur ne peut placer un Master que sur les **trous** restants.
+2. **Les PDF officiels se contredisent** — l'import devra signaler les collisions et demander arbitrage humain (cohérent avec BR-12/FR-import).
+3. **Disponibilité réelle** : amphis quasi saturés en semaine par la Licence → les Masters vont naturellement vers les salles + samedi/amphis soirs (16–18). Samedi après-midi et vendredi sont déjà denses.
+4. **Salle 9 confirmée** (7 usages licence FR + masters) mais absente de la liste officielle → inventaire à revalider.

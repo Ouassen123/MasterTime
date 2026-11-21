@@ -1,0 +1,169 @@
+programme;groupe;module;professeur;jour;debut;fin;salle;source
+Licence S1 droit privé;A;مدخل لدراسة القانون;آيت الحاج مرزوق;mardi;14:00;16:00;المدرج 3;S1-A-2.pdf
+Licence S1 droit privé;A;المدخل لدراسة الشريعة;البغيل عبد اللطيف;mardi;12:00;14:00;المدرج 6;S1-A-2.pdf
+Licence S1 droit privé;A;المدخل لعلم الاجتماع القانوني;خالد بنتركي;lundi;16:00;18:00;المدرج 6;S1-A-2.pdf
+Licence S1 droit privé;A;النظرية العامة للقانون الدستوري;يحيا محمد;mardi;10:00;12:00;المدرج 3;S1-A-2.pdf
+Licence S1 droit privé;A;مدخل إلى علم السياسة;جعفر بنموسي;lundi;12:00;14:00;المدرج 6;S1-A-2.pdf
+Licence S1 droit privé;A;المدخل للاقتصاد والتدبير;عبد السلام لزرق;mercredi;10:00;12:00;المدرج 2;S1-A-2.pdf
+Licence S1 droit privé;A;منهجية العمل الجامعي;عبد الله أشركي;samedi;09:00;11:00;المدرج 5;S1-A-2.pdf
+Licence S1 droit privé;B;مدخل لدراسة القانون;آيت الحاج مرزوق;mardi;16:00;18:00;المدرج 3;S1-B.pdf
+Licence S1 droit privé;B;المدخل لدراسة الشريعة;البغيل عبد اللطيف;mercredi;12:00;14:00;المدرج 6;S1-B.pdf
+Licence S1 droit privé;B;المدخل لعلم الاجتماع القانوني;خالد بنتركي;lundi;16:00;18:00;المدرج 6;S1-B.pdf
+Licence S1 droit privé;B;النظرية العامة للقانون الدستوري;يحيا محمد;mardi;08:00;10:00;المدرج 3;S1-B.pdf
+Licence S1 droit privé;B;مدخل إلى علم السياسة;جعفر بنموسي;lundi;10:00;12:00;المدرج 6;S1-B.pdf
+Licence S1 droit privé;B;المدخل للاقتصاد والتدبير;الحسناوي التقال محمد;mercredi;08:00;10:00;المدرج 3;S1-B.pdf
+Licence S1 droit privé;B;منهجية العمل الجامعي;عبد الله أشركي;samedi;11:00;13:00;المدرج 5;S1-B.pdf
+Licence S1 droit privé;C;مدخل لدراسة القانون;لطيفة بنخير;mercredi;08:00;10:00;المدرج 5;S1-C.pdf
+Licence S1 droit privé;C;مدخل لدراسة الشريعة;أحمد الجباري;mercredi;10:00;12:00;المدرج 5;S1-C.pdf
+Licence S1 droit privé;C;مدخل الى علم الاجتماع القانوني;خالد بنتركي;lundi;14:00;16:00;المدرج 6;S1-C.pdf
+Licence S1 droit privé;C;النظرية العامة للقانون الدستوري;الحسن جماعي;mardi;10:00;12:00;المدرج 2;S1-C.pdf
+Licence S1 droit privé;C;مدخل إلى علم السياسة;اشحشاح نور الدين;jeudi;16:00;18:00;المدرج 5;S1-C.pdf
+Licence S1 droit privé;C;المدخل للاقتصاد والتدبير;عبد الرحمن الصديقي;lundi;08:00;10:00;المدرج 3;S1-C.pdf
+Licence S1 droit privé;C;منهجية العمل الجامعي;المصطفى الغشام الشعيبي;jeudi;10:00;12:00;المدرج 3;S1-C.pdf
+Licence S1 droit privé;D;مدخل لدراسة القانون;لطيفة بنخير;mercredi;10:00;12:00;المدرج 3;S1-D-2.pdf
+Licence S1 droit privé;D;مدخل لدراسة الشريعة;أحمد الجباري;mercredi;12:00;14:00;المدرج 5;S1-D-2.pdf
+Licence S1 droit privé;D;مدخل الى علم الاجتماع القانوني;هند الوهابي;vendredi;10:00;12:00;المدرج 1;S1-D-2.pdf
+Licence S1 droit privé;D;النظرية العامة للقانون الدستوري;الحسن الجماعي;mardi;12:00;14:00;المدرج 2;S1-D-2.pdf
+Licence S1 droit privé;D;مدخل إلى علم السياسة;اشحشاح نور الدين;jeudi;14:00;16:00;المدرج 5;S1-D-2.pdf
+Licence S1 droit privé;D;المدخل للاقتصاد والتدبير;عبد الرحمن الصديقي;lundi;10:00;12:00;المدرج 5;S1-D-2.pdf
+Licence S1 droit privé;D;منهجية العمل الجامعي;المليحي عبد الحميد;mercredi;14:00;16:00;المدرج 4;S1-D-2.pdf
+Licence S1 droit public;A;المدخل لدراسة القانون;لبنى الغومرتي;lundi;12:00;14:00;المدرج 5;S1-DRP-A-1.pdf
+Licence S1 droit public;A;مدخل لدراسة الشريعة;الكلعي عبد اللطيف;samedi;12:00;14:00;المدرج 2;S1-DRP-A-1.pdf
+Licence S1 droit public;A;النظرية العامة للقانون الدستوري;اشحشاح نور الدين;jeudi;12:00;14:00;المدرج 5;S1-DRP-A-1.pdf
+Licence S1 droit public;A;المدخل إلى علم السياسة;الحسن جماعي;lundi;10:00;12:00;المدرج 2;S1-DRP-A-1.pdf
+Licence S1 droit public;A;مدخل لدراسة الاقتصاد والتدبير;عبد السلام الأزرق;mardi;10:00;12:00;المدرج 4;S1-DRP-A-1.pdf
+Licence S1 droit public;A;منهجية العمل الجامعي;نسرين بوخيزو;mercredi;14:00;16:00;المدرج 3;S1-DRP-A-1.pdf
+Licence S1 droit public;A;تاريخ الوقائع والمؤسسات الاجتماعية;أسماء الشطيبي;mercredi;10:00;12:00;القاعة 1;S1-DRP-A-1.pdf
+Licence S1 droit public;B;المدخل لدراسة القانون;هند الوهابي;lundi;12:00;14:00;المدرج 3;S1-DRP-B-1.pdf
+Licence S1 droit public;B;مدخل لدراسة الشريعة;عبد اللطيف البغيل;mercredi;10:00;12:00;المدرج 1;S1-DRP-B-1.pdf
+Licence S1 droit public;B;النظرية العامة للقانون الدستوري;اشحشاح نور الدين;jeudi;08:00;10:00;المدرج 6;S1-DRP-B-1.pdf
+Licence S1 droit public;B;المدخل إلى علم السياسة;الحسن جماعي;lundi;08:00;10:00;المدرج 2;S1-DRP-B-1.pdf
+Licence S1 droit public;B;مدخل لدراسة الاقتصاد والتدبير;عبد السلام الأزرق;mardi;12:00;14:00;المدرج 5;S1-DRP-B-1.pdf
+Licence S1 droit public;B;منهجية العمل الجامعي;سهام السهولي;mercredi;12:00;14:00;القاعة 4;S1-DRP-B-1.pdf
+Licence S1 droit public;B;تاريخ الوقائع والمؤسسات الاجتماعية;المهدي السرسار;mardi;14:00;16:00;المدرج 6;S1-DRP-B-1.pdf
+Licence S3 droit privé;A;قانون الأسرة;خالد بنتركي;mardi;16:00;18:00;المدرج 6;S3-A.pdf
+Licence S3 droit privé;A;المالية العامة;الموساوي رشيد;vendredi;08:00;10:00;المدرج 5;S3-A.pdf
+Licence S3 droit privé;A;القانون الاجتماعي;جميلة العماري;mercredi;16:00;18:00;المدرج 5;S3-A.pdf
+Licence S3 droit privé;A;القانون الجنائي الخاص;سعاد حميدي;lundi;14:00;16:00;المدرج 3;S3-A.pdf
+Licence S3 droit privé;A;النشاط الإداري;ادريس جردان;mardi;12:00;14:00;المدرج 1;S3-A.pdf
+Licence S3 droit privé;A;المسؤولية المدنية;مرزوق آيت الحاج;jeudi;14:00;16:00;المدرج 4;S3-A.pdf
+Licence S3 droit privé;A;اللغة الفرنسية;إيمان جلول;mercredi;12:00;14:00;المدرج 3;S3-A.pdf
+Licence S3 droit privé;B;قانون الأسرة;خالد بنتركي;mardi;14:00;16:00;المدرج 1;S3-B.pdf
+Licence S3 droit privé;B;المالية العامة;الموساوي رشيد;vendredi;10:00;12:00;المدرج 5;S3-B.pdf
+Licence S3 droit privé;B;القانون الاجتماعي;عبد الله اشركي;vendredi;16:00;18:00;المدرج 5;S3-B.pdf
+Licence S3 droit privé;B;القانون الجنائي الخاص;هشام بوحوص;lundi;15:00;17:00;المدرج 5;S3-B.pdf
+Licence S3 droit privé;B;النشاط الإداري;ادريس جردان;lundi;12:00;14:00;المدرج 1;S3-B.pdf
+Licence S3 droit privé;B;المسؤولية المدنية;مرزوق آيت الحاج;jeudi;16:00;18:00;المدرج 4;S3-B.pdf
+Licence S3 droit privé;B;اللغة الفرنسية;إيمان جلول;mercredi;14:00;16:00;المدرج 2;S3-B.pdf
+Licence S3 droit privé;C;قانون الأسرة;عائشة برشان;mercredi;08:00;10:00;المدرج 2;S3-C.pdf
+Licence S3 droit privé;C;المالية العامة;حميد النهري;mercredi;14:00;16:00;المدرج 6;S3-C.pdf
+Licence S3 droit privé;C;القانون الاجتماعي;أمال الحرفوش;jeudi;12:00;14:00;المدرج 3;S3-C.pdf
+Licence S3 droit privé;C;القانون الجنائي الخاص;عدنان عبد الصمد;vendredi;14:00;16:00;المدرج 2;S3-C.pdf
+Licence S3 droit privé;C;النشاط الإداري;إدريس جردان;lundi;10:00;12:00;المدرج 3;S3-C.pdf
+Licence S3 droit privé;C;المسؤولية المدنية;لبنى الغومرتي;lundi;14:00;16:00;المدرج 4;S3-C.pdf
+Licence S3 droit privé;C;اللغة الفرنسية;إيمان جلول;mercredi;16:00;18:00;المدرج 3;S3-C.pdf
+Licence S3 droit privé;D;قانون الأسرة;نائلة الحليمي;jeudi;10:00;12:00;المدرج 6;S3-D.pdf
+Licence S3 droit privé;D;المالية العامة;حميد النهري;mercredi;16:00;18:00;المدرج 6;S3-D.pdf
+Licence S3 droit privé;D;القانون الاجتماعي;عائشة برشان;vendredi;08:30;10:00;المدرج 4;S3-D.pdf
+Licence S3 droit privé;D;القانون الجنائي الخاص;أويس السيمو;mardi;12:00;14:00;المدرج 4;S3-D.pdf
+Licence S3 droit privé;D;النشاط الإداري;إكرام اشحيمة;mardi;10:00;12:00;المدرج 1;S3-D.pdf
+Licence S3 droit privé;D;المسؤولية المدنية;مريم الطاشي;mercredi;12:00;14:00;المدرج 4;S3-D.pdf
+Licence S3 droit privé;D;اللغة الفرنسية;فاطمة الزهراء الحمري;jeudi;14:00;16:00;المدرج 3;S3-D.pdf
+Licence S3 droit public;unique;قانون الأسرة;نائلة الحليمي;jeudi;12:00;14:00;المدرج 1;S3-DRP.pdf
+Licence S3 droit public;unique;المالية العامة;الموساوي رشيد;mercredi;12:00;14:00;المدرج 1;S3-DRP.pdf
+Licence S3 droit public;unique;القانون الاجتماعي;جميلة العماري;mercredi;14:00;16:00;المدرج 5;S3-DRP.pdf
+Licence S3 droit public;unique;القانون الجنائي الخاص;هند الوهابي;mardi;10:00;12:00;المدرج 6;S3-DRP.pdf
+Licence S3 droit public;unique;النشاط الإداري;ادريس جردان;lundi;10:00;12:00;المدرج 1;S3-DRP.pdf
+Licence S3 droit public;unique;قانون البيئة;مولود السباعي;mercredi;10:00;12:00;المدرج 6;S3-DRP.pdf
+Licence S3 droit public;unique;اللغة الفرنسية;فاطمة الزهراء الحمري;jeudi;10:00;12:00;المدرج 5;S3-DRP.pdf
+Licence S5 études administratives et financières (ar);unique;الصفقات العمومية;توفيق السعيد;lundi;10:00;12:00;القاعة 1;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;حكامة المرافق العمومية;محمد العمراني بوخبزة;mardi;08:00;10:00;المدرج 4;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;المالية المحلية;صباح ياسين;mardi;10:00;12:00;القاعة 2;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;الحكامة الترابية;محمد الحسناوي;mercredi;12:00;14:00;القاعة 2;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;القانون الضريبي;حميد النهري;vendredi;14:00;16:00;المدرج 4;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;اللغة الإنجليزية;بوشتى العبوبي;lundi;14:00;16:00;المدرج 6;S5-idaria.pdf
+Licence S5 études administratives et financières (ar);unique;المؤسسات المالية الدولية;الصدقي عادل;mercredi;10:00;12:00;القاعة 2;S5-idaria.pdf
+Licence S5 finance et affaires (ar);unique;وسائل الأداء والإئتمان;لطيفة بنخير;lundi;10:00;12:00;المدرج 4;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;قانون الرقمنة والذكاء الاصطناعي;أمين أعزان;mercredi;08:00;10:00;المدرج 6;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;قانون التأمين;عمر الحواشي;mardi;16:00;18:00;المدرج 5;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;اللغة الإنجليزية;بوشتى العبوبي;lundi;14:00;16:00;المدرج 6;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;صعوبات المقاولة;نهال اللواح;jeudi;12:00;14:00;المدرج 4;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;الوسائل البديلة لتسوية المنازعات;إيمان الصروخ;vendredi;10:00;12:00;المدرج 3;S5-mal.pdf
+Licence S5 finance et affaires (ar);unique;القانون البحري;المصطفى الغشام الشعيبي;samedi;10:00;12:00;المدرج 3;S5-mal.pdf
+Licence S5 métiers du droit (ar);A;القانون الدولي الخاص;عبد الله أشركي;vendredi;14:00;16:00;المدرج 3;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;الحقوق العينية;آمال الحرفوش;mardi;12:00;14:00;المدرج 3;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;مساعدوا العدالة;وداد العيدوني;mardi;14:00;16:00;المدرج 2;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;قانون الرقمنة والذكاء الاصطناعي;محمد حامي الدين;jeudi;10:00;12:00;المدرج 2;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;اللغة الإنجليزية;بوشتى العبوبي;lundi;16:00;18:00;المدرج 2;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;الوسائل البديلة لتسوية المنازعات;نهال اللواح;mercredi;12:00;14:00;المدرج 2;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);A;قانون المواريث والحقوق المالية;مرزوق آيت الحاج;jeudi;12:00;14:00;المدرج 2;S5-mihan-A.pdf
+Licence S5 métiers du droit (ar);B;القانون الدولي الخاص;عبد الله أشركي;vendredi;10:00;12:00;المدرج 4;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;الحقوق العينية;محمد حامي الدين;jeudi;12:00;14:00;المدرج 6;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;مساعدوا العدالة;عبد اللطيف الكلعي;samedi;10:00;12:00;المدرج 2;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;قانون الرقمنة والذكاء الاصطناعي;لبنى الغومرتي;jeudi;14:00;16:00;المدرج 6;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;اللغة الإنجليزية;بوشتى العبوبي;lundi;16:00;18:00;المدرج 2;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;الوسائل البديلة لتسوية المنازعات;إيمان الصروخ;mercredi;14:00;16:00;المدرج 1;S5-mihan-B.pdf
+Licence S5 métiers du droit (ar);B;قانون المواريث والحقوق المالية;أحمد الجباري;mardi;14:00;16:00;المدرج 4;S5-mihan-B.pdf
+Licence S5 études politiques et internationales (ar);unique;علم الاجتماع السياسي;خالد مساوي;mardi;14:00;16:00;القاعة 7;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;القانون البرلماني;مولود السباعي;mardi;10:00;12:00;القاعة 7;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;نظريات العلاقات الدولية;مونية الشتوكي;jeudi;14:00;16:00;القاعة 6;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;قانون المنظمات الدولية;سهام السهولي;vendredi;10:00;12:00;القاعة 6;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;التحليل السياسي;مونشيح محمد;mercredi;12:00;14:00;القاعة 5;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;اللغة الإنجليزية;بوشتى العبوبي;lundi;14:00;16:00;المدرج 6;S5-siyasia.pdf
+Licence S5 études politiques et internationales (ar);unique;القانون الدولي الإنساني;محمد غربي;jeudi;10:00;12:00;القاعة 2;S5-siyasia.pdf
+Licence S1 droit privé (fr);unique;Introduction à l'économie et à gestion;el kharraz;mercredi;12:00;14:00;Salle 6;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;théorie générale du droit constitutionnel;Naimi;mardi;08:00;10:00;Salle 6;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;sociologie du droit;masrar;mardi;10:00;12:00;Salle 8;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;Introduction à l'étude du droit musulman (et francophones);merbouh;jeudi;08:00;10:00;Salle 7;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;Introduction à l'étude de droit;ouariaghly;mercredi;10:00;12:00;Salle 8;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;méthodologie de travail universitaire;moujahid;jeudi;16:00;18:00;Salle 6;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;Introduction à la science politique;el boughari;jeudi;14:00;16:00;Salle 6;DR-Prv-S1-3.pdf
+Licence S1 droit privé (fr);unique;Introduction à l'étude du droit musulman;ouais;lundi;10:00;12:00;Salle 7;DR-Prv-S1-3.pdf
+Licence S1 droit public (fr);unique;Introduction à l'économie et à gestion;jami;jeudi;08:00;10:00;Salle 5;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;théorie générale du droit constitutionnel;naimi;mercredi;08:00;10:00;Salle 1;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;Histoires des faits et des institutions sociales;alaoua mohamed;vendredi;14:00;16:00;Salle 8;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;Introduction à l'étude du droit musulman (et francophones);Merbouh;jeudi;10:00;12:00;Salle 7;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;Introduction à l'étude de droit;sabri;mercredi;14:00;16:00;Salle 7;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;méthodologie de travail universitaire;marini sara;vendredi;16:00;18:00;Salle 5;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;Introduction à la science politique;el boughari;jeudi;16:00;18:00;Salle 7;DR-PU-S1-3.pdf
+Licence S1 droit public (fr);unique;Introduction à l'étude du droit musulman;ouais;lundi;10:00;12:00;Salle 7;DR-PU-S1-3.pdf
+Licence S3 droit privé (fr);unique;Droit social;k. boukaich;lundi;12:00;14:00;Salle 7;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;Finances publiques;sabri;lundi;10:00;12:00;Salle 9;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;Responsabilité civile;khamal hind;mardi;14:00;16:00;Salle 5;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;Droit de la famille;Adil rajaa;jeudi;10:00;12:00;Salle 9;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;L'action administrative;cheddadi;mercredi;12:00;14:00;Salle 9;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;Droit pénal spécial;moujahid;jeudi;14:00;16:00;Salle 8;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;Droit de la famille;simou ouais;mardi;10:00;12:00;Salle 9;DR-Prv-S3.pdf
+Licence S3 droit privé (fr);unique;français;khamal hind;lundi;16:00;18:00;Amphi 2;DR-Prv-S3.pdf
+Licence S3 droit public (fr);unique;Droit social;K. boukaich;lundi;14:00;16:00;Salle 7;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;Finances publiques;Sabri;lundi;12:00;14:00;Salle 8;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;Droit de l'environnement;Karzazi mohcine;vendredi;09:00;12:00;Salle 8;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;Droit pénal spécial;Essarsar;mercredi;12:00;14:00;Salle 8;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;L'action administrative;EL cheddadi;jeudi;10:00;12:00;Salle 8;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;droit de la famille;ADIL RAJAA;jeudi;12:00;14:00;Salle 8;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;droit de la famille;Simou ouaiss;mardi;10:00;12:00;Salle 9;DR-PU-S3.pdf
+Licence S3 droit public (fr);unique;français;khamal hind;lundi;16:00;18:00;Amphi 2;DR-PU-S3.pdf
+Licence S5 droit financier et des affaires (fr);unique;Droit des assurances;khalid boukaich;lundi;16:00;18:00;Salle 4;E.DA-FR-S5.pdf
+Licence S5 droit financier et des affaires (fr);unique;instruments de paiements;lyazami nahid;mardi;10:00;12:00;Salle 6;E.DA-FR-S5.pdf
+Licence S5 droit financier et des affaires (fr);unique;introduction generative;kadi ilham;mardi;12:00;14:00;Salle 6;E.DA-FR-S5.pdf
+Licence S5 droit financier et des affaires (fr);unique;contrats nommes et bancaires;F. alaoui;mercredi;12:00;14:00;Salle 1;E.DA-FR-S5.pdf
+Licence S5 droit financier et des affaires (fr);unique;droit des entreprises en difficultes;lyazami nahid;jeudi;10:00;12:00;Salle 7;E.DA-FR-S5.pdf
+Licence S5 droit financier et des affaires (fr);unique;droit maritime;k. merbouh;jeudi;14:00;16:00;Salle 7;E.DA-FR-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;les institutions économiques internationales;M. essarsar;mardi;16:00;18:00;Salle 2;E.P.I-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;analyse politique;S.yasser;jeudi;16:00;18:00;Salle 8;E.P.I-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;théories des relations internationales;latmani;mercredi;16:00;18:00;Salle 2;E.P.I-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;droit des organisations internationales;elhoudaigui;vendredi;10:00;12:00;Salle 7;E.P.I-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;droit parlementaire;S.yasser;vendredi;14:00;16:00;Salle 6;E.P.I-S5.pdf
+Licence S5 études politiques et internationales (fr);unique;sociologie politique;alaoua mohamed;vendredi;16:00;18:00;Salle 9;E.P.I-S5.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;Droit réel;rim cherkaoui;lundi;10:00;12:00;Salle 4;M.J-FR-S5-2.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;droit international privé;rim cherkaoui;lundi;12:00;14:00;Salle 4;M.J-FR-S5-2.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;Entreprenariat et création d'entreprise;Hind khamal;lundi;14:00;16:00;Salle 4;M.J-FR-S5-2.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;Contrats nommés et bancaires;f. alaoui;mercredi;12:00;14:00;Salle 1;M.J-FR-S5-2.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;droit de l'écologie et des énergies renouvelables;karzazi mohcine;vendredi;09:00;12:00;Salle 8;M.J-FR-S5-2.pdf
+Licence S5 métiers du droit et de la justice (fr);unique;droit maritime;k. merbouh;jeudi;12:00;14:00;Salle 7;M.J-FR-S5-2.pdf
+Licence S5 études administratives et financières (fr);unique;Les institutions financières internationales;M. essarsar;lundi;12:00;14:00;Salle 5;ET.A.FR-S5.pdf
+Licence S5 études administratives et financières (fr);unique;Droit fiscal;EL moussaoui;jeudi;08:30;10:00;Salle 4;ET.A.FR-S5.pdf
+Licence S5 études administratives et financières (fr);unique;finance locale;EL moussaoui;jeudi;10:00;12:00;Salle 4;ET.A.FR-S5.pdf
+Licence S5 études administratives et financières (fr);unique;Les marchés publics;El cheddadi;mercredi;10:00;12:00;Salle 4;ET.A.FR-S5.pdf
+Licence S5 études administratives et financières (fr);unique;Gouvernance des services publics;Raffach;mardi;12:00;14:00;Salle 5;ET.A.FR-S5.pdf
+Licence S5 études administratives et financières (fr);unique;Gouvernance territoriales;Raffach;mardi;14:00;16:00;Salle 7;ET.A.FR-S5.pdf
