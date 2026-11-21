@@ -261,6 +261,63 @@ describe('professeurs — CRUD', () => {
     expect(JSON.parse(log[0].new_values).full_name).toBe('Prof Après');
   });
 
+  it('update : introuvable / no-op sans audit / nom propre ok / nom d’autrui refusé / is_active', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+
+    // Introuvable : pas d'écriture, pas d'audit.
+    expect(updateProfessor(db, uid, 9999, { full_name: 'X' }).ok).toBe(false);
+
+    const a = createProfessor(db, uid, { full_name: 'Prof A', email: 'a@x.ma' });
+    const b = createProfessor(db, uid, { full_name: 'Prof B' });
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+
+    // Même nom conservé : le doublon ignore la ligne elle-même → accepté.
+    const same = updateProfessor(db, uid, a.data.id, {
+      full_name: 'Prof A',
+      email: 'a@x.ma',
+    });
+    expect(same.ok).toBe(true);
+
+    // No-op : UPDATE sans effet → aucune ligne audit superflue.
+    expect(
+      all(
+        db,
+        "SELECT id FROM audit_log WHERE entity = 'professor' AND action = 'UPDATE'",
+      ),
+    ).toHaveLength(0);
+
+    // Nom d'un autre professeur (casse différente) → refus champ full_name.
+    const steal = updateProfessor(db, uid, b.data.id, {
+      full_name: 'prof a',
+    });
+    expect(steal.ok).toBe(false);
+    if (!steal.ok) expect(steal.fields?.[0].field).toBe('full_name');
+
+    // is_active : omis → préservé ; false strict → désactive ; true → réactive.
+    setProfessorActive(db, uid, a.data.id, false);
+    const kept = updateProfessor(db, uid, a.data.id, {
+      full_name: 'Prof A',
+    });
+    expect(kept.ok).toBe(true);
+    if (kept.ok) expect(kept.data.is_active).toBe(0);
+
+    const explicit = updateProfessor(db, uid, a.data.id, {
+      full_name: 'Prof A',
+      is_active: false,
+    });
+    expect(explicit.ok).toBe(true);
+    if (explicit.ok) expect(explicit.data.is_active).toBe(0);
+
+    const reactivated = updateProfessor(db, uid, a.data.id, {
+      full_name: 'Prof A',
+      is_active: true,
+    });
+    expect(reactivated.ok).toBe(true);
+    if (reactivated.ok) expect(reactivated.data.is_active).toBe(1);
+  });
+
   it('suppression refusée si lié (master_module, séance, absence) — BR-22', () => {
     const db = freshDb();
     const uid = admin(db).id;
@@ -282,6 +339,29 @@ describe('professeurs — CRUD', () => {
     expect(
       get(db, 'SELECT id FROM professor WHERE id = ?', f.profId),
     ).toBeDefined();
+  });
+
+  it('suppression refusée si lié seulement par des disponibilités — BR-22', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const created = createProfessor(db, uid, { full_name: 'Prof Dispo' });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const av = addAvailability(db, uid, created.data.id, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+    });
+    expect(av.ok).toBe(true);
+    // FK sans CASCADE : sans linkedCount complet, le DELETE crasherait.
+    const res = deleteProfessor(db, uid, created.data.id);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toMatch(/suppression impossible/);
+      expect(res.error).toMatch(/désactiver/);
+    }
+    expect(listAvailabilities(db, created.data.id)).toHaveLength(1);
   });
 
   it('suppression d’un professeur libre : DELETE + audit', () => {
@@ -378,6 +458,18 @@ describe('professeurs — compteurs (AD-7)', () => {
     expect(libre.masters).toEqual([]);
   });
 
+  it('borne inclusive : PREVUE datée aujourd’hui = restante, hier = non réalisée', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    addSession(db, f, { date: TODAY }); // date == aujourd'hui → restante
+    addSession(db, f, { date: '2026-10-14' }); // hier → non réalisée
+    const row = listProfessors(db, undefined, TODAY).find(
+      (p) => p.id === f.profId,
+    )!;
+    expect(row.nb_restantes).toBe(1);
+    expect(row.nb_non_realisees).toBe(1);
+  });
+
   it('recherche : nom, référence interne, email (sous-chaîne, casse ignorée)', () => {
     const db = freshDb();
     const uid = admin(db).id;
@@ -391,6 +483,9 @@ describe('professeurs — compteurs (AD-7)', () => {
     expect(listProfessors(db, 'REF-2')).toHaveLength(1);
     expect(listProfessors(db, 'FSJP.MA')).toHaveLength(1);
     expect(listProfessors(db, 'inexistant')).toHaveLength(0);
+    // Jokers LIKE échappés : '%' et '_' restent littéraux.
+    expect(listProfessors(db, '%')).toHaveLength(0);
+    expect(listProfessors(db, '_')).toHaveLength(0);
   });
 });
 
@@ -469,7 +564,7 @@ describe('professeurs — disponibilités', () => {
     ).toHaveLength(1);
   });
 
-  it('chevauchement même kind refusé ; kind différent accepté', () => {
+  it('chevauchement même kind refusé (DISPO et INDISPO) ; autres kind/jour acceptés', () => {
     const db = freshDb();
     const uid = admin(db).id;
     const f = seedFixture(db);
@@ -479,19 +574,38 @@ describe('professeurs — disponibilités', () => {
       end_min: 720,
       kind: 'DISPO',
     });
-    const overlap = addAvailability(db, uid, f.profId, {
+    addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 840,
+      end_min: 1020,
+      kind: 'INDISPO',
+    });
+
+    const overlapDispo = addAvailability(db, uid, f.profId, {
       weekday: 0,
       start_min: 600,
       end_min: 900,
       kind: 'DISPO',
     });
-    expect(overlap.ok).toBe(false);
-    if (!overlap.ok) expect(overlap.fields?.[0].field).toBe('start_min');
+    expect(overlapDispo.ok).toBe(false);
+    if (!overlapDispo.ok)
+      expect(overlapDispo.fields?.[0].field).toBe('start_min');
 
+    const overlapIndispo = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 900,
+      end_min: 960,
+      kind: 'INDISPO',
+    });
+    expect(overlapIndispo.ok).toBe(false);
+    if (!overlapIndispo.ok)
+      expect(overlapIndispo.fields?.[0].field).toBe('start_min');
+
+    // Même plage qu'une DISPO existante mais kind différent → accepté.
     const otherKind = addAvailability(db, uid, f.profId, {
       weekday: 0,
       start_min: 600,
-      end_min: 900,
+      end_min: 660,
       kind: 'INDISPO',
     });
     expect(otherKind.ok).toBe(true);
@@ -503,6 +617,54 @@ describe('professeurs — disponibilités', () => {
       kind: 'DISPO',
     });
     expect(otherDay.ok).toBe(true);
+  });
+
+  it('chevauchement : fenêtres d’effet disjointes acceptées, jointes refusées', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const f = seedFixture(db);
+    // DISPO bornée S1 : lun 08h-12h, sept.→déc. 2026.
+    const first = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+      effective_from: '2026-09-01',
+      effective_to: '2026-12-31',
+    });
+    expect(first.ok).toBe(true);
+
+    // Même plage horaire, fenêtre disjointe (S2 2027) → acceptée.
+    const disjoint = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+      effective_from: '2027-01-01',
+      effective_to: '2027-03-31',
+    });
+    expect(disjoint.ok).toBe(true);
+
+    // Fenêtre qui se joint (déc. 2026 commun) → refusée.
+    const joint = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 600,
+      end_min: 660,
+      kind: 'DISPO',
+      effective_from: '2026-12-01',
+      effective_to: '2027-06-30',
+    });
+    expect(joint.ok).toBe(false);
+    if (!joint.ok) expect(joint.fields?.[0].field).toBe('start_min');
+
+    // Sans bornes = fenêtre infinie → chevauche toute fenêtre.
+    const unbounded = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 600,
+      end_min: 660,
+      kind: 'DISPO',
+    });
+    expect(unbounded.ok).toBe(false);
   });
 
   it('weekday invalide, start>=end, effective inversé : refusés', () => {
@@ -528,6 +690,24 @@ describe('professeurs — disponibilités', () => {
     expect(badTime.ok).toBe(false);
     if (!badTime.ok) expect(badTime.fields?.[0].field).toBe('end_min');
 
+    // Borne horaire : end_min > 1440 refusé, 1440 (24h00) accepté.
+    const tooLate = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 1441,
+      kind: 'DISPO',
+    });
+    expect(tooLate.ok).toBe(false);
+    if (!tooLate.ok) expect(tooLate.fields?.[0].field).toBe('end_min');
+    const midnight = addAvailability(db, uid, f.profId, {
+      weekday: 2,
+      start_min: 480,
+      end_min: 1440,
+      kind: 'DISPO',
+    });
+    expect(midnight.ok).toBe(true);
+    expect(removeAvailability(db, uid, midnight.ok ? midnight.data.id : -1).ok).toBe(true);
+
     const badRange = addAvailability(db, uid, f.profId, {
       weekday: 0,
       start_min: 480,
@@ -538,6 +718,17 @@ describe('professeurs — disponibilités', () => {
     });
     expect(badRange.ok).toBe(false);
     if (!badRange.ok) expect(badRange.fields?.[0].field).toBe('effective_to');
+
+    // Format ISO correct mais date inexistante (30 février).
+    const badEff = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+      effective_from: '2026-02-30',
+    });
+    expect(badEff.ok).toBe(false);
+    if (!badEff.ok) expect(badEff.fields?.[0].field).toBe('effective_from');
     expect(listAvailabilities(db, f.profId)).toHaveLength(0);
   });
 
@@ -561,15 +752,16 @@ describe('professeurs — disponibilités', () => {
 });
 
 describe('professeurs — absences (BR-17)', () => {
-  it('ajout ok : séances PREVUE impactées retournées, AUCUNE annulée', () => {
+  it('ajout ok : séances PREVUE impactées (bornes incluses), AUCUNE annulée', () => {
     const db = freshDb();
     const uid = admin(db).id;
     const f = seedFixture(db);
-    // 2 PREVUE dans la fenêtre, 1 hors fenêtre, 1 déjà REALISEE (non impactée).
-    const inA = addSession(db, f, { date: '2026-11-02' });
-    const inB = addSession(db, f, { date: '2026-11-04' });
-    addSession(db, f, { date: '2026-12-01' });
-    addSession(db, f, { date: '2026-11-03', status: 'REALISEE' });
+    // Bornes inclusives : 1er et dernier jour de la fenêtre impactés.
+    const inA = addSession(db, f, { date: '2026-11-01' });
+    const inB = addSession(db, f, { date: '2026-11-05' });
+    addSession(db, f, { date: '2026-12-01' }); // hors fenêtre
+    addSession(db, f, { date: '2026-11-03', status: 'REALISEE' }); // non PREVUE
+    const other = addSession(db, f, { date: '2026-11-02', profId: f.prof2Id });
 
     const res = addAbsence(db, uid, f.profId, {
       start_date: '2026-11-01',
@@ -579,18 +771,24 @@ describe('professeurs — absences (BR-17)', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.absence.resolution).toBe('A_TRAITER');
-    expect(res.data.impacted.map((s) => s.id).sort()).toEqual(
-      [inA, inB].sort(),
-    );
-    expect(res.data.impacted[0].status).toBe('PREVUE');
+    const impactedIds = res.data.impacted
+      .map((s) => s.id)
+      .sort((a, b) => a - b);
+    expect(impactedIds).toEqual([inA, inB].sort((a, b) => a - b));
+    // La séance de l'autre professeur (même fenêtre) n'est pas impactée.
+    expect(impactedIds).not.toContain(other);
     expect(res.data.impacted[0].module_name).toBe('Module T');
+    expect(res.data.impacted[0].room_name).toBe('Salle T');
 
-    // BR-17 : toutes les séances restent PREVUE — aucune annulation auto.
-    const statuses = all<{ status: string }>(
+    // BR-17 : statuts RELUS en base — tout reste PREVUE, rien d'annulé.
+    const statuses = all<{ id: number; status: string }>(
       db,
-      'SELECT status FROM session WHERE professor_id = ?',
+      'SELECT id, status FROM session WHERE professor_id = ?',
       f.profId,
     );
+    for (const s of statuses) {
+      if ([inA, inB].includes(s.id)) expect(s.status).toBe('PREVUE');
+    }
     expect(statuses.filter((s) => s.status === 'ANNULEE')).toHaveLength(0);
     expect(listAbsences(db, f.profId)).toHaveLength(1);
     // Compteur nb_absences vu par la liste.
@@ -600,7 +798,21 @@ describe('professeurs — absences (BR-17)', () => {
     ).toBe(1);
   });
 
-  it('dates invalides : format ou ordre refusés, aucune écriture', () => {
+  it('absence sans séance PREVUE dans la fenêtre : impacted vide', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const f = seedFixture(db);
+    addSession(db, f, { date: '2026-12-10' });
+    const res = addAbsence(db, uid, f.profId, {
+      start_date: '2026-11-01',
+      end_date: '2026-11-05',
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.impacted).toEqual([]);
+  });
+
+  it('dates invalides : format, calendrier ou ordre refusés, aucune écriture', () => {
     const db = freshDb();
     const uid = admin(db).id;
     const f = seedFixture(db);
@@ -610,6 +822,21 @@ describe('professeurs — absences (BR-17)', () => {
     });
     expect(badFormat.ok).toBe(false);
     if (!badFormat.ok) expect(badFormat.fields?.[0].field).toBe('start_date');
+
+    // Format ISO correct mais date inexistante (30 février / mois 13).
+    const badDay = addAbsence(db, uid, f.profId, {
+      start_date: '2026-02-30',
+      end_date: '2026-03-05',
+    });
+    expect(badDay.ok).toBe(false);
+    if (!badDay.ok) expect(badDay.fields?.[0].field).toBe('start_date');
+    const badMonth = addAbsence(db, uid, f.profId, {
+      start_date: '2026-11-01',
+      end_date: '2026-13-40',
+    });
+    expect(badMonth.ok).toBe(false);
+    if (!badMonth.ok)
+      expect(badMonth.fields?.map((x) => x.field)).toContain('end_date');
 
     const inverted = addAbsence(db, uid, f.profId, {
       start_date: '2026-11-05',
@@ -637,50 +864,104 @@ describe('professeurs — absences (BR-17)', () => {
 });
 
 describe('professeurs — garde IPC (composition des handlers)', () => {
-  it('requireRole ADMIN : création refusée en GESTIONNAIRE, acceptée en ADMIN', () => {
+  it('requireRole ADMIN : les 4 mutations refusées en GESTIONNAIRE, acceptées en ADMIN', () => {
     const db = freshDb();
+    const f = seedFixture(db);
     const gest = listProfiles(db).find((p) => p.role === 'GESTIONNAIRE')!;
-    setCurrentProfile(db, gest.id);
-    // Même composition que ipcMain.handle('professors:create').
-    const denied = guard(
-      () => db,
-      (d) => createProfessor(d, currentUserId(d), { full_name: 'Prof G' }),
-      { requireRole: 'ADMIN' },
-    );
-    expect(denied.ok).toBe(false);
-    if (!denied.ok) expect(denied.error).toMatch(/Administrateur/);
-    expect(listProfessors(db)).toHaveLength(0);
+    const adminUser = admin(db);
+    // Même composition que les handlers create/update/setActive/remove.
+    const mutations = [
+      (d: DatabaseSync) =>
+        createProfessor(d, currentUserId(d), { full_name: 'Prof R1' }),
+      (d: DatabaseSync) =>
+        updateProfessor(d, currentUserId(d), f.prof2Id, {
+          full_name: 'Prof R2',
+        }),
+      (d: DatabaseSync) =>
+        setProfessorActive(d, currentUserId(d), f.prof2Id, false),
+      (d: DatabaseSync) => deleteProfessor(d, currentUserId(d), f.prof2Id),
+    ];
 
-    setCurrentProfile(db, admin(db).id);
-    const allowed = guard(
-      () => db,
-      (d) => createProfessor(d, currentUserId(d), { full_name: 'Prof G' }),
-      { requireRole: 'ADMIN' },
-    );
-    expect(allowed.ok).toBe(true);
+    setCurrentProfile(db, gest.id);
+    for (const fn of mutations) {
+      const denied = guard(() => db, fn, { requireRole: 'ADMIN' });
+      expect(denied.ok).toBe(false);
+      if (!denied.ok) expect(denied.error).toMatch(/Administrateur/);
+    }
+    // Aucune mutation n'a eu lieu.
+    expect(listProfessors(db)).toHaveLength(2);
+    expect(
+      all(db, 'SELECT id FROM audit_log'),
+    ).toHaveLength(0);
+
+    setCurrentProfile(db, adminUser.id);
+    for (const fn of mutations) {
+      const allowed = guard(() => db, fn, { requireRole: 'ADMIN' });
+      expect(allowed.ok).toBe(true);
+    }
   });
 
-  it('payloads invalides rejetés côté service : aucune écriture', () => {
+  it('payloads invalides rejetés avec erreurs {field,message} (pas de TypeError)', () => {
     const db = freshDb();
     const uid = admin(db).id;
-    // Types erronés possibles après désérialisation IPC.
-    expect(
-      createProfessor(db, uid, {} as never).ok,
-    ).toBe(false);
-    expect(
-      updateProfessor(db, uid, 1, { full_name: '' }).ok,
-    ).toBe(false);
-    expect(
-      addAvailability(db, uid, 1, {
-        weekday: 'lundi' as never,
-        start_min: 480,
-        end_min: 720,
-        kind: 'DISPO',
-      }).ok,
-    ).toBe(false);
-    expect(
-      addAbsence(db, uid, 1, { start_date: '', end_date: '' }).ok,
-    ).toBe(false);
-    expect(listProfessors(db)).toHaveLength(0);
+    const f = seedFixture(db); // professeur réel pour les validations par prof
+
+    const badName = createProfessor(db, uid, {
+      full_name: 123,
+    } as never);
+    expect(badName.ok).toBe(false);
+    if (!badName.ok) {
+      expect(badName.fields?.[0].field).toBe('full_name');
+      expect(badName.error).toMatch(/Validation/);
+    }
+
+    const badMail = updateProfessor(db, uid, f.profId, {
+      full_name: 'Prof Test',
+      email: 42,
+    } as never);
+    expect(badMail.ok).toBe(false);
+    if (!badMail.ok) expect(badMail.fields?.[0].field).toBe('email');
+
+    const badPhone = updateProfessor(db, uid, f.profId, {
+      full_name: 'Prof Test',
+      phone: { x: 1 },
+    } as never);
+    expect(badPhone.ok).toBe(false);
+    if (!badPhone.ok) expect(badPhone.fields?.[0].field).toBe('phone');
+
+    const badWeekday = addAvailability(db, uid, f.profId, {
+      weekday: 'lundi',
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+    } as never);
+    expect(badWeekday.ok).toBe(false);
+    if (!badWeekday.ok) expect(badWeekday.fields?.[0].field).toBe('weekday');
+
+    const badEff = addAvailability(db, uid, f.profId, {
+      weekday: 0,
+      start_min: 480,
+      end_min: 720,
+      kind: 'DISPO',
+      effective_from: 20261101,
+    } as never);
+    expect(badEff.ok).toBe(false);
+    if (!badEff.ok) expect(badEff.fields?.[0].field).toBe('effective_from');
+
+    const badAbs = addAbsence(db, uid, f.profId, {
+      start_date: 123,
+      end_date: '2026-11-05',
+      reason: 7,
+    } as never);
+    expect(badAbs.ok).toBe(false);
+    if (!badAbs.ok) {
+      expect(badAbs.fields?.map((x) => x.field)).toEqual(
+        expect.arrayContaining(['start_date', 'reason']),
+      );
+    }
+
+    // Rien n'a été écrit par les payloads forgés.
+    expect(listAvailabilities(db, f.profId)).toHaveLength(0);
+    expect(listAbsences(db, f.profId)).toHaveLength(0);
   });
 });

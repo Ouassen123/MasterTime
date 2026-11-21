@@ -405,9 +405,14 @@ export function ProfessorsPage(): React.JSX.Element {
   }, []);
 
   const reloadDetail = useCallback(async (id: number): Promise<void> => {
-    const res = await api().professors.get(id);
-    if (res.ok) setDetail(res.data);
-    else void message.error(errorMessage(res));
+    try {
+      const res = await api().professors.get(id);
+      if (res.ok) setDetail(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      // Rejet IPC : jamais de promesse non gérée sur un drawer ouvert.
+      void message.error(errorMessage(err));
+    }
   }, []);
 
   useEffect(() => {
@@ -427,6 +432,9 @@ export function ProfessorsPage(): React.JSX.Element {
   };
 
   const openDetail = (row: ProfessorRow): void => {
+    // Purge la fiche précédente : pas de données périmées ni de mutation
+    // possible sur le mauvais professeur pendant le chargement.
+    setDetail(null);
     setDetailOpen(true);
     void reloadDetail(row.id);
   };
@@ -633,7 +641,15 @@ export function ProfessorsPage(): React.JSX.Element {
       <Drawer
         open={detailOpen}
         width={760}
-        title={p ? t('professors.detailTitle', { name: p.full_name }) : t('common.loading')}
+        title={
+          p ? (
+            <span dir="auto">
+              {t('professors.detailTitle', { name: p.full_name })}
+            </span>
+          ) : (
+            t('common.loading')
+          )
+        }
         onClose={() => {
           setDetailOpen(false);
           void reload(); // compteurs/absences potentiellement modifiés
@@ -652,14 +668,21 @@ export function ProfessorsPage(): React.JSX.Element {
                 {p.phone ?? '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('professors.teachings')}>
-                {detail.teachings.length > 0
-                  ? detail.teachings
+                {detail.teachings.length > 0 ? (
+                  <span dir="auto">
+                    {detail.teachings
                       .map((x) => `${x.master_name} — ${x.module_name}`)
-                      .join(' · ')
-                  : '—'}
+                      .join(' · ')}
+                  </span>
+                ) : (
+                  '—'
+                )}
               </Descriptions.Item>
             </Descriptions>
+            {/* key=id : remonte les onglets par professeur — réinitialise
+                l'onglet actif et l'état interne (impacted des absences). */}
             <Tabs
+              key={p.id}
               items={[
                 {
                   key: 'sessions',

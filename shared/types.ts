@@ -148,7 +148,7 @@ export interface ProfessorRow extends ProfessorCounters {
   is_demo: number;
   /** Noms des masters enseignés (distincts, via master_module + session). */
   masters: string[];
-  /** Liens bloquant la suppression (master_module + session + absence, BR-22). */
+  /** Liens bloquant la suppression (mm + session + absence + dispo, BR-22). */
   linkedCount: number;
 }
 

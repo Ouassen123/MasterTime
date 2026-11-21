@@ -3,7 +3,7 @@
  * Recherche client-side, tri par colonne, pagination 15, colonne d'actions
  * (éditer / désactiver-activer / supprimer) optionnellement paramétrée.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Input, Space, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -13,6 +13,8 @@ import {
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+
+const PAGE_SIZE = 15;
 
 export interface CrudTableProps<T extends { id: number }> {
   rows: T[];
@@ -49,6 +51,13 @@ export function CrudTable<T extends { id: number }>(
       ),
     );
   }, [props.rows, props.searchKeys, search]);
+
+  // La liste rétrécit (suppression, filtre, rechargement) : une page
+  // courante hors portée afficherait une table vide — retour en page 1.
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (page > maxPage) setPage(1);
+  }, [filtered.length, page]);
 
   const actionColumn: ColumnsType<T>[number] = {
     key: '_actions',
@@ -153,7 +162,7 @@ export function CrudTable<T extends { id: number }>(
           style: props.onRowClick ? { cursor: 'pointer' } : undefined,
         })}
         pagination={{
-          pageSize: 15,
+          pageSize: PAGE_SIZE,
           showSizeChanger: false,
           current: page,
           onChange: setPage,

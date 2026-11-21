@@ -35,9 +35,30 @@ import { withAudit } from './audit.service';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Date du jour au format TEXT 'YYYY-MM-DD' (injectable pour les tests). */
+/** 'YYYY-MM-DD' syntaxiquement ET calendairement valide (rejette 2026-02-30). */
+function isValidIsoDate(s: string): boolean {
+  if (!ISO_DATE_RE.test(s)) return false;
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(5, 7));
+  const d = Number(s.slice(8, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+/**
+ * Date du jour 'YYYY-MM-DD' en composants LOCAUX (fuseau de l'école —
+ * `toISOString` en UTC décalerait les compteurs autour de minuit, AD-7).
+ * Injectable pour les tests.
+ */
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 interface ProfessorSqlRow extends Omit<ProfessorRow, 'masters'> {
@@ -67,7 +88,8 @@ const COUNTERS_SQL = `
       (SELECT count(*) FROM master_module mm WHERE mm.professor_id = p.id)
         + (SELECT count(*) FROM session s WHERE s.professor_id = p.id)
         + (SELECT count(*) FROM professor_absence a WHERE a.professor_id = p.id)
-        AS linkedCount`;
+        + (SELECT count(*) FROM professor_availability v
+             WHERE v.professor_id = p.id) AS linkedCount`;
 
 /** Masters enseignés par professeur (distincts, mm + séances), triés. */
 function mastersByProfessor(db: DatabaseSync): Map<number, string[]> {
@@ -109,16 +131,18 @@ export function listProfessors(
   today: string = todayIso(),
 ): ProfessorRow[] {
   const q = search?.trim();
-  const like = `%${q ?? ''}%`;
+  // `%`, `_` et `\` échappés : la recherche est une sous-chaîne littérale,
+  // pas un motif LIKE forgé depuis le renderer.
+  const like = `%${(q ?? '').replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   const rows = q
     ? all<ProfessorSqlRow>(
         db,
         `SELECT p.id, p.full_name, p.internal_ref, p.email, p.phone,
                 p.is_active, p.is_demo,${COUNTERS_SQL}
            FROM professor p
-          WHERE p.full_name LIKE ? COLLATE NOCASE
-             OR p.internal_ref LIKE ? COLLATE NOCASE
-             OR p.email LIKE ? COLLATE NOCASE
+          WHERE p.full_name LIKE ? ESCAPE '\\'
+             OR p.internal_ref LIKE ? ESCAPE '\\'
+             OR p.email LIKE ? ESCAPE '\\'
           ORDER BY p.full_name COLLATE NOCASE`,
         today,
         today,
@@ -218,7 +242,10 @@ function validateProfessor(
   excludeId: number | null,
 ): FieldError[] {
   const errors: FieldError[] = [];
-  const fullName = (input.full_name ?? '').trim();
+  // Champs non-string possibles via un payload IPC forgé : erreurs de
+  // champ propres, jamais de TypeError sur `.trim()`.
+  const fullName =
+    typeof input.full_name === 'string' ? input.full_name.trim() : '';
   if (!fullName) {
     errors.push({
       field: 'full_name',
@@ -238,26 +265,47 @@ function validateProfessor(
       });
     }
   }
-  const ref = input.internal_ref?.trim();
-  if (ref) {
-    const dupRef = get<{ id: number }>(
-      db,
-      'SELECT id FROM professor WHERE internal_ref = ? COLLATE NOCASE AND id != ?',
-      ref,
-      excludeId ?? -1,
-    );
-    if (dupRef) {
-      errors.push({
-        field: 'internal_ref',
-        message: 'Cette référence interne est déjà utilisée.',
-      });
+  if (input.internal_ref != null && typeof input.internal_ref !== 'string') {
+    errors.push({
+      field: 'internal_ref',
+      message: 'Référence interne invalide.',
+    });
+  } else {
+    const ref = input.internal_ref?.trim();
+    if (ref) {
+      const dupRef = get<{ id: number }>(
+        db,
+        'SELECT id FROM professor WHERE internal_ref = ? COLLATE NOCASE AND id != ?',
+        ref,
+        excludeId ?? -1,
+      );
+      if (dupRef) {
+        errors.push({
+          field: 'internal_ref',
+          message: 'Cette référence interne est déjà utilisée.',
+        });
+      }
     }
   }
-  const email = input.email?.trim();
-  if (email && !EMAIL_RE.test(email)) {
-    errors.push({ field: 'email', message: "Format d'email invalide." });
+  if (input.email != null && typeof input.email !== 'string') {
+    errors.push({ field: 'email', message: 'Email invalide.' });
+  } else {
+    const email = input.email?.trim();
+    if (email && !EMAIL_RE.test(email)) {
+      errors.push({ field: 'email', message: "Format d'email invalide." });
+    }
+  }
+  if (input.phone != null && typeof input.phone !== 'string') {
+    errors.push({ field: 'phone', message: 'Téléphone invalide.' });
   }
   return errors;
+}
+
+/** `false` strict → 0 ; défini → 1 ; omis → null (préserver à l'édition). */
+function activeFlag(v: unknown): number | null {
+  if (v === false) return 0;
+  if (v == null) return null;
+  return 1;
 }
 
 export function createProfessor(
@@ -279,7 +327,7 @@ export function createProfessor(
         input.internal_ref?.trim() || null,
         input.email?.trim() || null,
         input.phone?.trim() || null,
-        input.is_active === false ? 0 : 1,
+        activeFlag(input.is_active) ?? 1,
       ).lastInsertRowid,
     ),
   );
@@ -309,7 +357,7 @@ export function updateProfessor(
       input.email?.trim() || null,
       input.phone?.trim() || null,
       // is_active omis → valeur conservée (basculer passe par setActive).
-      input.is_active == null ? null : input.is_active ? 1 : 0,
+      activeFlag(input.is_active),
       id,
     );
   });
@@ -333,8 +381,8 @@ export function deleteProfessor(
   if (prof.linkedCount > 0) {
     return apiErr(
       `Ce professeur est lié à ${prof.linkedCount} donnée(s) ` +
-        '(master-modules, séances ou absences) : suppression impossible. ' +
-        'Vous pouvez le désactiver.',
+        '(master-modules, séances, absences ou disponibilités) : ' +
+        'suppression impossible. Vous pouvez le désactiver.',
     );
   }
   withAudit(db, userId, 'DELETE', 'professor', id, () => {
@@ -396,11 +444,12 @@ function validateAvailability(
     !Number.isInteger(input.start_min) ||
     !Number.isInteger(input.end_min) ||
     input.start_min < 0 ||
-    input.start_min >= input.end_min
+    input.start_min >= input.end_min ||
+    input.end_min > 1440
   ) {
     errors.push({
       field: 'end_min',
-      message: "L'heure de début doit précéder l'heure de fin.",
+      message: "L'heure de début doit précéder l'heure de fin (≤ 24h00).",
     });
   }
   if (input.kind !== 'DISPO' && input.kind !== 'INDISPO') {
@@ -409,15 +458,21 @@ function validateAvailability(
       message: "Le type doit être 'DISPO' ou 'INDISPO'.",
     });
   }
-  const from = input.effective_from?.trim() || null;
-  const to = input.effective_to?.trim() || null;
-  if (from && !ISO_DATE_RE.test(from)) {
+  const from =
+    typeof input.effective_from === 'string'
+      ? input.effective_from.trim() || null
+      : null;
+  const to =
+    typeof input.effective_to === 'string'
+      ? input.effective_to.trim() || null
+      : null;
+  if (input.effective_from != null && !isValidIsoDate(from ?? '')) {
     errors.push({
       field: 'effective_from',
       message: 'Date de début invalide (AAAA-MM-JJ attendu).',
     });
   }
-  if (to && !ISO_DATE_RE.test(to)) {
+  if (input.effective_to != null && !isValidIsoDate(to ?? '')) {
     errors.push({
       field: 'effective_to',
       message: 'Date de fin invalide (AAAA-MM-JJ attendu).',
@@ -429,19 +484,26 @@ function validateAvailability(
       message: 'La date de début doit précéder la date de fin.',
     });
   }
-  // Chevauchement refusé à jour et type identiques (plages horaires qui
-  // se coupent : start < exist.end AND end > exist.start).
+  // Chevauchement refusé à jour et type identiques SEULEMENT si les fenêtres
+  // d'effet se coupent aussi (NULL = bornes infinies ; dispo S1 et S2 à la
+  // même heure ne se chevauchent pas).
   if (errors.length === 0) {
     const overlap = get<{ id: number }>(
       db,
       `SELECT id FROM professor_availability
         WHERE professor_id = ? AND weekday = ? AND kind = ?
-          AND start_min < ? AND end_min > ?`,
+          AND start_min < ? AND end_min > ?
+          AND (effective_from IS NULL OR ? IS NULL OR effective_from <= ?)
+          AND (effective_to   IS NULL OR ? IS NULL OR effective_to   >= ?)`,
       professorId,
       input.weekday,
       input.kind,
       input.end_min,
       input.start_min,
+      to,
+      to,
+      from,
+      from,
     );
     if (overlap) {
       errors.push({
@@ -572,15 +634,17 @@ export function addAbsence(
     return apiErr('Professeur introuvable.');
   }
   const errors: FieldError[] = [];
-  const startDate = input.start_date?.trim();
-  const endDate = input.end_date?.trim();
-  if (!startDate || !ISO_DATE_RE.test(startDate)) {
+  const startDate =
+    typeof input.start_date === 'string' ? input.start_date.trim() : '';
+  const endDate =
+    typeof input.end_date === 'string' ? input.end_date.trim() : '';
+  if (!isValidIsoDate(startDate)) {
     errors.push({
       field: 'start_date',
       message: 'Date de début invalide (AAAA-MM-JJ attendu).',
     });
   }
-  if (!endDate || !ISO_DATE_RE.test(endDate)) {
+  if (!isValidIsoDate(endDate)) {
     errors.push({
       field: 'end_date',
       message: 'Date de fin invalide (AAAA-MM-JJ attendu).',
@@ -591,6 +655,9 @@ export function addAbsence(
       field: 'end_date',
       message: 'La date de début doit précéder la date de fin.',
     });
+  }
+  if (input.reason != null && typeof input.reason !== 'string') {
+    errors.push({ field: 'reason', message: 'Motif invalide.' });
   }
   if (errors.length > 0) {
     return apiErr('Validation impossible : corrigez les champs signalés.', errors);

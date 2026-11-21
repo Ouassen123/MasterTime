@@ -95,3 +95,22 @@ calendaire professeur (Phase 7), import/export (Phase 10).
 ## Critères d'acceptation
 `npm test` vert, `npm run typecheck` clean, `npm run build` OK, page visible
 et fonctionnelle sous `npm run dev`.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. **HIGH** — `linkedCount` doit inclure `professor_availability` (FK sans CASCADE : un prof lié par ses seules dispos passe le garde → crash « erreur interne » au lieu du refus BR-22). + test dédié.
+2. Chevauchement disponibilités : ne refuser que si les fenêtres `effective_from/to` se coupent aussi (dispos S1 vs S2 disjointes doivent passer).
+3. Fiche de suivi : `setDetail(null)` à l'ouverture, `key={professorId}` sur les onglets, reset `impacted`, catch du rejet `professors:get` (drawer sur données périmées + mutations possibles sur le mauvais prof).
+4. Validation calendaire réelle des dates ISO (rejeter 2026-02-30 / 2026-13-40) pour absences + `effective_*`.
+5. `todayIso()` en composants **locaux** (Tanger UTC+1 : minuit→01h UTC décale les compteurs et diverge du renderer).
+6. Borne `end_min <= 1440` sur les disponibilités.
+7. Champs non-string via IPC forgé → erreurs `{field,message}`, pas `TypeError` (typeof guards sur full_name/internal_ref/email/phone/dates/reason).
+8. `is_active` : sémantique unifiée create/update (seul `false` strict désactive ; omis = actif à la création / préservé à l'édition).
+9. `CrudTable` : `setPage(1)` aussi quand `rows.length` fait sortir la page courante de portée.
+10. Échapper `%`/`_` dans le `LIKE` de `listProfessors`.
+11. Tests : corriger « payloads invalides » (prof seedé, assert `fields`/`error`) ; BR-17 assert `status==='PREVUE'` relu ; `impacted:[]` + autre prof + bornes inclusives ; INDISPO-vs-INDISPO ; borne `date==today` ; `.sort((a,b)=>a-b)` ; branches update (introuvable, no-op sans ligne audit, même nom accepté, nom d'autrui refusé, is_active préservé vs false) ; `requireRole` sur les 4 mutations.
+12. `dir="auto"` sur le titre de la fiche et les intitulés d'enseignement.
+
+Différé/noté : NOCASE ASCII-only (limite SQLite), `upcoming` inclut ANNULEE (à revoir Phase 9), `impacted` rétroactif (clarifier Phase 9), TOCTOU négligeable mono-poste, libellé actif/inactif au féminin.
