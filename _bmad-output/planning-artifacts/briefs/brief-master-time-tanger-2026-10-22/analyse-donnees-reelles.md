@@ -140,3 +140,28 @@ Anglais S5 (3 fil., même prof) · sociologie S1 A+B · droit musulman S1fr · d
 2. **Les PDF officiels se contredisent** — l'import devra signaler les collisions et demander arbitrage humain (cohérent avec BR-12/FR-import).
 3. **Disponibilité réelle** : amphis quasi saturés en semaine par la Licence → les Masters vont naturellement vers les salles + samedi/amphis soirs (16–18). Samedi après-midi et vendredi sont déjà denses.
 4. **Salle 9 confirmée** (7 usages licence FR + masters) mais absente de la liste officielle → inventaire à revalider.
+
+---
+
+# Annexe B — Proposition EDT Masters S1 (M1), automne 2026/2027
+
+## Méthode
+Placement glouton dans les **243 créneaux libres** (salles×jours×blocs 2h, grille 08–18) après occupation Licence (168 séances) + Masters S3 (97). Hypothèses : les 14 Masters existent aussi en S1 ; structure identique S3 (7 modules × 1 séance hebdo de 2h). Répartition : jour le moins chargé par master, créneau le moins utilisé par le master, **salles d'abord** (les amphis restent au service des Licence, conforme à l'usage réel).
+
+## Résultat : 98/98 séances placées, zéro conflit
+| Indicateur | Valeur |
+|---|---|
+| Séances M1 placées | 98 (14 masters × 7) |
+| Répartition créneaux | 08–10 : 27 · 10–12 : 21 · 12–14 : 22 · 14–16 : 14 · 16–18 : 14 |
+| Répartition jours | Lun 28 · Mar–Sam ≈ 14/jour |
+| Salles / amphis | 58 en salles / 40 en amphis |
+| Charge ajoutée | 196 h-salle/sem. — reste ~145 créneaux libres après tout |
+
+**Fichier** : `proposition-edt-m1-2026.csv` (grille complète par master).
+
+## Réserves / à valider avec la faculté
+- Liste réelle des Masters en S1 (supposée = les 14 S3) — et leurs modules/profs exacts (le fichier n'alloue que créneau+salle, modules en placeholder M1–M7)
+- Capacité : les masters S3 utilisent surtout des salles 36–78 — taille des promotions M1 inconnue (amphis réservés si >78 inscrits)
+- Salle 3 et Salle 9 utilisées avec prudence (hors liste officielle — confirmées par usage)
+- La proposition ignore les disponibilités individuelles des professeurs (donnée absente) — un vrai run du moteur devra les intégrer
+- Les 12 conflits Master S3↔Licence détectés plus haut devront être **arbitrés** avant ou en même temps que cette proposition
