@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { closeDb, getDb } from './db/connection';
 import { bundledMigrations, runMigrations } from './db/migrate';
-import { seedDemo } from './db/seed-demo';
+import { seedReal } from './db/seed-real';
 import { collectDbStatus } from './db/status';
 import { ensureProfiles } from './db/profile.service';
 import { registerIpcHandlers } from './ipc';
@@ -30,7 +30,7 @@ function initDatabase(): void {
     dbPath,
   });
   ensureProfiles(db); // profils par défaut + profil courant (avant tout usage)
-  seedDemo(db);
+  seedReal(db);
 }
 
 function createWindow(): void {
