@@ -10,3 +10,8 @@ body {
   color: #9ca3af;
   background: #fafafa;
 }
+
+/* Bloc séance de la grille hebdo (P7a) — hover subtil, pas d'ombre (DESIGN). */
+.tt-block:hover {
+  filter: brightness(0.96);
+}

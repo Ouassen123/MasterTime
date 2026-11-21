@@ -14,8 +14,14 @@ import {
   message,
 } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { WarningOutlined } from '@ant-design/icons';
 import { api, errorMessage, hasApi } from '../api/client';
-import type { AppInfo, DbStatus } from '../../shared/types';
+import type {
+  AppInfo,
+  ConflictSummary,
+  DbStatus,
+} from '../../shared/types';
 
 const COUNT_KEYS = [
   'academicYear', 'semester', 'timeSlot', 'room',
@@ -26,6 +32,7 @@ export function DashboardPage(): React.JSX.Element {
   const { t } = useTranslation();
   const [status, setStatus] = useState<DbStatus | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,15 +40,23 @@ export function DashboardPage(): React.JSX.Element {
       setLoading(false);
       return;
     }
-    void Promise.allSettled([api().dbStatus(), api().appInfo()]).then(
-      ([statusRes, infoRes]) => {
-        if (statusRes.status === 'fulfilled') setStatus(statusRes.value);
-        else void message.error(errorMessage(statusRes.reason));
-        if (infoRes.status === 'fulfilled') setInfo(infoRes.value);
-        else void message.error(errorMessage(infoRes.reason));
-        setLoading(false);
-      },
-    );
+    void Promise.allSettled([
+      api().dbStatus(),
+      api().appInfo(),
+      api().timetable.summary(),
+    ]).then(([statusRes, infoRes, conflictRes]) => {
+      if (statusRes.status === 'fulfilled') setStatus(statusRes.value);
+      else void message.error(errorMessage(statusRes.reason));
+      if (infoRes.status === 'fulfilled') setInfo(infoRes.value);
+      else void message.error(errorMessage(infoRes.reason));
+      if (
+        conflictRes.status === 'fulfilled' &&
+        conflictRes.value.ok
+      ) {
+        setConflicts(conflictRes.value.data);
+      }
+      setLoading(false);
+    });
   }, []);
 
   if (loading) return <Skeleton active />;
@@ -72,6 +87,44 @@ export function DashboardPage(): React.JSX.Element {
                 {status.appliedMigrations.join(', ') || '—'}
               </Descriptions.Item>
             </Descriptions>
+          </Space>
+        </Card>
+      )}
+
+      {conflicts && (
+        <Card
+          title={
+            <Space>
+              <WarningOutlined
+                style={{ color: conflicts.total > 0 ? '#DC2626' : '#16A34A' }}
+              />
+              {t('dashboard.conflicts')}
+            </Space>
+          }
+          style={
+            conflicts.total > 0 ? { borderLeft: '3px solid #DC2626' } : undefined
+          }
+          extra={<Link to="/emplois-du-temps">{t('dashboard.conflictsLink')}</Link>}
+        >
+          <Space wrap size="large">
+            <Statistic
+              title={t('dashboard.conflicts')}
+              value={conflicts.total}
+              valueStyle={
+                conflicts.total > 0 ? { color: '#DC2626' } : undefined
+              }
+            />
+            {(
+              ['ROOM', 'PROFESSOR', 'MASTER', 'GROUP', 'EXTERNAL'] as const
+            ).map((kind) =>
+              conflicts.byKind[kind] > 0 ? (
+                <Statistic
+                  key={kind}
+                  title={t(`dashboard.byKind.${kind}`)}
+                  value={conflicts.byKind[kind]}
+                />
+              ) : null,
+            )}
           </Space>
         </Card>
       )}

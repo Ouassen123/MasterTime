@@ -6,6 +6,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AbsenceInput,
   AbsenceRow,
+  AnnualFilter,
+  AnnualRow,
   ApiResult,
   AppContext,
   AppInfo,
@@ -13,6 +15,9 @@ import type {
   AuditEntry,
   AvailabilityInput,
   AvailabilityRow,
+  ConflictFilter,
+  ConflictItem,
+  ConflictSummary,
   ContextSemesters,
   DbStatus,
   DeleteResult,
@@ -27,12 +32,18 @@ import type {
   MasterStatus,
   Module,
   ModuleInput,
+  MonthFilter,
+  OccupancyFilter,
+  OccupancyRow,
   ProfessorDetail,
   ProfessorInput,
   ProfessorRow,
   Room,
   RoomInput,
+  SessionDetail,
+  SessionRow,
   StudentGroupRow,
+  WeekFilter,
   WindowApi,
 } from '../../shared/types';
 
@@ -142,6 +153,26 @@ const api: WindowApi = {
       remove: (id: number): Promise<ApiResult<null>> =>
         ipcRenderer.invoke('professors:absence:remove', id),
     },
+  },
+  timetable: {
+    week: (filter: WeekFilter): Promise<ApiResult<SessionRow[]>> =>
+      ipcRenderer.invoke('timetable:week', filter),
+    month: (filter: MonthFilter): Promise<ApiResult<SessionRow[]>> =>
+      ipcRenderer.invoke('timetable:month', filter),
+    annual: (filter: AnnualFilter): Promise<ApiResult<AnnualRow[]>> =>
+      ipcRenderer.invoke('timetable:annual', filter),
+    conflicts: (
+      filter?: ConflictFilter,
+    ): Promise<ApiResult<ConflictItem[]>> =>
+      ipcRenderer.invoke('timetable:conflicts', filter),
+    summary: (): Promise<ApiResult<ConflictSummary>> =>
+      ipcRenderer.invoke('timetable:summary'),
+    occupancy: (filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>> =>
+      ipcRenderer.invoke('timetable:occupancy', filter),
+  },
+  sessions: {
+    get: (id: number): Promise<ApiResult<SessionDetail>> =>
+      ipcRenderer.invoke('sessions:get', id),
   },
   profile: {
     list: (): Promise<ApiResult<AppUser[]>> => ipcRenderer.invoke('profile:list'),

@@ -11,6 +11,7 @@ import { registerModuleHandlers } from './modules';
 import { registerProfessorHandlers } from './professors';
 import { registerMasterHandlers } from './masters';
 import { registerProfileHandlers } from './profile';
+import { registerTimetableHandlers } from './timetable';
 
 export function registerIpcHandlers(getDb: DbGetter): void {
   registerRoomHandlers(getDb);
@@ -18,6 +19,7 @@ export function registerIpcHandlers(getDb: DbGetter): void {
   registerProfessorHandlers(getDb);
   registerMasterHandlers(getDb);
   registerProfileHandlers(getDb);
+  registerTimetableHandlers(getDb);
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

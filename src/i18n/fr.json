@@ -259,6 +259,79 @@
     "empty": "Aucun module rattaché",
     "inactiveSuffix": "(désactivé)"
   },
+  "timetable": {
+    "title": "Emplois du temps",
+    "tabs": {
+      "week": "Semaine",
+      "master": "Par master",
+      "professor": "Par professeur",
+      "room": "Par salle",
+      "month": "Mois",
+      "year": "Année"
+    },
+    "week": {
+      "today": "Aujourd'hui",
+      "label": "Semaine du {{date}}"
+    },
+    "filters": {
+      "status": "Statuts",
+      "module": "Module"
+    },
+    "entity": {
+      "master": "Choisir un master",
+      "professor": "Choisir un professeur",
+      "room": "Choisir une salle",
+      "year": "Année universitaire"
+    },
+    "empty": {
+      "week": "Aucune séance cette semaine",
+      "entity": "Choisissez une entité pour afficher son emploi du temps",
+      "year": "Aucune séance sur cette année universitaire"
+    },
+    "block": {
+      "reported": "→ reportée"
+    },
+    "detail": {
+      "title": "Détail de la séance",
+      "date": "Date",
+      "time": "Horaire",
+      "status": "Statut",
+      "module": "Module",
+      "master": "Master",
+      "professor": "Professeur",
+      "room": "Salle",
+      "group": "Groupe",
+      "comment": "Commentaire",
+      "actual": "Réalisation effective",
+      "history": "Historique des statuts",
+      "noHistory": "Aucun historique",
+      "rescheduled": "→ {{date}} {{start}}–{{end}}"
+    }
+  },
+  "conflicts": {
+    "title": "Conflits",
+    "hide": "Masquer",
+    "refresh": "Actualiser",
+    "empty": "Aucun conflit détecté",
+    "kinds": {
+      "ROOM": "Conflits de salle",
+      "PROFESSOR": "Conflits de professeur",
+      "MASTER": "Conflits de master",
+      "GROUP": "Conflits de groupe",
+      "EXTERNAL": "Occupations externes (Licence)"
+    }
+  },
+  "dashboard": {
+    "conflicts": "Conflits à résoudre",
+    "conflictsLink": "Voir les emplois du temps",
+    "byKind": {
+      "ROOM": "Salle",
+      "PROFESSOR": "Professeur",
+      "MASTER": "Master",
+      "GROUP": "Groupe",
+      "EXTERNAL": "Externe"
+    }
+  },
   "placeholder": {
     "title": "Fonctionnalité à venir",
     "body": "Cette section sera disponible dans une phase ultérieure du projet."

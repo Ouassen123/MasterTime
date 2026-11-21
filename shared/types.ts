@@ -404,6 +404,166 @@ export interface ContextSemesters {
   semesters: SemesterRef[];
 }
 
+// ---------------------------------------------------------------------------
+// P7a — Emplois du temps : vues calendrier + détection de conflits (BR-11)
+// ---------------------------------------------------------------------------
+
+/** Filtres communs des vues semaine/mois (ids uniquement — jamais de LIKE). */
+export interface SessionFilter {
+  masterId?: number;
+  professorId?: number;
+  roomId?: number;
+  moduleId?: number;
+  /** Statuts EFFECTIFS (NON_ENCORE_REALISEE dérivé accepté, AD-7). */
+  statuses?: EffectiveSessionStatus[];
+}
+
+/** Filtre de la vue semaine — `weekStart` est le lundi ISO de la semaine. */
+export interface WeekFilter extends SessionFilter {
+  weekStart: string; // 'YYYY-MM-DD' (lundi)
+}
+
+/** Filtre de la vue mois — `month` dans 1..12. */
+export interface MonthFilter extends SessionFilter {
+  year: number;
+  month: number;
+}
+
+/** Filtre de la vue année. */
+export interface AnnualFilter {
+  academicYearId: number;
+}
+
+/** Filtre de la détection de conflits — plage de dates optionnelle. */
+export interface ConflictFilter {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+/** Filtre des blocages externes (occupation Licence, récurrents par weekday). */
+export interface OccupancyFilter {
+  weekStart: string; // lundi ISO — détermine la date affichée par weekday
+  roomId?: number;
+}
+
+/** Séance enrichie pour les vues calendrier (jointures + statut dérivé). */
+export interface SessionRow {
+  id: number;
+  date: string;
+  start_min: number;
+  end_min: number;
+  status: SessionStatus;
+  /** AD-7 : PREVUE + date < aujourd'hui → 'NON_ENCORE_REALISEE'. */
+  effective_status: EffectiveSessionStatus;
+  comment: string | null;
+  master: { id: number; code: string; name: string };
+  module: { id: number; code: string; name: string };
+  professor: { id: number; full_name: string };
+  room: { id: number; name: string; capacity: number | null };
+  /** Groupe mm.student_group + groupes session_group (', '-joinés). */
+  group_name: string | null;
+}
+
+/** Entrée d'historique de statut (session_status_history + nom du profil). */
+export interface SessionHistoryEntry {
+  id: number;
+  old_status: string | null;
+  new_status: string;
+  changed_at: string;
+  changed_by: number | null;
+  user_name: string | null;
+  reason: string | null;
+  old_date: string | null;
+  old_start_min: number | null;
+  old_end_min: number | null;
+  new_date: string | null;
+  new_start_min: number | null;
+  new_end_min: number | null;
+}
+
+/** Fiche séance complète (drawer) : séance + groupes + historique statuts. */
+export interface SessionDetail {
+  session: SessionRow & {
+    master_module_id: number;
+    actual_date: string | null;
+    actual_start_min: number | null;
+    actual_end_min: number | null;
+    generation_id: number | null;
+    is_demo: number;
+    updated_at: string | null;
+  };
+  /** Groupes liés : mm.student_group + session_group (id + nom). */
+  groups: { id: number; name: string }[];
+  /** Historique trié du plus récent au plus ancien. */
+  history: SessionHistoryEntry[];
+}
+
+/** Blocage externe récurrent (Licence) affiché en gris dans la vue salle. */
+export interface OccupancyRow {
+  id: number;
+  program: string;
+  groupe: string | null;
+  module: string | null;
+  professor: string | null;
+  weekday: number; // 0=lun..5=sam (AD-7)
+  /** Date concrète dans la semaine demandée (weekStart + weekday jours). */
+  date: string;
+  start_min: number;
+  end_min: number;
+  room_id: number;
+  room_name: string;
+  /** Libellé affiché : « Licence — <programme> » (+ groupe si présent). */
+  label: string;
+}
+
+export type ConflictKind = 'ROOM' | 'PROFESSOR' | 'MASTER' | 'GROUP' | 'EXTERNAL';
+
+/** Séance impliquée dans un conflit (référence compacte pour le panneau). */
+export interface ConflictSessionRef {
+  id: number;
+  /** Libellé court : « <module> — <master> ». */
+  label: string;
+  masterName: string;
+  moduleName: string;
+}
+
+/**
+ * Conflit détecté (BR-11) : une paire de séances (ou séance ↔ blocage
+ * externe) en chevauchement strict sur la même ressource et le même jour.
+ * `startMin`/`endMin` = fenêtre de chevauchement.
+ */
+export interface ConflictItem {
+  kind: ConflictKind;
+  date: string;
+  startMin: number;
+  endMin: number;
+  /** Entité partagée : salle, professeur, master, groupe ou « Licence — … ». */
+  entityLabel: string;
+  sessions: ConflictSessionRef[];
+  detail: string;
+}
+
+/** Compteur global pour la carte « Conflits à résoudre » du dashboard. */
+export interface ConflictSummary {
+  total: number;
+  byKind: Record<ConflictKind, number>;
+}
+
+/** Ligne de la vue année : master × semaine ISO (lundi) → compteurs statuts. */
+export interface AnnualRow {
+  masterId: number;
+  masterCode: string;
+  masterName: string;
+  weekStart: string; // lundi ISO de la semaine
+  count: number;
+  parStatut: {
+    prevue: number;
+    realisee: number;
+    annulee: number;
+    reportee: number;
+  };
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -501,6 +661,17 @@ export interface WindowApi {
       ): Promise<ApiResult<{ absence: AbsenceRow; impacted: ImpactedSession[] }>>;
       remove(id: number): Promise<ApiResult<null>>;
     };
+  };
+  timetable: {
+    week(filter: WeekFilter): Promise<ApiResult<SessionRow[]>>;
+    month(filter: MonthFilter): Promise<ApiResult<SessionRow[]>>;
+    annual(filter: AnnualFilter): Promise<ApiResult<AnnualRow[]>>;
+    conflicts(filter?: ConflictFilter): Promise<ApiResult<ConflictItem[]>>;
+    summary(): Promise<ApiResult<ConflictSummary>>;
+    occupancy(filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>>;
+  };
+  sessions: {
+    get(id: number): Promise<ApiResult<SessionDetail>>;
   };
   profile: {
     list(): Promise<ApiResult<AppUser[]>>;

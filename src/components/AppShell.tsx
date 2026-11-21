@@ -7,7 +7,11 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Layout, Menu, Select, Space, Tooltip, Typography, message } from 'antd';
-import { BankOutlined, TeamOutlined } from '@ant-design/icons';
+import {
+  BankOutlined,
+  CalendarOutlined,
+  TeamOutlined,
+} from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -43,7 +47,12 @@ const NAV: NavEntry[] = [
   },
   { key: 'modules', path: '/modules', enabled: true },
   { key: 'rooms', path: '/salles', enabled: true },
-  { key: 'schedule', path: '/emplois-du-temps', enabled: false },
+  {
+    key: 'schedule',
+    path: '/emplois-du-temps',
+    enabled: true,
+    icon: <CalendarOutlined />,
+  },
   { key: 'generation', path: '/generation', enabled: false },
   { key: 'sessions', path: '/seances', enabled: false },
   { key: 'absences', path: '/absences', enabled: false },
