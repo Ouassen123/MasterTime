@@ -239,3 +239,29 @@ INDISPO/absence + 1 external_occupancy + sessions existantes.
 Noté (différé) : `professor_absence.resolution` ignoré en v1 (Phase 9
 filtrera `RESOLUE`) ; DISPO pas encore effective → « toujours dispo »
 (sémantique P6b) ; EXAMEN bloqué non paramétrable.
+
+---
+
+## Addendum métier (utilisateur) — Licence fixe + modules fixables
+
+- **Occupation Licence = permanente** : `external_occupancy.academic_year_id`
+  doit être NULL (les blocages s'appliquent à toutes les années — les EDT
+  Licence sont des fixtures récurrentes tous semestres). Migration :
+  `UPDATE external_occupancy SET academic_year_id = NULL` + seed corrigé.
+- **`master_module.is_fixed`** (migration `0007`, `INTEGER NOT NULL
+  DEFAULT 0`) : un module fixé gèle ses séances face au générateur —
+  REGENERATE l'ignore (warning « module fixé ») ; COMPLETE le traite
+  normalement (il ne déplace rien). Toggle dans la page Masters
+  (colonne/badge + action dans `updateMasterModule`).
+
+## Revue P9a — patches exigés
+
+10. `removeAbsence` : une absence ayant des `absence_decision` doit les
+    supprimer dans la transaction (trace conservée par l'audit JSON)
+    plutôt que produire une erreur FK opaque.
+11. `deleteSession` : idem — supprimer les `absence_decision` de la
+    séance dans la TX + recalculer la résolution des absences
+    concernées.
+12. `impactedSessions` (professor.service.ts P6b) : aligner sur
+    `status IN ('PREVUE','REPORTEE')` (cohérent avec P9a).
+13. `db.test.ts` : 27 tables, versions 0001–0007.

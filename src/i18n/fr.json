@@ -256,6 +256,8 @@
     "schedStart": "Début",
     "schedEnd": "Fin",
     "period": "Période",
+    "fixed": "Fixé",
+    "fixedToggled": "Drapeau « fixé » mis à jour.",
     "empty": "Aucun module rattaché",
     "inactiveSuffix": "(désactivé)"
   },
@@ -369,6 +371,7 @@
     "semester": "Semestre",
     "modules": "Modules du semestre",
     "modulesAll": "Tout le semestre",
+    "fixedTag": "Fixé",
     "mode": "Mode",
     "modes": {
       "COMPLETE": "Compléter",

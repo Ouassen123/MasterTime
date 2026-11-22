@@ -827,3 +827,59 @@ describe('registre des séances (listSessionsRegistry / remainingSessions)', () 
       .toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Revue P9a + addendum : suppressions en présence de décisions
+// ---------------------------------------------------------------------------
+
+describe('suppressions liées aux décisions (FK sans CASCADE)', () => {
+  it('removeAbsence supprime les décisions dans la TX — pas d\'erreur FK', async () => {
+    const { removeAbsence } = await import(
+      '../electron/main/db/professor.service'
+    );
+    const db = freshDb();
+    const f = seedFixture(db);
+    const s1 = addSession(db, f, { date: MON });
+    const aId = addAbsence(db, f.profId, MON, MON);
+    const dec = decideSession(db, uid(db), aId, s1, {
+      decision: 'ANNULATION',
+    }, TODAY);
+    expect(dec.ok).toBe(true);
+
+    const res = removeAbsence(db, uid(db), aId);
+    expect(res.ok).toBe(true);
+    expect(
+      get(db, 'SELECT id FROM professor_absence WHERE id = ?', aId),
+    ).toBeUndefined();
+    expect(
+      get(db, 'SELECT id FROM absence_decision WHERE absence_id = ?', aId),
+    ).toBeUndefined();
+  });
+
+  it('deleteSession supprime la décision et recalcule la résolution', async () => {
+    const { deleteSession } = await import(
+      '../electron/main/db/session-edit.service'
+    );
+    const db = freshDb();
+    const f = seedFixture(db);
+    const s1 = addSession(db, f, { date: MON });
+    const s2 = addSession(db, f, { date: TUE });
+    const aId = addAbsence(db, f.profId, MON, TUE);
+    // 2 impactées, 1 décidée → PARTIELLE.
+    const dec = decideSession(db, uid(db), aId, s1, {
+      decision: 'ANNULATION',
+    }, TODAY);
+    expect(dec.ok).toBe(true);
+    expect(resolution(db, aId)).toBe('PARTIELLE');
+
+    // La séance ANNULEE restante est supprimable (date >= today).
+    const del = deleteSession(db, uid(db), s1, TODAY);
+    expect(del.ok).toBe(true);
+    expect(
+      get(db, 'SELECT id FROM absence_decision WHERE session_id = ?', s1),
+    ).toBeUndefined();
+    // Plus aucune décision sur les impactées restantes → A_TRAITER.
+    expect(resolution(db, aId)).toBe('A_TRAITER');
+    void s2;
+  });
+});

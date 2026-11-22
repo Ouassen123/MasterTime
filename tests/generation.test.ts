@@ -1157,3 +1157,80 @@ describe('acceptation seed RÉEL FSJP', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Addendum métier : modules fixés (is_fixed) + Licence permanente
+// ---------------------------------------------------------------------------
+
+describe('module fixé (is_fixed, migration 0007)', () => {
+  it('REGENERATE ignore le mm fixé (warning) et conserve ses séances', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // mm4 : fixé + une PREVUE future qui aurait été remplacée.
+    run(db, 'UPDATE master_module SET is_fixed = 1 WHERE id = ?', f.mm4);
+    const futur = addSession(db, f.mm4, f.prof4, f.room1, '2026-09-24', 480, 600);
+
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, {
+        mode: 'REGENERATE',
+        master_module_ids: [f.mm4, f.mm1],
+      }),
+      TODAY,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(
+      res.data.warnings.some(
+        (w) => w.includes('fixé') && w.includes('MOD-4'),
+      ),
+    ).toBe(true);
+    // Aucune remplacée ne vient du mm fixé.
+    expect(res.data.replaced_ids ?? []).not.toContain(futur);
+    // À l'apply, la séance du module fixé reste PREVUE.
+    const app = applyGeneration(db, uid(db), res.data.generation_id, TODAY);
+    expect(app.ok).toBe(true);
+    const s = get<{ status: string }>(
+      db,
+      'SELECT status FROM session WHERE id = ?',
+      futur,
+    )!;
+    expect(s.status).toBe('PREVUE');
+  });
+
+  it('REGENERATE sur un seul mm fixé → erreur explicite', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    run(db, 'UPDATE master_module SET is_fixed = 1 WHERE id = ?', f.mm4);
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, { mode: 'REGENERATE', master_module_ids: [f.mm4] }),
+      TODAY,
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain('module fixé');
+    }
+  });
+
+  it('COMPLETE traite normalement un mm fixé (il ne déplace rien)', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    run(db, 'UPDATE master_module SET is_fixed = 1 WHERE id = ?', f.mm4);
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, { mode: 'COMPLETE', master_module_ids: [f.mm4] }),
+      TODAY,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // mm4 a 0 séance existante → les 3 manquantes sont proposées.
+    expect(res.data.placed).toHaveLength(3);
+    expect(
+      res.data.warnings.some((w) => w.includes('fixé')),
+    ).toBe(false);
+  });
+});

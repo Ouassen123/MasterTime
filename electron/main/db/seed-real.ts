@@ -270,19 +270,20 @@ export function seedReal(db: DatabaseSync): SeedResult {
       }
     }
 
-    // Occupation Licence (BR-25)
+    // Occupation Licence (BR-25) — permanente : academic_year_id NULL
+    // (blocages récurrents valables toutes années, migration 0007).
     const insOcc = db.prepare(
       `INSERT INTO external_occupancy
          (program, groupe, module, professor, room_id, weekday, start_min,
           end_min, academic_year_id, source_file)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     );
     let licCount = 0;
     for (const [prog, grp, mod, prof, wd, s, e, roomName] of REAL_LIC) {
       const roomId = roomIdByName.get(roomName);
       if (roomId === undefined) continue;
       const canonProf = prof ? (profs.canonByNorm.get(normName(prof)) ?? prof) : prof;
-      insOcc.run(prog, grp, mod, canonProf, roomId, wd, s, e, yearId, 'a.fsjest.ma');
+      insOcc.run(prog, grp, mod, canonProf, roomId, wd, s, e, 'a.fsjest.ma');
       licCount++;
     }
 

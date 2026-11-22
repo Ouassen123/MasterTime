@@ -196,7 +196,7 @@ function getMasterModuleRow(
             mm.professor_id, p.full_name AS professor_name,
             mm.student_group_id, g.name AS group_name,
             mm.volume_min, mm.session_duration_min, mm.planned_sessions,
-            mm.sched_start, mm.sched_end, mm.distribution_rule,
+            mm.sched_start, mm.sched_end, mm.distribution_rule, mm.is_fixed,
             (SELECT count(*) FROM session s
                WHERE s.master_module_id = mm.id
                  AND s.status != 'ANNULEE') AS nb_seances,
@@ -224,7 +224,7 @@ function listMasterModules(
             mm.professor_id, p.full_name AS professor_name,
             mm.student_group_id, g.name AS group_name,
             mm.volume_min, mm.session_duration_min, mm.planned_sessions,
-            mm.sched_start, mm.sched_end, mm.distribution_rule,
+            mm.sched_start, mm.sched_end, mm.distribution_rule, mm.is_fixed,
             (SELECT count(*) FROM session s
                WHERE s.master_module_id = mm.id
                  AND s.status != 'ANNULEE') AS nb_seances,
@@ -791,6 +791,12 @@ function validateMasterModule(
       }
     }
   }
+  if (input.is_fixed != null && typeof input.is_fixed !== 'boolean') {
+    errors.push({
+      field: 'is_fixed',
+      message: 'Le drapeau « fixé » doit être un booléen.',
+    });
+  }
   return errors;
 }
 
@@ -834,8 +840,8 @@ export function attachModule(
           `INSERT INTO master_module
              (master_id, module_id, semester_id, professor_id, student_group_id,
               volume_min, session_duration_min, planned_sessions,
-              distribution_rule, sched_start, sched_end)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              distribution_rule, sched_start, sched_end, is_fixed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           masterId,
           input.module_id,
           input.semester_id,
@@ -847,6 +853,7 @@ export function attachModule(
           input.distribution_rule?.trim() || null,
           input.sched_start.trim(),
           input.sched_end.trim(),
+          input.is_fixed === true ? 1 : 0,
         ).lastInsertRowid,
       ),
     );
@@ -889,7 +896,8 @@ export function updateMasterModule(
         `UPDATE master_module SET module_id = ?, semester_id = ?,
            professor_id = ?, student_group_id = ?, volume_min = ?,
            session_duration_min = ?, planned_sessions = ?,
-           distribution_rule = ?, sched_start = ?, sched_end = ?
+           distribution_rule = ?, sched_start = ?, sched_end = ?,
+           is_fixed = COALESCE(?, is_fixed)
          WHERE id = ?`,
         input.module_id,
         input.semester_id,
@@ -901,6 +909,8 @@ export function updateMasterModule(
         input.distribution_rule?.trim() || null,
         input.sched_start.trim(),
         input.sched_end.trim(),
+        // is_fixed omis → valeur conservée (la bascule passe par l'UI).
+        input.is_fixed == null ? null : input.is_fixed ? 1 : 0,
         id,
       );
     });

@@ -313,6 +313,7 @@ interface MmRow {
   sched_start: string;
   sched_end: string;
   distribution_rule: string | null;
+  is_fixed: number;
 }
 
 function loadMmRows(
@@ -334,7 +335,7 @@ function loadMmRows(
             p.is_active AS prof_active,
             mm.student_group_id, g.name AS group_name, g.size AS group_size,
             mm.session_duration_min, mm.planned_sessions,
-            mm.sched_start, mm.sched_end, mm.distribution_rule
+            mm.sched_start, mm.sched_end, mm.distribution_rule, mm.is_fixed
        FROM master_module mm
        JOIN master ma ON ma.id = mm.master_id
        JOIN module mo ON mo.id = mm.module_id
@@ -463,6 +464,16 @@ export function generate(
       );
       continue;
     }
+    // Module fixé (is_fixed) : ses séances sont gelées — exclu du
+    // workload en REGENERATE seulement ; COMPLETE le traite normalement
+    // (il ne déplace rien, il comble le manquant).
+    if (r.is_fixed === 1 && mode === 'REGENERATE') {
+      warnings.push(
+        `${label} (${r.master_code}) : module fixé — ` +
+          'ignoré en régénération (ses séances sont conservées).',
+      );
+      continue;
+    }
     if (r.prof_active !== 1) {
       warnings.push(
         `${label} (${r.master_code}) : professeur « ${r.professor_name} » désactivé, ignoré.`,
@@ -532,7 +543,9 @@ export function generate(
   if (works.length === 0) {
     return apiErr(
       'Aucun master-module éligible pour ce semestre ' +
-        '(master archivé ou professeur désactivé).',
+        '(master archivé, professeur désactivé, fenêtre invalide' +
+        (mode === 'REGENERATE' ? ' ou module fixé' : '') +
+        ').',
     );
   }
 
@@ -1597,7 +1610,7 @@ export function generationCatalog(
             p.is_active AS prof_active,
             mm.student_group_id, g.name AS group_name, g.size AS group_size,
             mm.session_duration_min, mm.planned_sessions,
-            mm.sched_start, mm.sched_end, mm.distribution_rule
+            mm.sched_start, mm.sched_end, mm.distribution_rule, mm.is_fixed
        FROM master_module mm
        JOIN master ma ON ma.id = mm.master_id
        JOIN module mo ON mo.id = mm.module_id
@@ -1619,6 +1632,7 @@ export function generationCatalog(
     planned_sessions: r.planned_sessions,
     sched_start: r.sched_start,
     sched_end: r.sched_end,
+    is_fixed: r.is_fixed,
   }));
   return apiOk({
     modules,

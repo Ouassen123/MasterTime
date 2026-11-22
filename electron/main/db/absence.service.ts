@@ -207,8 +207,11 @@ export function getAbsence(
  * décidées → RESOLUE ; sinon PARTIELLE. Appelé DANS la transaction de
  * `decideSession` — si la résolution change, l'UPDATE est tracé par une
  * ligne audit_log explicite (même transaction).
+ *
+ * Exporté : `session-edit.service` (deleteSession) le rejoue après la
+ * suppression des `absence_decision` de la séance effacée.
  */
-function recalcResolutionTx(
+export function recalcResolutionTx(
   db: DatabaseSync,
   userId: number | null,
   absenceId: number,

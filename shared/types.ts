@@ -52,7 +52,7 @@ export interface DbStatus {
   /** Message d'erreur bloquant si l'initialisation DB a échoué. */
   error: string | null;
   dbPath: string;
-  /** Nombre de tables utilisateur (attendu : 26 après 0006). */
+  /** Nombre de tables utilisateur (attendu : 26 après 0007 — ALTER, pas de table). */
   tableCount: number;
   /** Versions de migrations appliquées (ex. ['0001']). */
   appliedMigrations: string[];
@@ -324,6 +324,8 @@ export interface MasterModuleRow {
   sched_start: string;
   sched_end: string;
   distribution_rule: string | null;
+  /** 1 = module fixé : REGENERATE l'ignore, COMPLETE le traite (migration 0007). */
+  is_fixed: number;
   /** Séances réelles non annulées rattachées. */
   nb_seances: number;
   /** Toutes les séances référençant le master-module (blocage BR-22). */
@@ -342,6 +344,8 @@ export interface MasterModuleInput {
   sched_end: string;
   /** JSON libre (règles de répartition), null si absent. */
   distribution_rule?: string | null;
+  /** Module fixé (gèle les séances face à REGENERATE) — omis = conservé. */
+  is_fixed?: boolean;
 }
 
 /**
@@ -831,6 +835,8 @@ export interface GenerationModuleRef {
   planned_sessions: number;
   sched_start: string;
   sched_end: string;
+  /** 1 = module fixé (REGENERATE l'ignore) — badge « Fixé » dans l'UI. */
+  is_fixed: number;
 }
 
 /** Catalogue du sélecteur : mm du semestre + fenêtre globale sched. */

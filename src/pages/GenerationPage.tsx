@@ -285,7 +285,10 @@ export function GenerationPage(): React.JSX.Element {
 
   // --- Options du multi-select master-modules (groupées par Master) -----------
   const mmOptions = useMemo(() => {
-    const byMaster = new Map<string, { value: number; label: string }[]>();
+    const byMaster = new Map<
+      string,
+      { value: number; label: string; is_fixed: number }[]
+    >();
     for (const m of catalog?.modules ?? []) {
       const key = `${m.master_code} — ${m.master_name}`;
       const list = byMaster.get(key) ?? [];
@@ -294,6 +297,7 @@ export function GenerationPage(): React.JSX.Element {
         label: `${m.module_label} · ${m.professor_name}${
           m.group_name ? ` · ${m.group_name}` : ''
         }`,
+        is_fixed: m.is_fixed,
       });
       byMaster.set(key, list);
     }
@@ -498,6 +502,14 @@ export function GenerationPage(): React.JSX.Element {
               value={mmIds}
               onChange={setMmIds}
               options={mmOptions}
+              optionRender={(opt) => (
+                <Space size={6}>
+                  <span dir="auto">{opt.label as string}</span>
+                  {(opt.data as { is_fixed?: number }).is_fixed === 1 && (
+                    <Tag color="gold">{t('generation.fixedTag')}</Tag>
+                  )}
+                </Space>
+              )}
             />
           </Col>
           <Col xs={24} sm={12} md={6}>

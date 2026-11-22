@@ -22,6 +22,7 @@ import {
   Select,
   Space,
   Statistic,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -208,6 +209,9 @@ function ModulesTab({
       sched_start: values.sched_start.format('YYYY-MM-DD'),
       sched_end: values.sched_end.format('YYYY-MM-DD'),
       distribution_rule: values.distribution_rule?.trim() || null,
+      // Le drapeau « fixé » se gère par le Switch de la table, pas par
+      // le formulaire : en édition on renvoie la valeur courante.
+      is_fixed: editing?.is_fixed === 1,
     };
     const res = editing
       ? await api().masters.updateModule(editing.id, input)
@@ -217,6 +221,30 @@ function ModulesTab({
       onChanged();
     }
     return res;
+  };
+
+  /** Bascule « fixé » : update complet (le service conserve les autres
+   *  champs via COALESCE, mais on renvoie l'intégralité de la ligne). */
+  const toggleFixed = async (row: MasterModuleRow): Promise<void> => {
+    const res = await api().masters.updateModule(row.id, {
+      module_id: row.module_id,
+      semester_id: row.semester_id,
+      professor_id: row.professor_id,
+      student_group_id: row.student_group_id ?? null,
+      volume_min: row.volume_min,
+      session_duration_min: row.session_duration_min,
+      planned_sessions: row.planned_sessions,
+      sched_start: row.sched_start,
+      sched_end: row.sched_end,
+      distribution_rule: row.distribution_rule,
+      is_fixed: row.is_fixed !== 1,
+    });
+    if (res.ok) {
+      void message.success(t('masterModules.fixedToggled'));
+      onChanged();
+    } else {
+      Modal.error({ title: t('masterModules.fixed'), content: res.error });
+    }
   };
 
   const confirmDetach = (row: MasterModuleRow): void => {
@@ -286,6 +314,22 @@ function ModulesTab({
         <Text type="secondary">
           {r.sched_start} → {r.sched_end}
         </Text>
+      ),
+    },
+    {
+      key: 'fixed',
+      title: t('masterModules.fixed'),
+      width: 110,
+      render: (_v, r) => (
+        <Space size={6}>
+          {r.is_fixed === 1 && <Tag color="gold">{t('masterModules.fixed')}</Tag>}
+          <Switch
+            size="small"
+            checked={r.is_fixed === 1}
+            onChange={() => void toggleFixed(r)}
+            aria-label={t('masterModules.fixed')}
+          />
+        </Space>
       ),
     },
     {

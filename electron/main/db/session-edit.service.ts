@@ -46,6 +46,9 @@ import { all, get, run } from './connection';
 import { isValidIsoDate, todayIso } from './date';
 import { withAudit } from './audit.service';
 import { checkSessionPlacement } from './conflict.service';
+// Cycle assumé (absence.service importe planSessionMove/planStatusChange) :
+// fonction appelée à l'exécution uniquement, jamais à l'initialisation.
+import { recalcResolutionTx } from './absence.service';
 
 // --- Helpers de lecture ------------------------------------------------------
 
@@ -966,8 +969,10 @@ export function setSessionGroups(
  * Suppression définitive (l'audit trace old_values) — refusée pour une
  * séance REALISEE (historique pédagogique) ou passée (une
  * NON_ENCORE_REALISEE doit être ANNULEE, pas effacée). Les lignes filles
- * (session_group, historique, attendances) sont supprimées dans la même
- * transaction (FK sans CASCADE).
+ * (session_group, historique, attendances, `absence_decision`) sont
+ * supprimées dans la même transaction (FK sans CASCADE) ; la résolution
+ * des absences concernées est recalculée (même fonction que
+ * `absence.service` — une décision effacée rouvre le traitement).
  * @param today Date 'YYYY-MM-DD' de la borne « passé » (injectable —
  *   défaut `todayIso()`).
  */
@@ -992,6 +997,20 @@ export function deleteSession(
     );
   }
   withAudit(db, userId, 'DELETE', 'session', id, () => {
+    // Décisions d'absence portant sur cette séance : supprimées dans la
+    // TX (FK sans CASCADE) puis résolution des absences recalculée —
+    // une séance décidée effacée réduit le nombre de décisions.
+    const absenceIds = all<{ absence_id: number }>(
+      db,
+      'SELECT DISTINCT absence_id FROM absence_decision WHERE session_id = ?',
+      id,
+    ).map((r) => r.absence_id);
+    if (absenceIds.length > 0) {
+      run(db, 'DELETE FROM absence_decision WHERE session_id = ?', id);
+      for (const absenceId of absenceIds) {
+        recalcResolutionTx(db, userId, absenceId);
+      }
+    }
     run(db, 'DELETE FROM session_group WHERE session_id = ?', id);
     run(db, 'DELETE FROM session_status_history WHERE session_id = ?', id);
     run(db, 'DELETE FROM session_attendance WHERE session_id = ?', id);

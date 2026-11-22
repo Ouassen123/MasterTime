@@ -569,7 +569,11 @@ export function listAbsences(
   );
 }
 
-/** Séances PREVUE du professeur dans la fenêtre d'absence (BR-17). */
+/**
+ * Séances du professeur ENCORE OUVERTES dans la fenêtre d'absence :
+ * PREVUE **et** REPORTEE (une REPORTEE reste attribuée au titulaire et
+ * occupe son nouveau créneau — même règle que `absence.service`, P9a).
+ */
 function impactedSessions(
   db: DatabaseSync,
   professorId: number,
@@ -586,7 +590,7 @@ function impactedSessions(
        JOIN module mo ON mo.id = mm.module_id
        JOIN master m ON m.id = mm.master_id
        JOIN room r ON r.id = s.room_id
-      WHERE s.professor_id = ? AND s.status = 'PREVUE'
+      WHERE s.professor_id = ? AND s.status IN ('PREVUE','REPORTEE')
         AND s.date BETWEEN ? AND ?
       ORDER BY s.date, s.start_min`,
     professorId,
@@ -661,6 +665,12 @@ export function addAbsence(
   });
 }
 
+/**
+ * Suppression d'une absence : les `absence_decision` liées sont
+ * supprimées dans la MÊME transaction (FK sans CASCADE — la trace reste
+ * dans le JSON old_values de l'audit ; une erreur FK opaque serait
+ * sinon produite).
+ */
 export function removeAbsence(
   db: DatabaseSync,
   userId: number | null,
@@ -670,6 +680,7 @@ export function removeAbsence(
     return apiErr('Absence introuvable.');
   }
   withAudit(db, userId, 'DELETE', 'professor_absence', id, () => {
+    run(db, 'DELETE FROM absence_decision WHERE absence_id = ?', id);
     run(db, 'DELETE FROM professor_absence WHERE id = ?', id);
   });
   return apiOk(null);
