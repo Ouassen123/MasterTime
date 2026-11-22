@@ -39,12 +39,18 @@ multi-semestres en une passe ; échange de professeurs entre mm.
 ## 3. API de génération — `generation.service.ts` (main)
 
 ```ts
-generate(db, uid, params: GenerateParams): ApiResult<GenerationResult>
-applyGeneration(db, uid, generationId): ApiResult<ApplyResult>
+generate(db, uid, params: GenerateParams, today?): ApiResult<GenerationResult>
+applyGeneration(db, uid, generationId, today?): GenerationApplyResult
 listGenerations(db, f): ApiResult<GenerationRow[]>
 getGeneration(db, id): ApiResult<GenerationDetail>   // params+result
 abandonGeneration(db, id): ApiResult<null>
+generationCatalog(db, semesterId): ApiResult<GenerationCatalog>
 ```
+
+`GenerationApplyResult` = `{ ok:true, data: ApplyResult } |
+{ ok:false, error, fields?, conflicts?: PlacementConflict[] }` — les
+conflits BR-10 retournés sont affichés en modal (même composant P7b).
+`today` injectable (tests) pour le clamp temporel des deux modes.
 
 ```ts
 interface GenerateParams {
@@ -60,22 +66,29 @@ interface GenerateParams {
 ```
 
 `GenerationResult` = `generation_id` + `{placed: ProposedSession[],
-unplaced: UnplacedItem[], warnings: string[], summary}`.
+unplaced: UnplacedItem[], warnings: string[], summary, replaced_ids,
+replaced: ReplacedSession[]}`.
 `ProposedSession` = mm, prof, salle, date, start, end + flag `replaces`
-(REGENERATE : remplace des séances existantes). `UnplacedItem` = mm,
-nb séances manquantes, `reasons[]` explicites + `suggestions[]` (BR-15).
+(REGENERATE : remplace des séances existantes). `ReplacedSession` =
+séance existante remplacée + appariement explicite `replaced_by_index`
+(index dans `placed[]`, null → « REMPLACÉE — non replacée »).
+`UnplacedItem` = mm, nb séances manquantes, `reasons[]` explicites +
+`suggestions[]` (BR-15).
 
 ### Modes
 
 - **COMPLETE** : pour chaque mm, `manquantes = planned_sessions −
   nb sessions non-ANNULEE existantes` ; ne place que le manquant. Ne
   touche à rien d'existant. Cas d'usage réel : compléter un semestre,
-  ou générer les M1 (planned renseigné, 0 séances).
-- **REGENERATE** : pour les mm ciblés, les séances **PREVUE futures**
-  (`date >= today`) sont marquées `replaces` dans le diff ; à
-  l'application, elles passent `ANNULEE` (motif « Remplacé par
-  génération #n ») et les nouvelles sont insérées. Séances passées,
-  REALISEE, REPORTEE, ANNULEE : jamais touchées — le quota tient compte
+  ou générer les M1 (planned renseigné, 0 séances). Le début effectif
+  est clampé à `today` (warning si la plage demandée est amputée) —
+  jamais de proposition dans le passé.
+- **REGENERATE** : pour les mm ciblés, les séances **PREVUE futures
+  dans la fenêtre** (`today <= date <= min(date_end, sched_end)`) sont
+  marquées `replaces` dans le diff ; à l'application, elles passent
+  `ANNULEE` (motif « Remplacé par génération #n ») et les nouvelles sont
+  insérées. Séances passées, REALISEE, REPORTEE, ANNULEE, et PREVUE
+  futures **hors fenêtre** : jamais touchées — le quota tient compte
   des séances conservées (`planned − conservées = à replacer`).
 
 ## 4. Moteur (algorithme v1)
@@ -111,19 +124,29 @@ nb séances manquantes, `reasons[]` explicites + `suggestions[]` (BR-15).
    `params_json`, `result_json`, `placed_count`) + audit GENERATE.
    Aucune séance écrite à ce stade (BR-14).
 
-**applyGeneration** : re-lit la génération `PREVIEW` ; **re-vérifie
-chaque séance proposée via `checkSessionPlacement`** (le monde a pu
-changer depuis le preview — refus si un conflit est apparu, liste
-détaillée retournée) ; transaction unique : REGENERATE → ANNULEE des
-remplacées (history + motif), INSERT des nouvelles `PREVUE` (history
-NULL→PREVUE, `session_group` = groupe du mm s'il existe), status
-`APPLIED`, audit APPLY. Idempotent : un id APPLIED/ABANDONED → refus.
+**applyGeneration** : re-lit la génération `PREVIEW` ; valide la **forme**
+du `result_json` (ids entiers > 0, dates ISO calendaires,
+`0 ≤ start < end ≤ 1440` → refus explicite) ; **rejoue les prédicats
+durs par proposition** (même code que le moteur : créneau dans la grille
+`time_slot`, jour hors `calendar_exception`, `date >= today`, prof
+`is_active` + DISPO/INDISPO effectives + pas d'absence, salle
+`is_active` + capacité ≥ effectif, master non `ARCHIVE` → refus
+détaillé) ; **re-vérifie chaque séance proposée via
+`checkSessionPlacement`** (le monde a pu changer depuis le preview —
+refus si un conflit est apparu, liste détaillée retournée) ; transaction
+unique : REGENERATE → ANNULEE des remplacées (history + motif), INSERT
+des nouvelles `PREVUE` (history NULL→PREVUE, `session_group` = groupe
+du mm s'il existe), status `APPLIED`, audit APPLY. Idempotent : un id
+APPLIED/ABANDONED → refus.
 
 ## 5. IPC
 
 `generation:run`, `generation:list`, `generation:get`,
-`generation:apply`, `generation:abandon` — guards payload stricts
-(mêmes helpers que sessions.ts), **pas de requireRole** (BR-24).
+`generation:apply`, `generation:abandon`, `generation:catalog` —
+guards payload stricts (mêmes helpers que sessions.ts), **pas de
+requireRole** (BR-24). `generation:catalog` sert le sélecteur UI :
+master-modules éligibles du semestre + fenêtre sched globale (plage de
+dates par défaut).
 `generation:run` peut durer — lancer en synchrone est acceptable v1
 (main mono-connexion ; la fenêtre reste responsive, requêtes lecture
 bloquées le temps du calcul — documenter, pas de worker).
@@ -175,3 +198,44 @@ INDISPO/absence + 1 external_occupancy + sessions existantes.
 - La grille `time_slot` du seed (08–18 continue) produit des créneaux
   de 2h enchaînés : 8-10, 10-12, … — conforme à l'EDT réel.
 - EXAMEN bloqué en v1 — à paramétrer si la fac programme en examens.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. REGENERATE : la sélection des remplacées est bornée à
+   `date <= min(date_end, sched_end)` — les PREVUE futures hors fenêtre
+   restent « conservées » (sinon annulation sans remplacement possible).
+2. Diff complet : chaque remplacée figure — appariée (REMPLACE + la
+   nouvelle en regard) ou non (ligne « REMPLACÉE — non replacée »).
+   Bouton Appliquer actif dès `placed>0 || replaced>0` ; Popconfirm
+   avertit explicitement du nombre de remplacées sans successeur.
+3. Apply : re-vérification élargie — en plus de `checkSessionPlacement`,
+   rejouer les prédicats durs par proposition : DISPO/INDISPO effectives,
+   absence, `calendar_exception`, `time_slot` (le créneau doit toujours
+   exister dans la grille), `room.is_active`, `professor.is_active`,
+   `master.status != ARCHIVE`, capacité ≥ effectif. Tout échec → refus
+   détaillé sans écriture.
+4. COMPLETE : `gStart` clampé à `today` aussi (warning si la plage
+   demandée est amputée) ; `applyGeneration` refuse toute proposition
+   `date < today`.
+5. Perf/robustesse : `external_occupancy` pré-indexée
+   `Map<roomId|weekday, Interval[]>` ; plafond dur 400 jours sur la plage
+   effective ; `sched_start/end`, `calendar_exception`, `effective_*`
+   non-ISO filtrés au chargement + warning (évite RangeError/OOM).
+6. `seed` non-entier → erreur de champ (au lieu d'un seed aléatoire
+   silencieux).
+7. Apply : validation de forme du `result_json` — `isId` sur chaque
+   `master_module_id`/`professor_id`/`room_id`/`group_id`, dates ISO
+   calendaires, `0 <= start < end <= 1440` → refus explicite.
+8. Tests : EXTERNAL non vacuus (fixture où seule la salle bloquée est
+   compatible) ; REGENERATE borné à la fenêtre ; COMPLETE passé clampé ;
+   `seed` forgé ; apply avec INDISPO/exception/`is_active` apparue →
+   refus ; proposition `date < today` refusée ; payload malformé refusé.
+9. Spec §3/§5 à jour : `generation:catalog`, `GenerationApplyResult`
+   (avec `conflicts?`), param `today` injectable, clamp today, borne
+   REGENERATE.
+
+Noté (différé) : `professor_absence.resolution` ignoré en v1 (Phase 9
+filtrera `RESOLUE`) ; DISPO pas encore effective → « toujours dispo »
+(sémantique P6b) ; EXAMEN bloqué non paramétrable.

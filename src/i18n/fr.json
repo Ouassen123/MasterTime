@@ -421,7 +421,9 @@
       "room": "Salle",
       "group": "Groupe",
       "replacesWhat": "Remplace",
-      "wholeMaster": "Master entier"
+      "wholeMaster": "Master entier",
+      "dropped": "REMPLACÉE — non replacée",
+      "noSuccessor": "Aucune séance proposée en retour"
     },
     "unplacedPanel": {
       "title": "Séances non placées (BR-15)",
@@ -431,6 +433,7 @@
     },
     "apply": "Appliquer",
     "applyConfirm": "Écrire {{inserted}} séance(s) et annuler {{cancelled}} remplacée(s) ?",
+    "applyConfirmOrphans": "dont {{count}} remplacée(s) sans successeur.",
     "applied": "Génération appliquée : {{inserted}} séance(s) insérée(s), {{cancelled}} annulée(s).",
     "abandon": "Abandonner",
     "abandonConfirm": "Abandonner cette prévisualisation ?",

@@ -731,6 +731,26 @@ export interface GenerationSummary {
   days: number;
 }
 
+/**
+ * Séance existante remplacée par une REGENERATE (diff complet) : chaque
+ * remplacée figure — appariée à une proposition (`replaced_by_index`)
+ * ou non (null → ligne « REMPLACÉE — non replacée » côté UI).
+ */
+export interface ReplacedSession {
+  session_id: number;
+  master_module_id: number;
+  module_label: string;
+  master_label: string;
+  professor_name: string;
+  date: string;
+  start_min: number;
+  end_min: number;
+  room_name: string;
+  /** Index dans `placed[]` de la proposition qui la remplace — null si
+   *  non replacée (échec partiel ou quota inférieur). */
+  replaced_by_index: number | null;
+}
+
 /** Contenu de `result_json` — diff + rapport d'échec. */
 export interface GenerationPayload {
   placed: ProposedSession[];
@@ -739,6 +759,8 @@ export interface GenerationPayload {
   summary: GenerationSummary;
   /** Ids des séances existantes remplacées (REGENERATE, à l'apply). */
   replaced_ids: number[];
+  /** Détail des remplacées + appariement explicite (diff complet). */
+  replaced?: ReplacedSession[];
 }
 
 /** Résultat de `generation:run` = payload + id de la preview persistée. */

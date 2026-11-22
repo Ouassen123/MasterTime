@@ -61,6 +61,7 @@ import type {
   GenerationRow,
   PlacementConflict,
   ProposedSession,
+  ReplacedSession,
   SemesterRef,
   UnplacedItem,
 } from '../../shared/types';
@@ -88,6 +89,14 @@ function minToHHMM(min: number): string {
     min % 60,
   ).padStart(2, '0')}`;
 }
+
+/**
+ * Ligne du diff : proposition du moteur (`placed`) ou séance remplacée
+ * sans successeur (`dropped` — affichée pour un diff complet).
+ */
+type DiffRow =
+  | { rowKind: 'placed'; key: string; p: ProposedSession }
+  | { rowKind: 'dropped'; key: string; r: ReplacedSession };
 
 export function GenerationPage(): React.JSX.Element {
   const { t } = useTranslation();
@@ -346,13 +355,15 @@ export function GenerationPage(): React.JSX.Element {
     },
   ];
 
-  // --- Colonnes diff -------------------------------------------------------------
-  const diffColumns: ColumnsType<ProposedSession> = [
+  // --- Colonnes diff (union : propositions + remplacées sans successeur) ------
+  const diffColumns: ColumnsType<DiffRow> = [
     {
       title: t('generation.diff.kind'),
-      width: 110,
-      render: (_: unknown, p) =>
-        p.replaces_session_id != null ? (
+      width: 150,
+      render: (_: unknown, row) =>
+        row.rowKind === 'dropped' ? (
+          <Tag color="#DC2626">{t('generation.diff.dropped')}</Tag>
+        ) : row.p.replaces_session_id != null ? (
           <Tag color="#D97706">{t('generation.diff.replaces')}</Tag>
         ) : (
           <Tag color="#16A34A">{t('generation.diff.new')}</Tag>
@@ -360,57 +371,98 @@ export function GenerationPage(): React.JSX.Element {
     },
     {
       title: t('generation.diff.date'),
-      dataIndex: 'date',
       width: 130,
-      render: (v: string) => dayjs(v).format('dddd DD/MM'),
+      render: (_: unknown, row) =>
+        dayjs(row.rowKind === 'placed' ? row.p.date : row.r.date).format(
+          'dddd DD/MM',
+        ),
     },
     {
       title: t('generation.diff.time'),
       width: 110,
-      render: (_: unknown, p) =>
-        `${minToHHMM(p.start_min)}–${minToHHMM(p.end_min)}`,
+      render: (_: unknown, row) => {
+        const s = row.rowKind === 'placed' ? row.p : row.r;
+        return `${minToHHMM(s.start_min)}–${minToHHMM(s.end_min)}`;
+      },
     },
     {
       title: t('generation.diff.module'),
-      dataIndex: 'module_label',
       ellipsis: true,
-      render: (v: string, p) => (
+      render: (_: unknown, row) => {
+        const s = row.rowKind === 'placed' ? row.p : row.r;
+        return (
+          <span dir="auto">
+            {s.module_label}
+            <Text type="secondary"> · {s.master_label.split(' — ')[0]}</Text>
+          </span>
+        );
+      },
+    },
+    {
+      title: t('generation.diff.professor'),
+      ellipsis: true,
+      render: (_: unknown, row) => (
         <span dir="auto">
-          {v}
-          <Text type="secondary"> · {p.master_label.split(' — ')[0]}</Text>
+          {row.rowKind === 'placed' ? row.p.professor_name : row.r.professor_name}
         </span>
       ),
     },
     {
-      title: t('generation.diff.professor'),
-      dataIndex: 'professor_name',
-      ellipsis: true,
-      render: (v: string) => <span dir="auto">{v}</span>,
-    },
-    {
       title: t('generation.diff.room'),
-      dataIndex: 'room_name',
       width: 120,
+      render: (_: unknown, row) =>
+        row.rowKind === 'placed' ? row.p.room_name : row.r.room_name,
     },
     {
       title: t('generation.diff.group'),
-      dataIndex: 'group_name',
       width: 110,
-      render: (v: string | null) => (
-        <span dir="auto">{v ?? t('generation.diff.wholeMaster')}</span>
-      ),
+      render: (_: unknown, row) =>
+        row.rowKind === 'placed' ? (
+          <span dir="auto">
+            {row.p.group_name ?? t('generation.diff.wholeMaster')}
+          </span>
+        ) : (
+          '—'
+        ),
     },
     {
       title: t('generation.diff.replacesWhat'),
-      dataIndex: 'replaces_label',
       width: 220,
-      render: (v: string | null) =>
-        v ? <Text type="secondary">{v}</Text> : '—',
+      render: (_: unknown, row) =>
+        row.rowKind === 'placed' ? (
+          row.p.replaces_label ? (
+            <Text type="secondary">{row.p.replaces_label}</Text>
+          ) : (
+            '—'
+          )
+        ) : (
+          <Text type="secondary">{t('generation.diff.noSuccessor')}</Text>
+        ),
     },
   ];
 
   const result = detail?.result ?? null;
   const isPreview = detail?.row.status === 'PREVIEW';
+  // Diff complet : remplacées sans proposition remplaçante (échec partiel
+  // ou quota inférieur au nombre d'annulées).
+  const unpairedReplaced = (result?.replaced ?? []).filter(
+    (r) => r.replaced_by_index == null,
+  );
+  const diffRows: DiffRow[] = [
+    ...(result?.placed ?? []).map((p) => ({
+      rowKind: 'placed' as const,
+      key: `p-${p.master_module_id}-${p.date}-${p.start_min}-${p.room_id}`,
+      p,
+    })),
+    ...unpairedReplaced.map((r) => ({
+      rowKind: 'dropped' as const,
+      key: `d-${r.session_id}`,
+      r,
+    })),
+  ];
+  const canApply =
+    result != null &&
+    (result.summary.placed > 0 || result.summary.replaced > 0);
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -619,21 +671,23 @@ export function GenerationPage(): React.JSX.Element {
               />
             )}
 
-            {/* Diff des séances proposées */}
-            <Table<ProposedSession>
+            {/* Diff des séances proposées + remplacées non replacées */}
+            <Table<DiffRow>
               size="small"
               title={() => (
                 <Text strong>{t('generation.diff.title')}</Text>
               )}
-              rowKey={(p) =>
-                `${p.master_module_id}-${p.date}-${p.start_min}-${p.room_id}`
-              }
+              rowKey="key"
               columns={diffColumns}
-              dataSource={result.placed}
+              dataSource={diffRows}
               pagination={
-                result.placed.length > 20 ? { pageSize: 20 } : false
+                diffRows.length > 20 ? { pageSize: 20 } : false
               }
               scroll={{ x: true }}
+              onRow={(row) => ({
+                style:
+                  row.rowKind === 'dropped' ? { opacity: 0.75 } : undefined,
+              })}
             />
 
             {/* Panneau BR-15 — non placées */}
@@ -715,10 +769,17 @@ export function GenerationPage(): React.JSX.Element {
                 <>
                   <Popconfirm
                     title={t('generation.apply')}
-                    description={t('generation.applyConfirm', {
-                      inserted: result.summary.placed,
-                      cancelled: result.summary.replaced,
-                    })}
+                    description={
+                      t('generation.applyConfirm', {
+                        inserted: result.summary.placed,
+                        cancelled: result.summary.replaced,
+                      }) +
+                      (unpairedReplaced.length > 0
+                        ? ` ${t('generation.applyConfirmOrphans', {
+                            count: unpairedReplaced.length,
+                          })}`
+                        : '')
+                    }
                     okText={t('common.ok')}
                     cancelText={t('common.cancel')}
                     onConfirm={() => void doApply()}
@@ -727,7 +788,7 @@ export function GenerationPage(): React.JSX.Element {
                       type="primary"
                       icon={<CheckOutlined />}
                       loading={applying}
-                      disabled={result.placed.length === 0}
+                      disabled={!canApply}
                     >
                       {t('generation.apply')}
                     </Button>

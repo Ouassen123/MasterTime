@@ -6,16 +6,21 @@
  *   requête SQL par candidat (NFR-7). Persiste une ligne
  *   `schedule_generation` PREVIEW (params_json + result_json) auditée —
  *   aucune séance n'est écrite à ce stade (BR-14).
- * - `applyGeneration` : re-vérifie chaque séance proposée via
- *   `checkSessionPlacement` (le monde a pu changer) puis, dans UNE
- *   transaction auditée : ANNULEE des remplacées (REGENERATE, motif +
+ * - `applyGeneration` : valide la forme du `result_json` stocké, rejoue
+ *   les prédicats durs par proposition (grille time_slot, exceptions,
+ *   DISPO/INDISPO + absences + is_active prof, salle active + capacité,
+ *   master non ARCHIVE, date >= today) puis re-vérifie chaque séance
+ *   proposée via `checkSessionPlacement` (le monde a pu changer) — dans
+ *   UNE transaction auditée : ANNULEE des remplacées (REGENERATE, motif +
  *   history), INSERT des nouvelles PREVUE (history NULL→PREVUE,
  *   session_group = groupe du mm), status APPLIED. Idempotent : un id
  *   APPLIED/ABANDONED est refusé.
  * - Modes : COMPLETE ne place que le manquant (planned − non-ANNULEE) ;
- *   REGENERATE ne remplace QUE les PREVUE futures (date >= today,
- *   injectable) — passées/REALISEE/REPORTEE/ANNULEE jamais touchées, le
- *   quota tient compte des conservées.
+ *   REGENERATE ne remplace QUE les PREVUE futures dans la fenêtre
+ *   (today <= date <= min(date_end, sched_end), `today` injectable) —
+ *   passées/REALISEE/REPORTEE/ANNULEE et futures hors fenêtre jamais
+ *   touchées, le quota tient compte des conservées. Le début effectif
+ *   est toujours clampé à `today` (plafond 400 jours par plage).
  *
  * Contraintes dures simulées (BR-7/8/9) : salle libre + is_active +
  * capacité ≥ effectif + hors external_occupancy (même règle année que
@@ -48,6 +53,7 @@ import type {
   GenerationStatus,
   PlacementConflict,
   ProposedSession,
+  ReplacedSession,
   UnplacedItem,
 } from '../../../shared/types';
 import {
@@ -84,6 +90,14 @@ function minToHHMM(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, '0')}h${String(
     min % 60,
   ).padStart(2, '0')}`;
+}
+
+/** Nombre de jours calendaires entre deux dates ISO (b − a). */
+function isoDayDiff(a: string, b: string): number {
+  return Math.round(
+    (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) /
+      86400000,
+  );
 }
 
 /** PRNG déterministe (mulberry32) — reproductibilité par `seed`. */
@@ -155,6 +169,18 @@ interface ExtOcc {
   yearId: number | null;
 }
 
+/** Séance existante PREVUE remplacée en REGENERATE (détails du diff). */
+interface ReplacedInfo {
+  session_id: number;
+  date: string;
+  start_min: number;
+  end_min: number;
+  room_name: string;
+  professor_name: string;
+  /** Libellé court pour `replaces_label` des propositions. */
+  label: string;
+}
+
 /** master-module chargé pour la génération. */
 interface MmWork {
   id: number;
@@ -177,9 +203,8 @@ interface MmWork {
   schedEnd: string;
   /** À placer (quota net des conservées). */
   missing: number;
-  /** REGENERATE : séances PREVUE futures remplacées. */
-  replacedIds: number[];
-  replacedLabels: Map<number, string>;
+  /** REGENERATE : séances PREVUE futures remplacées (dans la fenêtre). */
+  replacedInfos: ReplacedInfo[];
   /** Jours candidats ordonnés (index = position cible BR-13). */
   days: string[];
   /** Créneaux candidats par date (découpés des time_slot). */
@@ -261,6 +286,135 @@ function profBlock(
   }
   return null;
 }
+
+// --- Référentiels partagés (moteur + re-vérification apply) -------------------
+
+/** Fenêtres `time_slot` par weekday (0=lun..6=dim), triées. */
+function loadSlotsByWeekday(db: DatabaseSync): Map<number, Interval[]> {
+  const map = new Map<number, Interval[]>();
+  for (const ts of all<{ weekday: number; start_min: number; end_min: number }>(
+    db,
+    'SELECT weekday, start_min, end_min FROM time_slot ORDER BY weekday, start_min',
+  )) {
+    const list = map.get(ts.weekday) ?? [];
+    list.push({ s: ts.start_min, e: ts.end_min });
+    map.set(ts.weekday, list);
+  }
+  return map;
+}
+
+/**
+ * Jours d'exception (toutes `kind`, EXAMEN bloque en v1). Les lignes à
+ * bornes non-ISO ou incohérentes sont ignorées + warning — sinon la
+ * boucle d'expansion jour par jour divergerait (RangeError/OOM).
+ */
+function loadExceptions(db: DatabaseSync, warnings: string[]): Set<string> {
+  const set = new Set<string>();
+  let dropped = 0;
+  for (const ex of all<{ start_date: string; end_date: string }>(
+    db,
+    'SELECT start_date, end_date FROM calendar_exception',
+  )) {
+    if (
+      !isValidIsoDate(ex.start_date) ||
+      !isValidIsoDate(ex.end_date) ||
+      ex.start_date > ex.end_date
+    ) {
+      dropped++;
+      continue;
+    }
+    for (let d = ex.start_date; d <= ex.end_date; d = addDays(d, 1)) {
+      set.add(d);
+    }
+  }
+  if (dropped > 0) {
+    warnings.push(
+      `${dropped} exception(s) calendaire à dates invalides ignorée(s).`,
+    );
+  }
+  return set;
+}
+
+/**
+ * Contraintes professeurs : `is_active` + DISPO/INDISPO + absences.
+ * Les disponibilités à `effective_*` non-ISO sont ignorées + warning.
+ */
+function loadProfConstraints(
+  db: DatabaseSync,
+  profIds: number[],
+  warnings: string[],
+): Map<number, ProfConstraints> {
+  const cons = new Map<number, ProfConstraints>();
+  for (const pid of profIds) {
+    cons.set(pid, { isActive: true, dispo: [], indispo: [], absences: [] });
+  }
+  if (profIds.length === 0) return cons;
+  const ph = profIds.map(() => '?').join(',');
+  for (const r of all<{ id: number; is_active: number }>(
+    db,
+    `SELECT id, is_active FROM professor WHERE id IN (${ph})`,
+    ...profIds,
+  )) {
+    const c = cons.get(r.id);
+    if (c) c.isActive = r.is_active === 1;
+  }
+  let droppedAvail = 0;
+  for (const r of all<AvailRow & { professor_id: number; kind: string }>(
+    db,
+    `SELECT professor_id, weekday, start_min, end_min, kind,
+            effective_from, effective_to
+       FROM professor_availability WHERE professor_id IN (${ph})`,
+    ...profIds,
+  )) {
+    const c = cons.get(r.professor_id);
+    if (!c) continue;
+    if (
+      (r.effective_from != null && !isValidIsoDate(r.effective_from)) ||
+      (r.effective_to != null && !isValidIsoDate(r.effective_to))
+    ) {
+      droppedAvail++;
+      continue;
+    }
+    (r.kind === 'DISPO' ? c.dispo : c.indispo).push(r);
+  }
+  if (droppedAvail > 0) {
+    warnings.push(
+      `${droppedAvail} disponibilité(s) professeur à dates d'effet ` +
+        'invalides ignorée(s).',
+    );
+  }
+  for (const r of all<{
+    professor_id: number;
+    start_date: string;
+    end_date: string;
+  }>(
+    db,
+    `SELECT professor_id, start_date, end_date
+       FROM professor_absence WHERE professor_id IN (${ph})`,
+    ...profIds,
+  )) {
+    cons.get(r.professor_id)?.absences.push({
+      start: r.start_date,
+      end: r.end_date,
+    });
+  }
+  return cons;
+}
+
+/** Le créneau tient-il entier dans une fenêtre time_slot du weekday ? */
+function slotFitsGrid(
+  slotsByWeekday: Map<number, Interval[]>,
+  weekday: number,
+  s: number,
+  e: number,
+): boolean {
+  return (slotsByWeekday.get(weekday) ?? []).some(
+    (w) => w.s <= s && e <= w.e,
+  );
+}
+
+/** Plafond dur sur la plage effective de génération (robustesse NFR-7). */
+const MAX_RANGE_DAYS = 400;
 
 // --- Chargement --------------------------------------------------------------
 
@@ -405,10 +559,19 @@ export function generate(
       message: 'Maximum par jour invalide (entier 1–12).',
     });
   }
-  const seed =
-    params?.seed != null && Number.isInteger(params.seed)
-      ? (params.seed as number)
-      : Math.floor(Math.random() * 2 ** 31);
+  let seed = 0;
+  if (params?.seed != null) {
+    if (Number.isInteger(params.seed)) {
+      seed = params.seed as number;
+    } else {
+      errors.push({
+        field: 'seed',
+        message: 'Graine invalide (entier attendu).',
+      });
+    }
+  } else {
+    seed = Math.floor(Math.random() * 2 ** 31);
+  }
   if (errors.length > 0) {
     return apiErr('Paramètres de génération invalides.', errors);
   }
@@ -428,6 +591,17 @@ export function generate(
     if (r.prof_active !== 1) {
       warnings.push(
         `${label} (${r.master_code}) : professeur « ${r.professor_name} » désactivé, ignoré.`,
+      );
+      continue;
+    }
+    if (
+      !isValidIsoDate(r.sched_start) ||
+      !isValidIsoDate(r.sched_end) ||
+      r.sched_start > r.sched_end
+    ) {
+      warnings.push(
+        `${label} (${r.master_code}) : fenêtre sched_start/sched_end ` +
+          'invalide, ignoré.',
       );
       continue;
     }
@@ -465,8 +639,7 @@ export function generate(
       schedStart: r.sched_start,
       schedEnd: r.sched_end,
       missing: 0,
-      replacedIds: [],
-      replacedLabels: new Map(),
+      replacedInfos: [],
       days: [],
       slotsByDay: new Map(),
       degree: 0,
@@ -489,66 +662,27 @@ export function generate(
   }
 
   // --- Référentiels temps & contraintes --------------------------------------
-  const slotsByWeekday = new Map<number, Interval[]>();
-  for (const ts of all<{ weekday: number; start_min: number; end_min: number }>(
-    db,
-    'SELECT weekday, start_min, end_min FROM time_slot ORDER BY weekday, start_min',
-  )) {
-    const list = slotsByWeekday.get(ts.weekday) ?? [];
-    list.push({ s: ts.start_min, e: ts.end_min });
-    slotsByWeekday.set(ts.weekday, list);
-  }
-  const exceptions = new Set<string>();
-  for (const ex of all<{ start_date: string; end_date: string }>(
-    db,
-    "SELECT start_date, end_date FROM calendar_exception",
-  )) {
-    for (let d = ex.start_date; d <= ex.end_date; d = addDays(d, 1)) {
-      exceptions.add(d);
-    }
-  }
+  const slotsByWeekday = loadSlotsByWeekday(db);
+  const exceptions = loadExceptions(db, warnings);
   const profIds = [...new Set(works.map((w) => w.professorId))];
-  const profCons = new Map<number, ProfConstraints>();
-  for (const pid of profIds) {
-    profCons.set(pid, { isActive: true, dispo: [], indispo: [], absences: [] });
-  }
-  const ph = profIds.map(() => '?').join(',');
-  for (const r of all<AvailRow & { professor_id: number; kind: string }>(
-    db,
-    `SELECT professor_id, weekday, start_min, end_min, kind,
-            effective_from, effective_to
-       FROM professor_availability WHERE professor_id IN (${ph})`,
-    ...profIds,
-  )) {
-    const c = profCons.get(r.professor_id);
-    if (!c) continue;
-    (r.kind === 'DISPO' ? c.dispo : c.indispo).push(r);
-  }
-  for (const r of all<{
-    professor_id: number;
-    start_date: string;
-    end_date: string;
-  }>(
-    db,
-    `SELECT professor_id, start_date, end_date
-       FROM professor_absence WHERE professor_id IN (${ph})`,
-    ...profIds,
-  )) {
-    profCons.get(r.professor_id)?.absences.push({
-      start: r.start_date,
-      end: r.end_date,
-    });
-  }
+  const profCons = loadProfConstraints(db, profIds, warnings);
   const rooms = all<RoomInfo>(
     db,
     'SELECT id, name, capacity FROM room WHERE is_active = 1 ORDER BY id',
   );
-  const extOcc = all<ExtOcc>(
+  // Occupation Licence pré-indexée `roomId|weekday` → intervalles (perf :
+  // pas de .some() linéaire par candidat — Map indexée).
+  const extOccByRoomDay = new Map<string, ExtOcc[]>();
+  for (const o of all<ExtOcc>(
     db,
     `SELECT room_id AS roomId, weekday, start_min AS s, end_min AS e,
             academic_year_id AS yearId
        FROM external_occupancy`,
-  );
+  )) {
+    const list = extOccByRoomDay.get(`${o.roomId}|${o.weekday}`) ?? [];
+    list.push(o);
+    extOccByRoomDay.set(`${o.roomId}|${o.weekday}`, list);
+  }
 
   // --- Quotas : existantes (toutes dates) + remplacées (REGENERATE) ----------
   const workById = new Map(works.map((w) => [w.id, w]));
@@ -561,8 +695,11 @@ export function generate(
     if (w) w.existing = r.c;
   }
   if (mode === 'REGENERATE') {
-    // Remplacées = PREVUE futures des mm ciblés — libèrent leur créneau
-    // (annulées à l'apply) et comptent dans le quota comme NON conservées.
+    // Remplacées = PREVUE futures des mm ciblés DANS la fenêtre
+    // (bornées à date <= min(date_end, sched_end) — les PREVUE futures
+    // hors fenêtre restent « conservées », sinon annulation sans
+    // remplacement possible). Elles libèrent leur créneau (annulées à
+    // l'apply) et comptent dans le quota comme NON conservées.
     for (const r of all<{
       id: number;
       master_module_id: number;
@@ -570,29 +707,39 @@ export function generate(
       start_min: number;
       end_min: number;
       room_name: string;
+      professor_name: string;
     }>(
       db,
       `SELECT s.id, s.master_module_id, s.date, s.start_min, s.end_min,
-              ro.name AS room_name
+              ro.name AS room_name, pr.full_name AS professor_name
          FROM session s
          JOIN room ro ON ro.id = s.room_id
+         JOIN professor pr ON pr.id = s.professor_id
+         JOIN master_module mm ON mm.id = s.master_module_id
         WHERE s.status = 'PREVUE' AND s.date >= ?
+          AND s.date <= min(?, mm.sched_end)
           AND s.master_module_id IN (${works.map(() => '?').join(',')})
         ORDER BY s.date, s.start_min, s.id`,
       today,
+      dateEnd,
       ...works.map((w) => w.id),
     )) {
       const w = workById.get(r.master_module_id);
       if (!w) continue;
-      w.replacedIds.push(r.id);
-      w.replacedLabels.set(
-        r.id,
-        `${r.date} ${minToHHMM(r.start_min)}–${minToHHMM(r.end_min)} · ${r.room_name}`,
-      );
+      w.replacedInfos.push({
+        session_id: r.id,
+        date: r.date,
+        start_min: r.start_min,
+        end_min: r.end_min,
+        room_name: r.room_name,
+        professor_name: r.professor_name,
+        label: `${r.date} ${minToHHMM(r.start_min)}–${minToHHMM(r.end_min)} · ${r.room_name}`,
+      });
     }
   }
   for (const w of works) {
-    const kept = w.existing - (mode === 'REGENERATE' ? w.replacedIds.length : 0);
+    const kept =
+      w.existing - (mode === 'REGENERATE' ? w.replacedInfos.length : 0);
     w.missing = Math.max(0, w.planned - kept);
   }
   const alreadyDone = works.filter((w) => w.missing === 0).length;
@@ -616,7 +763,9 @@ export function generate(
     }
     m.set(date, (m.get(date) ?? 0) + delta);
   };
-  const replacedSet = new Set(works.flatMap((w) => w.replacedIds));
+  const replacedSet = new Set(
+    works.flatMap((w) => w.replacedInfos.map((i) => i.session_id)),
+  );
   // Séances existantes dans la fenêtre (hors ANNULEE, hors remplacées).
   interface OccSession {
     id: number;
@@ -666,9 +815,24 @@ export function generate(
   // --- Grille candidate par mm ----------------------------------------------
   const allDays = new Set<string>();
   let truncated = false;
+  // Le début effectif est toujours clampé à `today` (les deux modes) :
+  // placer une séance dans le passé n'a pas de sens — warning si la
+  // plage demandée est amputée.
+  if (dateStart < today) {
+    warnings.push(
+      `Plage amputée : le début demandé (${dateStart}) est passé — ` +
+        `génération bornée à aujourd'hui (${today}).`,
+    );
+  }
+  let rangeClamped = 0;
   for (const w of works) {
-    const gStart = max3(dateStart, w.schedStart, mode === 'REGENERATE' ? today : '');
-    const gEnd = w.schedEnd < dateEnd ? w.schedEnd : dateEnd;
+    const gStart = max3(dateStart, w.schedStart, today);
+    let gEnd = w.schedEnd < dateEnd ? w.schedEnd : dateEnd;
+    // Plafond dur : la plage effective ne dépasse jamais 400 jours.
+    if (gStart <= gEnd && isoDayDiff(gStart, gEnd) + 1 > MAX_RANGE_DAYS) {
+      gEnd = addDays(gStart, MAX_RANGE_DAYS - 1);
+      rangeClamped++;
+    }
     for (let d = gStart; d <= gEnd; d = addDays(d, 1)) {
       const wd = weekdayOf(d);
       const windows = slotsByWeekday.get(wd);
@@ -697,6 +861,12 @@ export function generate(
       }
     }
     w.degree = deg;
+  }
+  if (rangeClamped > 0) {
+    warnings.push(
+      `Plage effective plafonnée à ${MAX_RANGE_DAYS} jours pour ` +
+        `${rangeClamped} master-module(s).`,
+    );
   }
   if (truncated) {
     warnings.push(
@@ -739,13 +909,9 @@ export function generate(
     s: number,
     e: number,
   ): boolean =>
-    extOcc.some(
+    (extOccByRoomDay.get(`${roomId}|${weekday}`) ?? []).some(
       (o) =>
-        o.roomId === roomId &&
-        o.weekday === weekday &&
-        (o.yearId == null || o.yearId === w.yearId) &&
-        s < o.e &&
-        o.s < e,
+        (o.yearId == null || o.yearId === w.yearId) && s < o.e && o.s < e,
     );
 
   for (const w of ordered) {
@@ -756,6 +922,11 @@ export function generate(
     );
     const n = w.missing;
     const D = w.days.length;
+    // Appariement explicite remplacée ↔ proposition : la k-ième
+    // proposition ÉMISE du mm consomme la k-ième remplacée (un échec de
+    // placement ne décale pas l'appariement). Les remplacées au-delà
+    // restent appariées à null → « non replacée » dans le diff.
+    let placedForW = 0;
     for (let i = 0; i < n; i++) {
       // Position cible BR-13 : i × jours/n (répartition régulière).
       const target = n > 1 ? Math.floor((i * D) / n) : Math.floor(D / 2);
@@ -877,8 +1048,9 @@ export function generate(
             `(maximum souple ${limit} dépassé).`,
         );
       }
-      const replacesId =
-        i < w.replacedIds.length ? w.replacedIds[i] : null;
+      const replaces = w.replacedInfos[placedForW] ?? null;
+      const replacesId = replaces?.session_id ?? null;
+      placedForW++;
       placed.push({
         master_module_id: w.id,
         module_label: w.moduleLabel,
@@ -894,8 +1066,7 @@ export function generate(
         start_min: best.s,
         end_min: best.e,
         replaces_session_id: replacesId,
-        replaces_label:
-          replacesId != null ? (w.replacedLabels.get(replacesId) ?? null) : null,
+        replaces_label: replaces?.label ?? null,
       });
     }
   }
@@ -983,14 +1154,45 @@ export function generate(
   }
 
   const unplacedList = [...unplaced.values()];
-  const replacedIds = works.flatMap((w) => w.replacedIds);
-  const payload: GenerationPayload = {
-    placed: [...placed].sort(
+  const placedSorted = [...placed].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.start_min - b.start_min ||
+      a.master_module_id - b.master_module_id,
+  );
+  // Diff complet : chaque remplacée figure avec son appariement explicite
+  // (index dans `placed[]`) ou null → ligne « REMPLACÉE — non replacée ».
+  const indexByReplacedId = new Map<number, number>();
+  placedSorted.forEach((p, idx) => {
+    if (p.replaces_session_id != null) {
+      indexByReplacedId.set(p.replaces_session_id, idx);
+    }
+  });
+  const replacedSessions: ReplacedSession[] = works
+    .flatMap((w) =>
+      w.replacedInfos.map((info) => ({
+        session_id: info.session_id,
+        master_module_id: w.id,
+        module_label: w.moduleLabel,
+        master_label: w.masterLabel,
+        professor_name: info.professor_name,
+        date: info.date,
+        start_min: info.start_min,
+        end_min: info.end_min,
+        room_name: info.room_name,
+        replaced_by_index:
+          indexByReplacedId.get(info.session_id) ?? null,
+      })),
+    )
+    .sort(
       (a, b) =>
         a.date.localeCompare(b.date) ||
         a.start_min - b.start_min ||
-        a.master_module_id - b.master_module_id,
-    ),
+        a.session_id - b.session_id,
+    );
+  const replacedIds = replacedSessions.map((r) => r.session_id);
+  const payload: GenerationPayload = {
+    placed: placedSorted,
     unplaced: unplacedList,
     warnings,
     summary: {
@@ -1000,6 +1202,7 @@ export function generate(
       days: allDays.size,
     },
     replaced_ids: replacedIds,
+    replaced: replacedSessions,
   };
   const normalized: GenerateParams = {
     semester_id: semesterId,
@@ -1047,6 +1250,29 @@ function max3(a: string, b: string, c: string): string {
 }
 
 /**
+ * Validation de forme d'une proposition stockée (`result_json`) :
+ * références entières > 0, date ISO calendaire, 0 ≤ début < fin ≤ 1440.
+ */
+function isPlacedShape(p: unknown): p is ProposedSession {
+  const o = p as ProposedSession | null;
+  return (
+    o != null &&
+    isId(o.master_module_id) &&
+    isId(o.master_id) &&
+    isId(o.professor_id) &&
+    isId(o.room_id) &&
+    (o.group_id == null || isId(o.group_id)) &&
+    typeof o.date === 'string' &&
+    isValidIsoDate(o.date) &&
+    Number.isInteger(o.start_min) &&
+    Number.isInteger(o.end_min) &&
+    o.start_min >= 0 &&
+    o.start_min < o.end_min &&
+    o.end_min <= 1440
+  );
+}
+
+/**
  * Application d'une preview : re-vérification monde réel de chaque
  * candidate (`checkSessionPlacement`, les remplacées exclues), puis
  * transaction unique auditée — REGENERATE → ANNULEE des remplacées
@@ -1082,8 +1308,24 @@ export function applyGeneration(
   if (payload == null || !Array.isArray(payload.placed)) {
     return fail('Résultat de génération illisible.');
   }
+  // Validation de forme du payload stocké : ids entiers > 0, dates ISO
+  // calendaires, horaires 0 ≤ début < fin ≤ 24h00 — refus explicite
+  // plutôt qu'une insertion corrompue.
+  if (payload.placed.some((p) => !isPlacedShape(p))) {
+    return fail(
+      'Résultat de génération invalide : propositions malformées — ' +
+        'régénérez le planning.',
+    );
+  }
   const placed = payload.placed;
-  const replacedIds = (payload.replaced_ids ?? []).filter(isId);
+  const replacedIds = [
+    ...new Set(
+      [
+        ...(payload.replaced_ids ?? []),
+        ...(payload.replaced ?? []).map((r) => r?.session_id),
+      ].filter(isId),
+    ),
+  ];
 
   // Les remplacées doivent être encore PREVUE futures — une séance passée
   // ou changée de statut depuis la preview invalide l'application.
@@ -1103,6 +1345,87 @@ export function applyGeneration(
       `Application refusée : ${stale.length} séance(s) à remplacer ont ` +
         `changé depuis la preview (${stale.slice(0, 5).join(', ')}). ` +
         'Régénérez le planning.',
+    );
+  }
+
+  // Re-vérification des prédicats durs par proposition (le monde a pu
+  // changer depuis la preview — mêmes règles que le moteur, rejouées) :
+  // créneau dans une fenêtre time_slot du weekday, jour hors exception
+  // calendaire, date non passée, professeur actif + DISPO/INDISPO
+  // effectives + pas d'absence, salle active + capacité ≥ effectif du
+  // groupe, master non ARCHIVE. Tout échec → refus détaillé, rien écrit.
+  const applySlotsByWeekday = loadSlotsByWeekday(db);
+  const applyExceptions = loadExceptions(db, []);
+  const applyProfCons = loadProfConstraints(
+    db,
+    [...new Set(placed.map((p) => p.professor_id))],
+    [],
+  );
+  const applyRooms = new Map(
+    all<{ id: number; is_active: number; capacity: number | null }>(
+      db,
+      'SELECT id, is_active, capacity FROM room',
+    ).map((r) => [r.id, r]),
+  );
+  const applyMasters = new Map(
+    all<{ id: number; status: string }>(db, 'SELECT id, status FROM master').map(
+      (m) => [m.id, m.status],
+    ),
+  );
+  const applyGroupSize = new Map(
+    all<{ id: number; size: number | null }>(
+      db,
+      'SELECT id, size FROM student_group',
+    ).map((g) => [g.id, g.size]),
+  );
+  const hardFails: string[] = [];
+  for (const p of placed) {
+    const label =
+      `${p.module_label ?? `mm#${p.master_module_id}`} — ${p.date} ` +
+      `${minToHHMM(p.start_min)}–${minToHHMM(p.end_min)}`;
+    const reasons: string[] = [];
+    if (p.date < today) reasons.push('date passée');
+    const wd = weekdayOf(p.date);
+    if (!slotFitsGrid(applySlotsByWeekday, wd, p.start_min, p.end_min)) {
+      reasons.push('créneau hors de la grille horaire (time_slot)');
+    }
+    if (applyExceptions.has(p.date)) {
+      reasons.push("jour d'exception calendaire");
+    }
+    const cons = applyProfCons.get(p.professor_id);
+    if (cons == null || !cons.isActive) {
+      reasons.push('professeur désactivé ou inexistant');
+    } else {
+      const block = profBlock(cons, p.date, wd, p.start_min, p.end_min);
+      if (block === 'absent') reasons.push('professeur absent');
+      else if (block === 'indispo') {
+        reasons.push('professeur indisponible (INDISPO)');
+      } else if (block === 'nodispo') {
+        reasons.push('professeur hors plages DISPO');
+      }
+    }
+    const room = applyRooms.get(p.room_id);
+    if (room == null || room.is_active !== 1) {
+      reasons.push('salle désactivée ou inexistante');
+    } else if (room.capacity != null && p.group_id != null) {
+      const need = applyGroupSize.get(p.group_id);
+      if (need != null && room.capacity < need) {
+        reasons.push('capacité de salle insuffisante');
+      }
+    }
+    const mStatus = applyMasters.get(p.master_id);
+    if (mStatus == null) reasons.push('master inexistant');
+    else if (mStatus === 'ARCHIVE') reasons.push('master archivé');
+    if (reasons.length > 0) {
+      hardFails.push(`${label} : ${reasons.join(', ')}`);
+    }
+  }
+  if (hardFails.length > 0) {
+    return fail(
+      `Application refusée : ${hardFails.length} séance(s) proposée(s) ` +
+        'ne respectent plus les contraintes — ' +
+        hardFails.slice(0, 6).join(' · ') +
+        (hardFails.length > 6 ? ` · … +${hardFails.length - 6}` : ''),
     );
   }
 

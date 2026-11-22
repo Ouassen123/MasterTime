@@ -777,6 +777,284 @@ describe('lecture / abandon', () => {
   });
 });
 
+describe('revue — patches exigés', () => {
+  it('EXTERNAL non vacuus : seule la salle bloquée est compatible', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // mm factice : prof sans contrainte + G2 (100) → seule Amphi C (300)
+    // convient — bloquée mardi 08–12 par une occupation Licence.
+    const modId = Number(
+      run(db, "INSERT INTO module (code, name) VALUES ('MOD-EXT', 'Ext')")
+        .lastInsertRowid,
+    );
+    const mmExt = insertMm(db, f.master2, modId, f.semId, f.prof4, f.group2, 3);
+    // Fenêtre réduite au seul mardi bloqué : sans le blocage Licence, les
+    // séances démarreraient à 08h00 — la contrainte mord forcément.
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, {
+        master_module_ids: [mmExt],
+        date_start: '2026-09-22',
+        date_end: '2026-09-22',
+      }),
+      TODAY,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.placed).toHaveLength(3);
+    for (const p of res.data.placed) {
+      expect(p.room_id).toBe(f.room3);
+      expect(p.date).toBe('2026-09-22');
+      expect(p.start_min).toBeGreaterThanOrEqual(720); // jamais sur 08–12
+    }
+  });
+
+  it('REGENERATE bornée à la fenêtre : PREVUE future hors fenêtre conservée', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // mm4 planned 3 : 1 PREVUE passée, 1 PREVUE future dans la fenêtre
+    // (date_end = 2026-09-25), 1 PREVUE future HORS fenêtre (09-30 ≤
+    // sched_end mais > date_end) → conservée, pas annulée.
+    const passe = addSession(db, f.mm4, f.prof4, f.room1, '2026-09-14', 480, 600);
+    const inWindow = addSession(db, f.mm4, f.prof4, f.room1, '2026-09-24', 480, 600);
+    const outWindow = addSession(db, f.mm4, f.prof4, f.room1, '2026-09-30', 480, 600);
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, {
+        mode: 'REGENERATE',
+        master_module_ids: [f.mm4],
+        date_end: '2026-09-25',
+      }),
+      TODAY,
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.replaced_ids).toEqual([inWindow]);
+    expect(res.data.replaced).toHaveLength(1);
+    expect(res.data.replaced![0].session_id).toBe(inWindow);
+    // conservées = 3 − 1 = 2 → missing = 1, appariée à la remplacée.
+    expect(res.data.placed).toHaveLength(1);
+    expect(res.data.replaced![0].replaced_by_index).toBe(0);
+    const app = applyGeneration(db, uid(db), res.data.generation_id, TODAY);
+    expect(app.ok).toBe(true);
+    const st = (id: number): string =>
+      get<{ status: string }>(db, 'SELECT status FROM session WHERE id = ?', id)!
+        .status;
+    expect(st(inWindow)).toBe('ANNULEE');
+    expect(st(outWindow)).toBe('PREVUE'); // hors fenêtre : jamais touchée
+    expect(st(passe)).toBe('PREVUE');
+  });
+
+  it('COMPLETE : début passé clampé à today (warning + jamais de proposition passée)', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const res = generate(
+      db,
+      uid(db),
+      baseParams(f, { master_module_ids: [f.mm1] }),
+      '2026-09-25', // today au milieu de la fenêtre
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.warnings.some((w) => w.includes('amputée'))).toBe(true);
+    expect(res.data.placed.length).toBeGreaterThan(0);
+    for (const p of res.data.placed) {
+      expect(p.date >= '2026-09-25').toBe(true);
+    }
+  });
+
+  it('seed non-entier → erreur de champ, rien persisté', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const bad = generate(
+      db,
+      uid(db),
+      { ...baseParams(f), seed: 1.5 },
+      TODAY,
+    );
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.fields?.some((e) => e.field === 'seed')).toBe(true);
+    const bad2 = generate(
+      db,
+      uid(db),
+      { ...baseParams(f), seed: 'abc' as unknown as number },
+      TODAY,
+    );
+    expect(bad2.ok).toBe(false);
+    expect(all(db, 'SELECT id FROM schedule_generation')).toHaveLength(0);
+  });
+
+  it('apply : INDISPO / exception / is_active apparus depuis la preview → refus, rien écrit', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const gen = generate(
+      db,
+      uid(db),
+      baseParams(f, { master_module_ids: [f.mm1] }),
+      TODAY,
+    );
+    expect(gen.ok).toBe(true);
+    if (!gen.ok) return;
+    const genId = gen.data.generation_id;
+    const p0 = gen.data.placed[0];
+    const sessionsBefore = sessionCount(db);
+    const isPreview = (): string =>
+      get<{ status: string }>(
+        db,
+        'SELECT status FROM schedule_generation WHERE id = ?',
+        genId,
+      )!.status;
+    // a) salle désactivée → refus.
+    run(db, 'UPDATE room SET is_active = 0 WHERE id = ?', p0.room_id);
+    let app = applyGeneration(db, uid(db), genId, TODAY);
+    expect(app.ok).toBe(false);
+    run(db, 'UPDATE room SET is_active = 1 WHERE id = ?', p0.room_id);
+    // b) exception calendaire apparue sur la date d'une proposition.
+    const exId = Number(
+      run(
+        db,
+        `INSERT INTO calendar_exception (start_date, end_date, type, label)
+         VALUES (?, ?, 'FERMETURE', 'Fermeture imprévue')`,
+        p0.date,
+        p0.date,
+      ).lastInsertRowid,
+    );
+    app = applyGeneration(db, uid(db), genId, TODAY);
+    expect(app.ok).toBe(false);
+    if (!app.ok) expect(app.error).toContain('exception');
+    run(db, 'DELETE FROM calendar_exception WHERE id = ?', exId);
+    // c) INDISPO effective apparue pour le prof sur le créneau proposé.
+    const avId = Number(
+      run(
+        db,
+        `INSERT INTO professor_availability
+           (professor_id, weekday, start_min, end_min, kind)
+         VALUES (?, ?, ?, ?, 'INDISPO')`,
+        p0.professor_id,
+        weekday(p0.date),
+        p0.start_min,
+        p0.end_min,
+      ).lastInsertRowid,
+    );
+    app = applyGeneration(db, uid(db), genId, TODAY);
+    expect(app.ok).toBe(false);
+    if (!app.ok) expect(app.error).toContain('rofesseur');
+    run(db, 'DELETE FROM professor_availability WHERE id = ?', avId);
+    // d) professeur désactivé → refus.
+    run(db, 'UPDATE professor SET is_active = 0 WHERE id = ?', p0.professor_id);
+    app = applyGeneration(db, uid(db), genId, TODAY);
+    expect(app.ok).toBe(false);
+    run(db, 'UPDATE professor SET is_active = 1 WHERE id = ?', p0.professor_id);
+    // Atomicité tout du long : aucune séance écrite, preview intacte.
+    expect(sessionCount(db)).toBe(sessionsBefore);
+    expect(isPreview()).toBe('PREVIEW');
+    // Monde restauré → l'application réussit.
+    app = applyGeneration(db, uid(db), genId, TODAY);
+    expect(app.ok).toBe(true);
+  });
+
+  it('apply : proposition date < today → refus', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const gen = generate(
+      db,
+      uid(db),
+      baseParams(f, { master_module_ids: [f.mm1] }),
+      TODAY,
+    );
+    expect(gen.ok).toBe(true);
+    if (!gen.ok) return;
+    const before = sessionCount(db);
+    // Le monde avance : toutes les propositions sont désormais passées.
+    const app = applyGeneration(
+      db,
+      uid(db),
+      gen.data.generation_id,
+      '2026-10-05',
+    );
+    expect(app.ok).toBe(false);
+    if (!app.ok) expect(app.error).toContain('passée');
+    expect(sessionCount(db)).toBe(before);
+    expect(
+      get<{ status: string }>(
+        db,
+        'SELECT status FROM schedule_generation WHERE id = ?',
+        gen.data.generation_id,
+      )!.status,
+    ).toBe('PREVIEW');
+  });
+
+  it('apply : payload malformé → refus explicite', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const gen = generate(
+      db,
+      uid(db),
+      baseParams(f, { master_module_ids: [f.mm1] }),
+      TODAY,
+    );
+    expect(gen.ok).toBe(true);
+    if (!gen.ok) return;
+    const genId = gen.data.generation_id;
+    const orig = get<{ result_json: string }>(
+      db,
+      'SELECT result_json FROM schedule_generation WHERE id = ?',
+      genId,
+    )!.result_json;
+    const setResult = (json: string): void => {
+      run(
+        db,
+        'UPDATE schedule_generation SET result_json = ? WHERE id = ?',
+        json,
+        genId,
+      );
+    };
+    const before = sessionCount(db);
+    // a) JSON illisible.
+    setResult('{oops');
+    expect(applyGeneration(db, uid(db), genId, TODAY).ok).toBe(false);
+    // b) proposition avec room_id non numérique.
+    const shape = {
+      placed: [
+        {
+          master_module_id: f.mm1,
+          master_id: f.master1,
+          professor_id: f.prof1,
+          room_id: 'abc',
+          group_id: f.group1,
+          date: '2026-09-25',
+          start_min: 480,
+          end_min: 600,
+        },
+      ],
+      unplaced: [],
+      warnings: [],
+      summary: { placed: 1, unplaced: 0, replaced: 0, days: 1 },
+      replaced_ids: [],
+    };
+    setResult(JSON.stringify(shape));
+    expect(applyGeneration(db, uid(db), genId, TODAY).ok).toBe(false);
+    // c) date non calendaire.
+    shape.placed[0].room_id = f.room1 as unknown as string;
+    shape.placed[0].date = '2026-02-30';
+    setResult(JSON.stringify(shape));
+    expect(applyGeneration(db, uid(db), genId, TODAY).ok).toBe(false);
+    // d) horaire inversé.
+    shape.placed[0].date = '2026-09-25';
+    shape.placed[0].start_min = 600;
+    shape.placed[0].end_min = 480;
+    setResult(JSON.stringify(shape));
+    expect(applyGeneration(db, uid(db), genId, TODAY).ok).toBe(false);
+    // Rien d'écrit ; payload restauré → application OK.
+    expect(sessionCount(db)).toBe(before);
+    setResult(orig);
+    expect(applyGeneration(db, uid(db), genId, TODAY).ok).toBe(true);
+  });
+});
+
 describe('acceptation seed RÉEL FSJP', () => {
   it('COMPLETE sur S3 : unplaced vide, aucun doublon écrit', () => {
     const db = freshDb();
