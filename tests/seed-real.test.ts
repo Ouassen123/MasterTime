@@ -20,7 +20,7 @@ describe('seed réel FSJP', () => {
     expect(r.inserted).toBe(true);
     expect(countRows(db, 'master')).toBe(14);
     expect(countRows(db, 'room')).toBe(17);
-    expect(countRows(db, 'professor')).toBe(149);
+    expect(countRows(db, 'professor')).toBe(133);
     expect(countRows(db, 'module')).toBe(93);
     expect(countRows(db, 'master_module')).toBe(97);
     expect(countRows(db, 'session')).toBe(97 * 12);

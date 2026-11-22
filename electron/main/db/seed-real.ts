@@ -4,9 +4,16 @@
  * is_demo = 0 partout : ce ne sont PAS des données de démonstration.
  *
  * Contenu : 17 salles (capacités officielles, Salle 3/9 capacité inconnue),
- * 14 Masters S3, 149 professeurs, 93 modules, master_module par (master,
- * module), 97 séances hebdomadaires × 12 semaines (fenêtre 2026-09-21 →
- * 2026-12-13), 168 occupations Licence (external_occupancy).
+ * 14 Masters S3, 133 professeurs (149 extraits − 30 doublons + 14 ajoutés),
+ * 93 modules, master_module par (master, module), 97 séances hebdomadaires
+ * × 12 semaines (fenêtre 2026-09-21 → 2026-12-13), 168 occupations Licence
+ * (external_occupancy).
+ *
+ * Dédup professeurs : les PDF sources écrivent le même enseignant de
+ * plusieurs façons (casse, ordre des mots, variantes hamza آ/أ/إ, formes
+ * courtes) — fusion validée manuellement le 2026-11-22. Canonique =
+ * première occurrence normalisée, sauf PROF_ALIAS (forme courte → nom
+ * complet, liste officielle utilisateur).
  *
  * NB : les collisions présentes dans les documents officiels sont insérées
  * telles quelles — le panneau de conflits devra les arbitrer (BR-12).
@@ -29,6 +36,101 @@ export interface SeedResult {
 const SEM_START = '2026-09-21'; // lundi — début programmation S3 2026/2027
 const SEM_END = '2026-12-13'; // 12 semaines
 const WEEKS = 12;
+
+// --- Dédup professeurs -------------------------------------------------------
+const AR_NORM = (s: string): string =>
+  s
+    .replace(/[آأإٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[ؤئ]/g, 'ء');
+const normName = (s: string): string =>
+  AR_NORM(s.toLowerCase())
+    .normalize('NFD')
+    .replace(/[̀-ͯـً-ٰٟ]/g, '')
+    .trim()
+    .split(/\s+/)
+    .sort()
+    .join(' ');
+
+/** Formes courtes → nom complet (fusion manuelle 2026-11-22). */
+const PROF_ALIAS = new Map<string, string>([
+  ['jami', 'Jami Jihad'],
+  ['merbouh', 'k. merbouh'],
+  ['essarsar', 'M. essarsar'],
+  ['cheddadi', 'EL cheddadi'],
+  ['ouais', 'Simou ouaiss'],
+  ['simou ouais', 'Simou ouaiss'],
+  ['حامي الدين', 'محمد حامي الدين'],
+  ['محمد الحسناوي', 'الحسناوي محمد التقال'],
+  ['عبد الله اشركي', 'أشركي أفقير عبد الله'],
+  ['عبد الله أشركي', 'أشركي أفقير عبد الله'],
+  // ordre des mots : canonique = forme conservée en base (la plus référencée)
+  ['الحسناوي التقال محمد', 'الحسناوي محمد التقال'],
+  ['محمد الحسناوي التقال', 'الحسناوي محمد التقال'],
+  ['الحواشي عمر', 'عمر الحواشي'],
+  ['البغيل عبد اللطيف', 'عبد اللطيف البغيل'],
+  ['الكلعي عبد اللطيف', 'عبد اللطيف الكلعي'],
+  ['بنيعيش محمد', 'محمد بنيعيش'],
+]);
+
+/** 14 professeurs ajoutés sur liste officielle utilisateur (2026-11-22). */
+const EXTRA_PROFS = [
+  'Rharzouz Jaouad',
+  'Sekali Jamal',
+  'Lamkaraf Ikram',
+  'El Hafid Allah Samira',
+  'Zarki Nabil',
+  'Ejbari Abdelbar',
+  'Morroun Rachid',
+  'Miloudi Chaymae',
+  'Bennani Anas',
+  'Jami Jihad',
+  'Boubker Omar',
+  'Belqasmi Sabrine',
+  'El Bakkouchi Youness',
+  'Balkiss Ben Hayoun',
+];
+
+interface ProfSeed {
+  /** Nom canonique par index REAL_PROFS (même longueur). */
+  canonByIdx: string[];
+  /** Noms dédupliqués dans l'ordre d'insertion. */
+  names: string[];
+  /** Index REAL_PROFS → index dans `names`. */
+  remap: number[];
+  /** Texte occupancy normalisé → nom canonique. */
+  canonByNorm: Map<string, string>;
+}
+
+function buildProfs(): ProfSeed {
+  const canonByIdx = REAL_PROFS.map(
+    (p) => PROF_ALIAS.get(p) ?? PROF_ALIAS.get(p.toLowerCase()) ?? p,
+  );
+  const names: string[] = [];
+  const idxByNorm = new Map<string, number>();
+  const remap = canonByIdx.map((name) => {
+    const k = normName(name);
+    let idx = idxByNorm.get(k);
+    if (idx === undefined) {
+      idx = names.length;
+      names.push(name);
+      idxByNorm.set(k, idx);
+    }
+    return idx;
+  });
+  for (const name of EXTRA_PROFS) {
+    const k = normName(name);
+    if (!idxByNorm.has(k)) {
+      idxByNorm.set(k, names.length);
+      names.push(name);
+    }
+  }
+  const canonByNorm = new Map<string, string>();
+  canonByIdx.forEach((name, i) => canonByNorm.set(normName(name), names[remap[i]]));
+  for (const p of REAL_PROFS) canonByNorm.set(normName(p), names[remap[REAL_PROFS.indexOf(p)]]);
+  return { canonByIdx, names, remap, canonByNorm };
+}
 
 function iso(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -92,9 +194,10 @@ export function seedReal(db: DatabaseSync): SeedResult {
       }[]).map((r) => [r.name, r.id]),
     );
 
-    // Professeurs réels
+    // Professeurs réels (dédupliqués — voir buildProfs)
+    const profs = buildProfs();
     const insProf = db.prepare('INSERT INTO professor (full_name) VALUES (?)');
-    for (const p of REAL_PROFS) insProf.run(p);
+    for (const p of profs.names) insProf.run(p);
     const profIds = (db.prepare('SELECT id FROM professor ORDER BY id').all() as { id: number }[]).map((r) => r.id);
 
     // Modules réels
@@ -138,11 +241,13 @@ export function seedReal(db: DatabaseSync): SeedResult {
     let sessCount = 0;
     for (const [mi, modi, p1, p2, wd, s, e, roomName] of REAL_SESSIONS) {
       const key = `${mi}:${modi}`;
+      const p1r = profs.remap[p1];
+      const p2r = p2 >= 0 ? profs.remap[p2] : -1;
       let mm = mmId.get(key);
       if (mm === undefined) {
         mm = Number(
           insMM
-            .run(masterIds[mi], modIds[modi], sem3, profIds[p1], 120 * WEEKS, WEEKS, SEM_START, SEM_END)
+            .run(masterIds[mi], modIds[modi], sem3, profIds[p1r], 120 * WEEKS, WEEKS, SEM_START, SEM_END)
             .lastInsertRowid,
         );
         mmId.set(key, mm);
@@ -150,14 +255,14 @@ export function seedReal(db: DatabaseSync): SeedResult {
       const roomId = roomIdByName.get(roomName);
       if (roomId === undefined) continue;
       const comment =
-        p2 >= 0 ? `Co-enseigné avec ${REAL_PROFS[p2]}` : null;
+        p2r >= 0 ? `Co-enseigné avec ${profs.names[p2r]}` : null;
       const base = firstOccurrence(wd);
       for (let w = 0; w < WEEKS; w++) {
         const d = new Date(base);
         d.setUTCDate(d.getUTCDate() + w * 7);
         const sid = Number(
           insSession
-            .run(mm, profIds[p1], roomId, iso(d), s, e, comment)
+            .run(mm, profIds[p1r], roomId, iso(d), s, e, comment)
             .lastInsertRowid,
         );
         insHist.run(sid);
@@ -176,7 +281,8 @@ export function seedReal(db: DatabaseSync): SeedResult {
     for (const [prog, grp, mod, prof, wd, s, e, roomName] of REAL_LIC) {
       const roomId = roomIdByName.get(roomName);
       if (roomId === undefined) continue;
-      insOcc.run(prog, grp, mod, prof, roomId, wd, s, e, yearId, 'a.fsjest.ma');
+      const canonProf = prof ? (profs.canonByNorm.get(normName(prof)) ?? prof) : prof;
+      insOcc.run(prog, grp, mod, canonProf, roomId, wd, s, e, yearId, 'a.fsjest.ma');
       licCount++;
     }
 
