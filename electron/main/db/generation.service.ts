@@ -66,17 +66,17 @@ import { all, get, run } from './connection';
 import { isValidIsoDate, todayIso } from './date';
 import { withAudit } from './audit.service';
 import { checkSessionPlacement } from './conflict.service';
+// Prédicats DISPO/INDISPO/absence partagés avec absence.service (P9a).
+import {
+  loadProfConstraints,
+  profBlock,
+  weekdayOf,
+} from './availability';
 
 // --- Helpers temps / ids -----------------------------------------------------
 
 function isId(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0;
-}
-
-/** Jour de semaine AD-7 d'une date ISO : 0=lundi … 6=dimanche. */
-function weekdayOf(iso: string): number {
-  const dt = new Date(`${iso}T00:00:00Z`);
-  return (dt.getUTCDay() + 6) % 7;
 }
 
 /** `date` + `days` jours en ISO (calcul UTC — pas de fuseau). */
@@ -138,21 +138,6 @@ function parseJson<T>(raw: string | null | undefined): T | null {
 interface Interval {
   s: number;
   e: number;
-}
-
-interface AvailRow {
-  weekday: number;
-  start_min: number;
-  end_min: number;
-  effective_from: string | null;
-  effective_to: string | null;
-}
-
-interface ProfConstraints {
-  isActive: boolean;
-  dispo: AvailRow[];
-  indispo: AvailRow[];
-  absences: { start: string; end: string }[];
 }
 
 interface RoomInfo {
@@ -243,50 +228,6 @@ function occFree(occ: Occupancy, date: string, key: string, s: number, e: number
   return !list.some((iv) => s < iv.e && iv.s < e);
 }
 
-/** Vrai si la plage est effective à `date` (bornes NULL = illimitées). */
-function effective(row: AvailRow, date: string): boolean {
-  return (
-    (row.effective_from == null || date >= row.effective_from) &&
-    (row.effective_to == null || date <= row.effective_to)
-  );
-}
-
-type ProfBlock = 'absent' | 'indispo' | 'nodispo' | null;
-
-/**
- * Disponibilité effective du prof sur [date, s, e) — sémantique P6b :
- * si le prof a des plages DISPO effectives à cette date (peu importe le
- * weekday), il n'est disponible QUE dans celles du weekday courant — un
- * jour sans plage DISPO effective est alors indisponible ; sans AUCUNE
- * DISPO (effective ou non) → toujours dispo. INDISPO effective et
- * absence déclarée interdisent le créneau/le jour.
- */
-function profBlock(
-  c: ProfConstraints,
-  date: string,
-  weekday: number,
-  s: number,
-  e: number,
-): ProfBlock {
-  if (c.absences.some((a) => a.start <= date && date <= a.end)) {
-    return 'absent';
-  }
-  const dispoEff = c.dispo.filter((r) => effective(r, date));
-  if (dispoEff.length > 0) {
-    const dayDispo = dispoEff.filter((r) => r.weekday === weekday);
-    if (!dayDispo.some((r) => r.start_min <= s && e <= r.end_min)) {
-      return 'nodispo';
-    }
-  }
-  const indispo = c.indispo.filter(
-    (r) => r.weekday === weekday && effective(r, date),
-  );
-  if (indispo.some((r) => s < r.end_min && r.start_min < e)) {
-    return 'indispo';
-  }
-  return null;
-}
-
 // --- Référentiels partagés (moteur + re-vérification apply) -------------------
 
 /** Fenêtres `time_slot` par weekday (0=lun..6=dim), triées. */
@@ -333,72 +274,6 @@ function loadExceptions(db: DatabaseSync, warnings: string[]): Set<string> {
     );
   }
   return set;
-}
-
-/**
- * Contraintes professeurs : `is_active` + DISPO/INDISPO + absences.
- * Les disponibilités à `effective_*` non-ISO sont ignorées + warning.
- */
-function loadProfConstraints(
-  db: DatabaseSync,
-  profIds: number[],
-  warnings: string[],
-): Map<number, ProfConstraints> {
-  const cons = new Map<number, ProfConstraints>();
-  for (const pid of profIds) {
-    cons.set(pid, { isActive: true, dispo: [], indispo: [], absences: [] });
-  }
-  if (profIds.length === 0) return cons;
-  const ph = profIds.map(() => '?').join(',');
-  for (const r of all<{ id: number; is_active: number }>(
-    db,
-    `SELECT id, is_active FROM professor WHERE id IN (${ph})`,
-    ...profIds,
-  )) {
-    const c = cons.get(r.id);
-    if (c) c.isActive = r.is_active === 1;
-  }
-  let droppedAvail = 0;
-  for (const r of all<AvailRow & { professor_id: number; kind: string }>(
-    db,
-    `SELECT professor_id, weekday, start_min, end_min, kind,
-            effective_from, effective_to
-       FROM professor_availability WHERE professor_id IN (${ph})`,
-    ...profIds,
-  )) {
-    const c = cons.get(r.professor_id);
-    if (!c) continue;
-    if (
-      (r.effective_from != null && !isValidIsoDate(r.effective_from)) ||
-      (r.effective_to != null && !isValidIsoDate(r.effective_to))
-    ) {
-      droppedAvail++;
-      continue;
-    }
-    (r.kind === 'DISPO' ? c.dispo : c.indispo).push(r);
-  }
-  if (droppedAvail > 0) {
-    warnings.push(
-      `${droppedAvail} disponibilité(s) professeur à dates d'effet ` +
-        'invalides ignorée(s).',
-    );
-  }
-  for (const r of all<{
-    professor_id: number;
-    start_date: string;
-    end_date: string;
-  }>(
-    db,
-    `SELECT professor_id, start_date, end_date
-       FROM professor_absence WHERE professor_id IN (${ph})`,
-    ...profIds,
-  )) {
-    cons.get(r.professor_id)?.absences.push({
-      start: r.start_date,
-      end: r.end_date,
-    });
-  }
-  return cons;
 }
 
 /** Le créneau tient-il entier dans une fenêtre time_slot du weekday ? */

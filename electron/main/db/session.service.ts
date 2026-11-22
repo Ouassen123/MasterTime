@@ -17,6 +17,10 @@ import type {
   MonthFilter,
   OccupancyFilter,
   OccupancyRow,
+  RegistryFilter,
+  RegistryPage,
+  RegistryResult,
+  RemainingResult,
   SessionDetail,
   SessionFilter,
   SessionHistoryEntry,
@@ -29,6 +33,7 @@ import {
   apiOk,
   EFFECTIVE_SESSION_STATUSES,
   effectiveSessionStatus,
+  SESSION_STATUSES,
 } from '../../../shared/types';
 import { all, get } from './connection';
 import { isValidIsoDate, todayIso } from './date';
@@ -476,4 +481,200 @@ export function listOccupancyWeek(
       label: `Licence — ${r.program}${r.groupe ? ` · ${r.groupe}` : ''}`,
     })),
   );
+}
+
+// --- Registre central (P9a — FR-30, FR-35) ------------------------------------
+
+/** Taille de page max du registre (borne anti-payload forgé). */
+const REGISTRY_MAX_PAGE_SIZE = 200;
+const REGISTRY_DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Registre central `/seances` : toutes les séances jointes aux
+ * référentiels, filtres combinés, statut effectif AD-7 et
+ * `retard_jours = max(0, today − date)` pour les PREVUE passées.
+ *
+ * `status_effectif` (valeur unique) est traduit en SQL via `today`
+ * injectable : 'PREVUE' = réellement future (`date >= today`),
+ * 'NON_ENCORE_REALISEE' (dérivé, jamais stocké) = `date < today`,
+ * les autres statuts filtrent tels quels.
+ * `search` est une sous-chaîne littérale sur module/master/professeur
+ * (LIKE échappé `\`, `%`, `_` — pattern P6a).
+ * Tri : plus récentes d'abord. `stats` = compteurs sur l'ensemble
+ * filtré complet (pas la page).
+ */
+export function listSessionsRegistry(
+  db: DatabaseSync,
+  filter: RegistryFilter | undefined,
+  page: RegistryPage | undefined,
+  today: string = todayIso(),
+): ApiResult<RegistryResult> {
+  const dateFrom =
+    typeof filter?.date_from === 'string' ? filter.date_from.trim() : '';
+  const dateTo =
+    typeof filter?.date_to === 'string' ? filter.date_to.trim() : '';
+  if (filter?.date_from != null && !isValidIsoDate(dateFrom)) {
+    return apiErr('Date de début invalide (AAAA-MM-JJ).');
+  }
+  if (filter?.date_to != null && !isValidIsoDate(dateTo)) {
+    return apiErr('Date de fin invalide (AAAA-MM-JJ).');
+  }
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    return apiErr('La date de fin doit être postérieure à la date de début.');
+  }
+
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+  if (dateFrom) {
+    clauses.push('s.date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    clauses.push('s.date <= ?');
+    params.push(dateTo);
+  }
+  if (isId(filter?.master_id)) {
+    clauses.push('mm.master_id = ?');
+    params.push(filter.master_id);
+  }
+  if (isId(filter?.professor_id)) {
+    clauses.push('s.professor_id = ?');
+    params.push(filter.professor_id);
+  }
+  if (isId(filter?.room_id)) {
+    clauses.push('s.room_id = ?');
+    params.push(filter.room_id);
+  }
+  if (isId(filter?.module_id)) {
+    clauses.push('mm.module_id = ?');
+    params.push(filter.module_id);
+  }
+  // Statut effectif (AD-7) — PREVUE affichée = réellement future.
+  const se = filter?.status_effectif;
+  if (typeof se === 'string') {
+    if (se === 'PREVUE') {
+      clauses.push(`s.status = 'PREVUE' AND s.date >= ?`);
+      params.push(today);
+    } else if (se === 'NON_ENCORE_REALISEE') {
+      clauses.push(`s.status = 'PREVUE' AND s.date < ?`);
+      params.push(today);
+    } else if (
+      (SESSION_STATUSES as readonly string[]).includes(se)
+    ) {
+      clauses.push('s.status = ?');
+      params.push(se);
+    }
+    // Valeur forgée hors liste : ignorée (payload IPC non fiable).
+  }
+  const q = typeof filter?.search === 'string' ? filter.search.trim() : '';
+  if (q) {
+    // Sous-chaîne littérale : `%`, `_` et `\` échappés (P6a).
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    clauses.push(
+      `(mo.name LIKE ? ESCAPE '\\' OR mo.code LIKE ? ESCAPE '\\'` +
+        ` OR m.name LIKE ? ESCAPE '\\' OR m.code LIKE ? ESCAPE '\\'` +
+        ` OR p.full_name LIKE ? ESCAPE '\\')`,
+    );
+    params.push(like, like, like, like, like);
+  }
+  const where = clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '';
+
+  // Pagination serveur : bornes durcies contre un payload forgé.
+  const pageNum =
+    Number.isInteger(page?.page) && (page!.page as number) >= 1
+      ? (page!.page as number)
+      : 1;
+  const pageSize =
+    Number.isInteger(page?.pageSize) &&
+    (page!.pageSize as number) >= 1 &&
+    (page!.pageSize as number) <= REGISTRY_MAX_PAGE_SIZE
+      ? (page!.pageSize as number)
+      : REGISTRY_DEFAULT_PAGE_SIZE;
+
+  const stats = get<{
+    total: number;
+    realisee: number;
+    non_realisee: number;
+  }>(
+    db,
+    `SELECT count(*) AS total,
+            COALESCE(sum(s.status = 'REALISEE'), 0) AS realisee,
+            COALESCE(sum(s.status = 'PREVUE' AND s.date < ?), 0)
+              AS non_realisee
+       FROM session s
+       JOIN master_module mm ON mm.id = s.master_module_id
+       JOIN master m ON m.id = mm.master_id
+       JOIN module mo ON mo.id = mm.module_id
+       JOIN professor p ON p.id = s.professor_id
+      WHERE 1 = 1${where}`,
+    today,
+    ...params,
+  ) ?? { total: 0, realisee: 0, non_realisee: 0 };
+
+  const rows = all<
+    SessionSqlRow & { retard_jours: number }
+  >(
+    db,
+    `${sessionSelectSql(`CASE WHEN s.status = 'PREVUE' AND s.date < ?
+        THEN CAST(julianday(?) - julianday(s.date) AS INTEGER)
+        ELSE 0 END AS retard_jours`)}
+      WHERE 1 = 1${where}
+      ORDER BY s.date DESC, s.start_min DESC, s.id DESC
+      LIMIT ? OFFSET ?`,
+    today,
+    today,
+    ...params,
+    pageSize,
+    (pageNum - 1) * pageSize,
+  );
+  return apiOk({
+    rows: rows.map((r) => ({
+      ...toSessionRow(r, today),
+      retard_jours: r.retard_jours,
+    })),
+    total: stats.total,
+    page: pageNum,
+    pageSize,
+    stats: {
+      total: stats.total,
+      realisee: stats.realisee,
+      non_realisee: stats.non_realisee,
+      // « En retard » = PREVUE passée non réalisée (retard_jours > 0).
+      en_retard: stats.non_realisee,
+    },
+  });
+}
+
+/**
+ * Reste à effectuer d'un master-module (FR-35) : `planned_sessions` vs
+ * séances non ANNULEE — `remaining = max(0, planned − non annulées)`.
+ */
+export function remainingSessions(
+  db: DatabaseSync,
+  masterModuleId: number,
+): ApiResult<RemainingResult> {
+  if (!isId(masterModuleId)) {
+    return apiErr('Master-module invalide.');
+  }
+  const mm = get<{ id: number; planned_sessions: number }>(
+    db,
+    'SELECT id, planned_sessions FROM master_module WHERE id = ?',
+    masterModuleId,
+  );
+  if (!mm) {
+    return apiErr('Master-module inexistant.');
+  }
+  const scheduled =
+    get<{ c: number }>(
+      db,
+      `SELECT count(*) AS c FROM session
+        WHERE master_module_id = ? AND status != 'ANNULEE'`,
+      masterModuleId,
+    )?.c ?? 0;
+  return apiOk({
+    master_module_id: mm.id,
+    planned: mm.planned_sessions,
+    scheduled_non_cancelled: scheduled,
+    remaining: Math.max(0, mm.planned_sessions - scheduled),
+  });
 }

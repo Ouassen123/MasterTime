@@ -52,7 +52,7 @@ export interface DbStatus {
   /** Message d'erreur bloquant si l'initialisation DB a échoué. */
   error: string | null;
   dbPath: string;
-  /** Nombre de tables utilisateur (attendu : 25 après 0005). */
+  /** Nombre de tables utilisateur (attendu : 26 après 0006). */
   tableCount: number;
   /** Versions de migrations appliquées (ex. ['0001']). */
   appliedMigrations: string[];
@@ -841,6 +841,121 @@ export interface GenerationCatalog {
   sched_end: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// P9a — Registre des séances + décisions d'absence (BR-17/18, FR-30/35→38)
+// ---------------------------------------------------------------------------
+
+/** Décision prise sur une séance impactée par une absence (migration 0006). */
+export const ABSENCE_DECISIONS = [
+  'REMPLACEMENT',
+  'REPORT',
+  'ANNULATION',
+] as const;
+export type AbsenceDecisionKind = (typeof ABSENCE_DECISIONS)[number];
+
+/** Ligne `absence_decision` enrichie (noms du remplaçant et de l'auteur). */
+export interface AbsenceDecisionRow {
+  id: number;
+  absence_id: number;
+  session_id: number;
+  decision: AbsenceDecisionKind;
+  substitute_professor_id: number | null;
+  /** Nom du remplaçant (jointure professor), null hors REMPLACEMENT. */
+  substitute_name: string | null;
+  decided_at: string;
+  decided_by: number | null;
+  decided_by_name: string | null;
+  note: string | null;
+}
+
+/** Absence + compteurs de suivi (liste `absences:list`). */
+export interface AbsenceListRow extends AbsenceRow {
+  professor_name: string;
+  /** Séances encore ouvertes (PREVUE/REPORTEE) dans la fenêtre. */
+  nb_impacted: number;
+  /** Décisions enregistrées pour cette absence. */
+  nb_decisions: number;
+}
+
+/** Séance impactée + décision éventuelle (fiche `absences:get`). */
+export interface AbsenceDetailSession extends ImpactedSession {
+  decision: AbsenceDecisionRow | null;
+}
+
+/** Détail d'une absence : absence + séances impactées et leurs décisions. */
+export interface AbsenceDetail {
+  absence: AbsenceListRow;
+  impacted: AbsenceDetailSession[];
+}
+
+/** Entrée de `absences:decide` — payload de décision sur une séance. */
+export interface AbsenceDecisionInput {
+  decision: AbsenceDecisionKind;
+  /** Obligatoire pour REMPLACEMENT (actif, ≠ titulaire). */
+  substitute_professor_id?: number | null;
+  /** Nouveau créneau — obligatoire pour REPORT (AD-7 : ISO + minutes). */
+  new_date?: string;
+  new_start?: number;
+  new_end?: number;
+  /** Note/motif tracé (défaut « Absence du titulaire »). */
+  note?: string | null;
+}
+
+/** Filtres du registre central `/seances` (`registry:list`, FR-30). */
+export interface RegistryFilter {
+  date_from?: string;
+  date_to?: string;
+  master_id?: number;
+  professor_id?: number;
+  room_id?: number;
+  module_id?: number;
+  /** Statut EFFECTIF (PREVUE = future ; NON_ENCORE_REALISEE dérivée, AD-7). */
+  status_effectif?: EffectiveSessionStatus;
+  /** Sous-chaîne sur module/master/professeur (LIKE échappé). */
+  search?: string;
+}
+
+/** Pagination serveur du registre (page 1-based). */
+export interface RegistryPage {
+  page?: number;
+  pageSize?: number;
+}
+
+/** Ligne du registre : séance enrichie + retard en jours (AD-7). */
+export interface RegistryRow extends SessionRow {
+  /** max(0, today − date) pour une PREVUE passée ; 0 sinon. */
+  retard_jours: number;
+}
+
+/** Compteurs d'en-tête du registre (calculés sur l'ensemble filtré). */
+export interface RegistryStats {
+  total: number;
+  realisee: number;
+  /** NON_ENCORE_REALISEE dérivé : PREVUE avec date < today. */
+  non_realisee: number;
+  /** Séances dont retard_jours > 0 (= PREVUE passée non réalisée). */
+  en_retard: number;
+}
+
+export interface RegistryResult {
+  rows: RegistryRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: RegistryStats;
+}
+
+/** Reste à effectuer d'un master-module (`registry:remaining`, FR-35). */
+export interface RemainingResult {
+  master_module_id: number;
+  /** planned_sessions du master-module. */
+  planned: number;
+  /** Séances non ANNULEE rattachées. */
+  scheduled_non_cancelled: number;
+  /** max(0, planned − scheduled_non_cancelled). */
+  remaining: number;
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -968,6 +1083,22 @@ export interface WindowApi {
     apply(id: number): Promise<GenerationApplyResult>;
     abandon(id: number): Promise<ApiResult<null>>;
     catalog(semesterId: number): Promise<ApiResult<GenerationCatalog>>;
+  };
+  registry: {
+    list(
+      filter?: RegistryFilter,
+      page?: RegistryPage,
+    ): Promise<ApiResult<RegistryResult>>;
+    remaining(masterModuleId: number): Promise<ApiResult<RemainingResult>>;
+  };
+  absences: {
+    list(professorId?: number): Promise<ApiResult<AbsenceListRow[]>>;
+    get(id: number): Promise<ApiResult<AbsenceDetail>>;
+    decide(
+      absenceId: number,
+      sessionId: number,
+      input: AbsenceDecisionInput,
+    ): Promise<SessionEditResult>;
   };
   profile: {
     list(): Promise<ApiResult<AppUser[]>>;

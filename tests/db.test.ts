@@ -70,25 +70,25 @@ afterEach(() => {
 });
 
 describe('migrations', () => {
-  it('applique 0001→0005 sur une base vierge : 25 tables + index', () => {
+  it('applique 0001→0006 sur une base vierge : 26 tables + index', () => {
     const db = openTempFileDb();
     const result = runMigrations(db, {
       migrations: loadMigrationsFromDir(MIGRATIONS_DIR),
     });
-    expect(result.applied).toEqual(['0001_init.sql', '0002_perf_indexes.sql', '0003_external_occupancy.sql', '0004_professor_active.sql', '0005_session_group.sql']);
-    expect(userTableCount(db)).toBe(25);
+    expect(result.applied).toEqual(['0001_init.sql', '0002_perf_indexes.sql', '0003_external_occupancy.sql', '0004_professor_active.sql', '0005_session_group.sql', '0006_absence_decision.sql']);
+    expect(userTableCount(db)).toBe(26);
 
     const indexCount = get<{ c: number }>(
       db,
       "SELECT count(*) AS c FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
     )!.c;
-    // 14 (0001→0003) + ix_sg_group (0005)
-    expect(indexCount).toBe(15);
+    // 14 (0001→0003) + ix_sg_group (0005) + ix_decision_absence (0006)
+    expect(indexCount).toBe(16);
 
     const versions = db
       .prepare('SELECT version FROM schema_migrations')
       .all() as { version: number }[];
-    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('bundledMigrations() charge le même SQL que le fichier disque', () => {
@@ -104,9 +104,9 @@ describe('migrations', () => {
     runMigrations(db, { migrations });
     const second = runMigrations(db, { migrations });
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toEqual([1, 2, 3, 4, 5]);
+    expect(second.alreadyApplied).toEqual([1, 2, 3, 4, 5, 6]);
     expect(second.backupPath).toBeUndefined();
-    expect(userTableCount(db)).toBe(25);
+    expect(userTableCount(db)).toBe(26);
   });
 
   it('pragmas : journal_mode=WAL (fichier) et foreign_keys=ON', () => {
@@ -142,14 +142,14 @@ describe('migrations', () => {
 
     const bad: MigrationSource[] = [
       {
-        version: 6,
-        name: '0006_partial.sql',
-        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (6, 'x'); THIS IS NOT SQL;",
+        version: 7,
+        name: '0007_partial.sql',
+        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (7, 'x'); THIS IS NOT SQL;",
       },
     ];
     expect(() =>
       runMigrations(db, { migrations: bad, backupDir, dbPath }),
-    ).toThrow(/0006_partial/);
+    ).toThrow(/0007_partial/);
 
     // Rien n'a été appliqué : ni table fantôme, ni version enregistrée
     expect(userTableCount(db)).toBe(tablesBefore);
@@ -159,7 +159,7 @@ describe('migrations', () => {
         "SELECT count(*) AS c FROM sqlite_master WHERE name='should_not_survive'",
       )!.c,
     ).toBe(0);
-    expect(countRows(db, 'schema_migrations')).toBe(5);
+    expect(countRows(db, 'schema_migrations')).toBe(6);
     expect(countRows(db, 'master')).toBe(mastersBefore);
 
     // Sauvegarde PRE_MIGRATION créée + enregistrée (base existante non vide)
@@ -227,7 +227,7 @@ describe('seed DÉMO', () => {
     const db = openMemoryDb();
     runMigrations(db, { migrations: bundledMigrations() });
     seedDemo(db);
-    expect(userTableCount(db)).toBe(25);
+    expect(userTableCount(db)).toBe(26);
     // Toutes les séances DÉMO sont PREVUE et datées dans le futur
     const past = get<{ c: number }>(
       db,
@@ -238,7 +238,7 @@ describe('seed DÉMO', () => {
 });
 
 describe('collectDbStatus', () => {
-  it('ok path : 25 tables, migrations [0001..0005], compteurs du seed', () => {
+  it('ok path : 26 tables, migrations [0001..0006], compteurs du seed', () => {
     const db = openTempFileDb();
     runMigrations(db, { migrations: loadMigrationsFromDir(MIGRATIONS_DIR) });
     seedDemo(db);
@@ -246,8 +246,8 @@ describe('collectDbStatus', () => {
     expect(status.ok).toBe(true);
     expect(status.error).toBeNull();
     expect(status.dbPath).toBe(dbPath);
-    expect(status.tableCount).toBe(25);
-    expect(status.appliedMigrations).toEqual(['0001', '0002', '0003', '0004', '0005']);
+    expect(status.tableCount).toBe(26);
+    expect(status.appliedMigrations).toEqual(['0001', '0002', '0003', '0004', '0005', '0006']);
     expect(status.counts.master).toBe(3);
     expect(status.counts.professor).toBe(8);
     expect(status.counts.room).toBe(3);
@@ -261,7 +261,7 @@ describe('collectDbStatus', () => {
     const status = collectDbStatus(db, dbPath, 'migration 0002 a échoué');
     expect(status.ok).toBe(false);
     expect(status.error).toBe('migration 0002 a échoué');
-    expect(status.tableCount).toBe(25); // base lisible malgré l'erreur
+    expect(status.tableCount).toBe(26); // base lisible malgré l'erreur
   });
 
   it('db null : ok=false même sans startupError', () => {

@@ -60,7 +60,7 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <ThunderboltOutlined />,
   },
-  { key: 'sessions', path: '/seances', enabled: false },
+  { key: 'sessions', path: '/seances', enabled: true },
   { key: 'absences', path: '/absences', enabled: false },
   { key: 'reports', path: '/rapports', enabled: false },
   { key: 'importExport', path: '/import-export', enabled: false },

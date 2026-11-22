@@ -23,6 +23,11 @@
  * - Ressources : salle/professeur `is_active = 0` refusés à la création
  *   et au déplacement (sauf valeur inchangée au move) ; master `ARCHIVE`
  *   refusé à la création.
+ * - P9a : `planSessionMove` / `planStatusChange` / `applySessionPlan`
+ *   exposent la mutation en deux phases (validation + garde BR-10, puis
+ *   écriture) SANS `withAudit` — `absence.service` peut ainsi écrire la
+ *   mutation de séance ET la ligne `absence_decision` dans une seule
+ *   transaction auditée (withAudit n'imbrique pas).
  */
 import { DatabaseSync } from 'node:sqlite';
 import type {
@@ -45,7 +50,7 @@ import { checkSessionPlacement } from './conflict.service';
 // --- Helpers de lecture ------------------------------------------------------
 
 /** Séance brute + master/groupe du master-module (tout ce dont les gardes ont besoin). */
-interface SessionDb {
+export interface SessionDb {
   id: number;
   master_module_id: number;
   professor_id: number;
@@ -149,11 +154,19 @@ function editOk(sessionId: number): SessionEditResult {
   return { ok: true, data: { sessionId } };
 }
 
+/** Bras d'échec commun à `SessionEditResult` et `SessionPlanResult`. */
+export interface SessionMutationError {
+  ok: false;
+  error: string;
+  fields?: FieldError[];
+  conflicts?: PlacementConflict[];
+}
+
 function editErr(
   error: string,
   fields?: FieldError[],
   conflicts?: PlacementConflict[],
-): SessionEditResult {
+): SessionMutationError {
   return { ok: false, error, fields, conflicts };
 }
 
@@ -201,7 +214,7 @@ function validateGroupIds(
 
 // --- Écrivain unique (AD-7) --------------------------------------------------
 
-interface SessionChange {
+export interface SessionChange {
   status: SessionStatus;
   date: string;
   start_min: number;
@@ -213,6 +226,37 @@ interface SessionChange {
   actual_end_min: number | null;
   /** Raison consignée dans l'historique (null pour un déplacement sans motif). */
   reason: string | null;
+}
+
+/**
+ * Mutation de séance validée (garde BR-10 passée), prête à être écrite
+ * par `applySessionPlan` dans la transaction de l'appelant.
+ */
+export interface SessionMutationPlan {
+  before: SessionDb;
+  change: SessionChange;
+}
+
+/**
+ * Résultat d'une planification (`planSessionMove`/`planStatusChange`) :
+ * succès → plan prêt à appliquer ; échec → mêmes bras d'erreur que
+ * `SessionEditResult` (validation `fields`, refus BR-10 `conflicts`).
+ */
+export type SessionPlanResult =
+  | { ok: true; plan: SessionMutationPlan }
+  | SessionMutationError;
+
+/**
+ * Phase d'écriture unique (P9a) : appelle `applySessionChange` —
+ * à invoquer DANS la transaction (`withAudit` ou BEGIN IMMEDIATE) de
+ * l'appelant. Jamais hors transaction : pas d'UPDATE sans audit.
+ */
+export function applySessionPlan(
+  db: DatabaseSync,
+  userId: number | null,
+  plan: SessionMutationPlan,
+): void {
+  applySessionChange(db, userId, plan.before, plan.change);
 }
 
 /**
@@ -449,6 +493,25 @@ export function moveSession(
   id: number,
   input: SessionMoveInput,
 ): SessionEditResult {
+  const res = planSessionMove(db, id, input);
+  if (!res.ok) return res;
+  withAudit(db, userId, 'UPDATE', 'session', id, () => {
+    applySessionPlan(db, userId, res.plan);
+  });
+  return editOk(id);
+}
+
+/**
+ * Phase 1 du déplacement (P9a) : mêmes validations et garde BR-10 que
+ * `moveSession` mais AUCUNE écriture — retourne un plan à appliquer par
+ * `applySessionPlan` dans la transaction de l'appelant (`absence.service`
+ * écrit ainsi mutation + `absence_decision` en une seule TX).
+ */
+export function planSessionMove(
+  db: DatabaseSync,
+  id: number,
+  input: SessionMoveInput,
+): SessionPlanResult {
   const s = getSession(db, id);
   if (!s) return editErr('Séance introuvable.');
   if (s.status === 'REALISEE') {
@@ -553,21 +616,24 @@ export function moveSession(
       );
     }
   }
-  withAudit(db, userId, 'UPDATE', 'session', id, () => {
-    applySessionChange(db, userId, s, {
-      status: s.status,
-      date: (date as string).trim(),
-      start_min: start,
-      end_min: end,
-      room_id: roomId,
-      professor_id: professorId,
-      actual_date: s.actual_date,
-      actual_start_min: s.actual_start_min,
-      actual_end_min: s.actual_end_min,
-      reason,
-    });
-  });
-  return editOk(id);
+  return {
+    ok: true,
+    plan: {
+      before: s,
+      change: {
+        status: s.status,
+        date: (date as string).trim(),
+        start_min: start,
+        end_min: end,
+        room_id: roomId,
+        professor_id: professorId,
+        actual_date: s.actual_date,
+        actual_start_min: s.actual_start_min,
+        actual_end_min: s.actual_end_min,
+        reason,
+      },
+    },
+  };
 }
 
 /**
@@ -608,6 +674,27 @@ export function changeSessionStatus(
   input: SessionStatusInput,
   today: string = todayIso(),
 ): SessionEditResult {
+  const res = planStatusChange(db, id, input, today);
+  if (!res.ok) return res;
+  withAudit(db, userId, 'UPDATE', 'session', id, () => {
+    applySessionPlan(db, userId, res.plan);
+  });
+  return editOk(id);
+}
+
+/**
+ * Phase 1 du changement de statut (P9a) : mêmes validations, transitions
+ * et garde BR-10 que `changeSessionStatus` mais AUCUNE écriture —
+ * retourne un plan à appliquer par `applySessionPlan` dans la
+ * transaction de l'appelant.
+ * @param today Date 'YYYY-MM-DD' des bornes temporelles (injectable).
+ */
+export function planStatusChange(
+  db: DatabaseSync,
+  id: number,
+  input: SessionStatusInput,
+  today: string = todayIso(),
+): SessionPlanResult {
   const s = getSession(db, id);
   if (!s) return editErr('Séance introuvable.');
   const newStatus = input?.status;
@@ -763,21 +850,24 @@ export function changeSessionStatus(
     }
   }
 
-  withAudit(db, userId, 'UPDATE', 'session', id, () => {
-    applySessionChange(db, userId, s, {
-      status: newStatus,
-      date: (date as string).trim(),
-      start_min: start as number,
-      end_min: end as number,
-      room_id: s.room_id,
-      professor_id: s.professor_id,
-      actual_date: actualDate,
-      actual_start_min: actualStart,
-      actual_end_min: actualEnd,
-      reason,
-    });
-  });
-  return editOk(id);
+  return {
+    ok: true,
+    plan: {
+      before: s,
+      change: {
+        status: newStatus,
+        date: (date as string).trim(),
+        start_min: start as number,
+        end_min: end as number,
+        room_id: s.room_id,
+        professor_id: s.professor_id,
+        actual_date: actualDate,
+        actual_start_min: actualStart,
+        actual_end_min: actualEnd,
+        reason,
+      },
+    },
+  };
 }
 
 /**

@@ -4,7 +4,10 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AbsenceDecisionInput,
+  AbsenceDetail,
   AbsenceInput,
+  AbsenceListRow,
   AbsenceRow,
   AnnualFilter,
   AnnualRow,
@@ -47,6 +50,10 @@ import type {
   ProfessorDetail,
   ProfessorInput,
   ProfessorRow,
+  RegistryFilter,
+  RegistryPage,
+  RegistryResult,
+  RemainingResult,
   Room,
   RoomInput,
   SessionCreateInput,
@@ -209,6 +216,29 @@ const api: WindowApi = {
       ipcRenderer.invoke('sessions:setGroups', id, groupIds),
     remove: (id: number): Promise<SessionEditResult> =>
       ipcRenderer.invoke('sessions:remove', id),
+  },
+  registry: {
+    list: (
+      filter?: RegistryFilter,
+      page?: RegistryPage,
+    ): Promise<ApiResult<RegistryResult>> =>
+      ipcRenderer.invoke('registry:list', filter, page),
+    remaining: (
+      masterModuleId: number,
+    ): Promise<ApiResult<RemainingResult>> =>
+      ipcRenderer.invoke('registry:remaining', masterModuleId),
+  },
+  absences: {
+    list: (professorId?: number): Promise<ApiResult<AbsenceListRow[]>> =>
+      ipcRenderer.invoke('absences:list', professorId),
+    get: (id: number): Promise<ApiResult<AbsenceDetail>> =>
+      ipcRenderer.invoke('absences:get', id),
+    decide: (
+      absenceId: number,
+      sessionId: number,
+      input: AbsenceDecisionInput,
+    ): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('absences:decide', absenceId, sessionId, input),
   },
   generation: {
     run: (params: GenerateParams): Promise<ApiResult<GenerationResult>> =>

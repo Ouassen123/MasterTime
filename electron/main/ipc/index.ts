@@ -14,6 +14,8 @@ import { registerProfileHandlers } from './profile';
 import { registerTimetableHandlers } from './timetable';
 import { registerSessionHandlers } from './sessions';
 import { registerGenerationHandlers } from './generation';
+import { registerRegistryHandlers } from './registry';
+import { registerAbsenceHandlers } from './absences';
 
 export function registerIpcHandlers(getDb: DbGetter): void {
   registerRoomHandlers(getDb);
@@ -24,6 +26,8 @@ export function registerIpcHandlers(getDb: DbGetter): void {
   registerTimetableHandlers(getDb);
   registerSessionHandlers(getDb);
   registerGenerationHandlers(getDb);
+  registerRegistryHandlers(getDb);
+  registerAbsenceHandlers(getDb);
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

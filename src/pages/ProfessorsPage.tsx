@@ -18,6 +18,7 @@ import {
   Input,
   List,
   Modal,
+  Radio,
   Select,
   Space,
   Statistic,
@@ -31,20 +32,27 @@ import {
 } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { api, errorMessage, hasApi } from '../api/client';
 import { CrudTable } from '../components/CrudTable';
 import { EntityDrawer } from '../components/EntityDrawer';
+import { SessionConflictsModal } from '../components/SessionDrawer';
 import {
+  ABSENCE_DECISIONS,
   effectiveSessionStatus,
+  type AbsenceDecisionKind,
+  type AbsenceDetail,
+  type AbsenceDetailSession,
   type AbsenceInput,
-  type AbsenceRow,
+  type AbsenceListRow,
+  type AbsenceResolution,
   type ApiResult,
   type AvailabilityInput,
   type AvailabilityRow,
   type EffectiveSessionStatus,
   type ImpactedSession,
+  type PlacementConflict,
   type ProfessorDetail,
   type ProfessorInput,
   type ProfessorRow,
@@ -254,13 +262,30 @@ function AvailabilitiesTab({
   );
 }
 
+/** Couleurs de résolution (P9a) : À traiter orange, Partielle bleu, Résolue vert. */
+const RESOLUTION_COLORS: Record<AbsenceResolution, string> = {
+  A_TRAITER: 'orange',
+  PARTIELLE: 'blue',
+  RESOLUE: 'green',
+};
+
+/** minutes depuis minuit pour un dayjs (heure de début/fin). */
+function minOf(d: Dayjs): number {
+  return d.hour() * 60 + d.minute();
+}
+
+/**
+ * Onglet Absences (P6b + P9a) : déclaration d'absence + liste enrichie
+ * (résolution, nb impactées/décisions) + fiche d'une absence (séances
+ * impactées PREVUE/REPORTEE avec leur décision) + modal de décision
+ * (Remplacer / Reporter / Annuler). Le serveur reste autorité sur les
+ * vérifications de disponibilité et les conflits BR-10 (modal détaillée).
+ */
 function AbsencesTab({
   professorId,
-  absences,
   onChanged,
 }: {
   professorId: number;
-  absences: AbsenceRow[];
   onChanged: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -268,7 +293,53 @@ function AbsencesTab({
     range: [dayjs.Dayjs, dayjs.Dayjs];
     reason?: string;
   }>();
+  const [absences, setAbsences] = useState<AbsenceListRow[]>([]);
   const [impacted, setImpacted] = useState<ImpactedSession[] | null>(null);
+  // Fiche de l'absence sélectionnée (séances impactées + décisions).
+  const [detail, setDetail] = useState<AbsenceDetail | null>(null);
+  // Remplaçants proposés : professeurs actifs ≠ titulaire.
+  const [professors, setProfessors] = useState<ProfessorRow[]>([]);
+  // Modal de décision.
+  const [decideTarget, setDecideTarget] = useState<AbsenceDetailSession | null>(
+    null,
+  );
+  const [decForm] = Form.useForm();
+  const decKind = Form.useWatch('decision', decForm) as
+    | AbsenceDecisionKind
+    | undefined;
+  const [deciding, setDeciding] = useState(false);
+  const [refusal, setRefusal] = useState<PlacementConflict[] | null>(null);
+
+  const loadAbsences = useCallback(async (): Promise<void> => {
+    try {
+      const res = await api().absences.list(professorId);
+      if (res.ok) setAbsences(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  }, [professorId]);
+
+  useEffect(() => {
+    void loadAbsences();
+    void api()
+      .professors.list()
+      .then((r) => {
+        if (r.ok) setProfessors(r.data);
+        else void message.error(errorMessage(r));
+      })
+      .catch((err) => void message.error(errorMessage(err)));
+  }, [loadAbsences]);
+
+  const loadDetail = async (id: number): Promise<void> => {
+    try {
+      const res = await api().absences.get(id);
+      if (res.ok) setDetail(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  };
 
   const submit = async (values: {
     range: [dayjs.Dayjs, dayjs.Dayjs];
@@ -284,6 +355,7 @@ function AbsencesTab({
       void message.success(t('professors.absence.added'));
       setImpacted(res.data.impacted);
       form.resetFields();
+      await loadAbsences();
       onChanged();
     } else {
       if (res.fields) {
@@ -302,24 +374,162 @@ function AbsencesTab({
     const res = await api().professors.absence.remove(id);
     if (res.ok) {
       void message.success(t('professors.absence.removed'));
+      if (detail?.absence.id === id) setDetail(null);
+      await loadAbsences();
       onChanged();
     } else {
       void message.error(errorMessage(res));
     }
   };
 
-  const resolutionColor = (r: AbsenceRow['resolution']): string =>
-    r === 'RESOLUE' ? 'green' : r === 'PARTIELLE' ? 'gold' : 'red';
+  const openDecide = (s: AbsenceDetailSession): void => {
+    decForm.resetFields();
+    decForm.setFieldsValue({ decision: 'REMPLACEMENT' });
+    setDecideTarget(s);
+  };
+
+  const submitDecision = async (): Promise<void> => {
+    if (!detail || !decideTarget) return;
+    const v = (await decForm.validateFields()) as {
+      decision: AbsenceDecisionKind;
+      substitute_professor_id?: number;
+      new_date?: dayjs.Dayjs;
+      new_range?: [dayjs.Dayjs, dayjs.Dayjs];
+      note?: string;
+    };
+    setDeciding(true);
+    try {
+      const res = await api().absences.decide(
+        detail.absence.id,
+        decideTarget.id,
+        {
+          decision: v.decision,
+          substitute_professor_id: v.substitute_professor_id ?? null,
+          new_date: v.new_date?.format('YYYY-MM-DD'),
+          new_start: v.new_range ? minOf(v.new_range[0]) : undefined,
+          new_end: v.new_range ? minOf(v.new_range[1]) : undefined,
+          note: v.note?.trim() || null,
+        },
+      );
+      if (res.ok) {
+        void message.success(t('absences.saved'));
+        setDecideTarget(null);
+        // Rafraîchit séances impactées + résolution + compteurs du prof.
+        await loadDetail(detail.absence.id);
+        await loadAbsences();
+        onChanged();
+        return;
+      }
+      if (res.fields && res.fields.length > 0) {
+        const map: Record<string, string> = {
+          substitute_professor_id: 'substitute_professor_id',
+          date: 'new_date',
+          start_min: 'new_range',
+          end_min: 'new_range',
+          reason: 'note',
+          note: 'note',
+        };
+        decForm.setFields(
+          res.fields.map((f) => ({
+            name: map[f.field] ?? f.field,
+            errors: [f.message],
+          })) as never,
+        );
+      }
+      // Refus BR-10 : modal détaillée (jamais un simple toast).
+      if (res.conflicts && res.conflicts.length > 0) {
+        setRefusal(res.conflicts);
+      } else {
+        void message.error(res.error);
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setDeciding(false);
+    }
+  };
+
+  /** Colonnes des séances impactées + décision enregistrée + action. */
+  const impactedCols: ColumnsType<AbsenceDetailSession> = [
+    {
+      key: 'date',
+      title: t('professors.session.date'),
+      render: (_v, s) => dayjs(s.date).format('ddd DD/MM/YYYY'),
+    },
+    {
+      key: 'time',
+      title: t('professors.session.time'),
+      render: (_v, s) => `${minToHHMM(s.start_min)}–${minToHHMM(s.end_min)}`,
+    },
+    { key: 'module', title: t('professors.session.module'), dataIndex: 'module_name' },
+    { key: 'master', title: t('professors.session.master'), dataIndex: 'master_name' },
+    { key: 'room', title: t('professors.session.room'), dataIndex: 'room_name' },
+    {
+      key: 'status',
+      title: t('professors.session.status'),
+      render: (_v, s) => <StatusTag status={s.status} date={s.date} />,
+    },
+    {
+      key: 'decision',
+      title: t('absences.decisionCol'),
+      render: (_v, s) =>
+        s.decision ? (
+          <Space direction="vertical" size={0}>
+            <Space size={4} wrap>
+              <Tag color="geekblue">
+                {t(`absences.decisionKinds.${s.decision.decision}`)}
+              </Tag>
+              {s.decision.substitute_name && (
+                <Text dir="auto">
+                  {t('absences.substituteOf', {
+                    name: s.decision.substitute_name,
+                  })}
+                </Text>
+              )}
+            </Space>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {s.decision.decided_at}
+              {s.decision.decided_by_name &&
+                ` ${t('absences.decidedBy', { name: s.decision.decided_by_name })}`}
+            </Text>
+          </Space>
+        ) : (
+          <Tag>{t('absences.pending')}</Tag>
+        ),
+    },
+    {
+      key: 'action',
+      title: t('common.actions'),
+      width: 90,
+      render: (_v, s) =>
+        s.decision == null ? (
+          <Button size="small" onClick={() => openDecide(s)}>
+            {t('absences.decide')}
+          </Button>
+        ) : null,
+    },
+  ];
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <List<AbsenceRow>
+      <List<AbsenceListRow>
         size="small"
         dataSource={absences}
         locale={{ emptyText: t('professors.absence.empty') }}
         renderItem={(a) => (
           <List.Item
             actions={[
+              <Button
+                key="see"
+                size="small"
+                onClick={() =>
+                  detail?.absence.id === a.id
+                    ? setDetail(null)
+                    : void loadDetail(a.id)
+                }
+              >
+                {t('absences.viewSessions')}
+              </Button>,
               <Button
                 key="del"
                 size="small"
@@ -332,13 +542,17 @@ function AbsencesTab({
             ]}
           >
             <Space direction="vertical" size={0}>
-              <Space>
+              <Space wrap>
                 <Text>
                   {a.start_date} → {a.end_date}
                 </Text>
-                <Tag color={resolutionColor(a.resolution)}>
+                <Tag color={RESOLUTION_COLORS[a.resolution]}>
                   {t(`professors.absence.resolutions.${a.resolution}`)}
                 </Tag>
+                <Text type="secondary">
+                  {t('absences.impactedCount', { count: a.nb_impacted })} ·{' '}
+                  {t('absences.decisionsCount', { count: a.nb_decisions })}
+                </Text>
               </Space>
               {a.reason && <Text type="secondary">{a.reason}</Text>}
             </Space>
@@ -373,6 +587,94 @@ function AbsencesTab({
       {impacted !== null && impacted.length > 0 && (
         <SessionsTable sessions={impacted} emptyText={t('common.empty')} />
       )}
+      {/* Séances impactées de l'absence sélectionnée + leurs décisions. */}
+      {detail != null && (
+        <>
+          <Text strong>{t('absences.detail')}</Text>
+          <Table<AbsenceDetailSession>
+            size="small"
+            rowKey="id"
+            columns={impactedCols}
+            dataSource={detail.impacted}
+            pagination={false}
+            locale={{ emptyText: t('professors.absence.noImpacted') }}
+          />
+        </>
+      )}
+      {/* Modal de décision : Remplacer / Reporter / Annuler — le serveur
+          reste autorité (disponibilités + conflits BR-10). */}
+      <Modal
+        title={t('absences.modalTitle', {
+          date: decideTarget ? dayjs(decideTarget.date).format('DD/MM/YYYY') : '',
+        })}
+        open={decideTarget != null}
+        onOk={() => void submitDecision()}
+        onCancel={() => setDecideTarget(null)}
+        confirmLoading={deciding}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        destroyOnHidden
+      >
+        <Form form={decForm} layout="vertical">
+          <Form.Item
+            name="decision"
+            label={t('absences.decision')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Radio.Group
+              options={ABSENCE_DECISIONS.map((d) => ({
+                value: d,
+                label: t(`absences.decisionKinds.${d}`),
+              }))}
+            />
+          </Form.Item>
+          {decKind === 'REMPLACEMENT' && (
+            <Form.Item
+              name="substitute_professor_id"
+              label={t('absences.substitute')}
+              rules={[{ required: true, message: t('common.required') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={professors
+                  .filter((p) => p.is_active === 1 && p.id !== professorId)
+                  .map((p) => ({ value: p.id, label: p.full_name }))}
+              />
+            </Form.Item>
+          )}
+          {decKind === 'REPORT' && (
+            <>
+              <Form.Item
+                name="new_date"
+                label={t('absences.newSlot')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+              <Form.Item
+                name="new_range"
+                label={t('professors.session.time')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+              </Form.Item>
+            </>
+          )}
+          <Form.Item name="note" label={t('absences.note')}>
+            <Input.TextArea
+              rows={2}
+              maxLength={200}
+              placeholder={t('absences.notePlaceholder')}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      {/* Refus BR-10 de la décision — liste détaillée des conflits. */}
+      <SessionConflictsModal
+        conflicts={refusal}
+        onClose={() => setRefusal(null)}
+      />
     </Space>
   );
 }
@@ -711,7 +1013,6 @@ export function ProfessorsPage(): React.JSX.Element {
                   children: (
                     <AbsencesTab
                       professorId={p.id}
-                      absences={detail.absences}
                       onChanged={() => void reloadDetail(p.id)}
                     />
                   ),

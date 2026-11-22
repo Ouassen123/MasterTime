@@ -508,5 +508,69 @@
     "electron": "Electron",
     "chrome": "Chrome",
     "node": "Node"
+  },
+  "registry": {
+    "title": "Registre des séances",
+    "cols": {
+      "date": "Date",
+      "time": "Horaire",
+      "module": "Module",
+      "master": "Master",
+      "professor": "Professeur",
+      "room": "Salle",
+      "status": "Statut",
+      "delay": "Retard"
+    },
+    "delayTag": "J+{{n}}",
+    "stats": {
+      "results": "Résultats",
+      "done": "Réalisées",
+      "notDone": "Non réalisées",
+      "delayed": "En retard"
+    },
+    "filters": {
+      "dateFrom": "Du",
+      "dateTo": "Au",
+      "master": "Master",
+      "professor": "Professeur",
+      "room": "Salle",
+      "module": "Module",
+      "status": "Statut effectif",
+      "search": "Module, master ou professeur…",
+      "apply": "Filtrer",
+      "reset": "Réinitialiser"
+    },
+    "empty": "Aucune séance ne correspond aux filtres",
+    "pagination": "{{count}} séance(s)",
+    "remaining": {
+      "title": "Reste à effectuer (par module)",
+      "line": "{{scheduled}} / {{planned}} séances placées",
+      "tag": "{{n}} restante(s)",
+      "done": "Complet"
+    }
+  },
+  "absences": {
+    "impactedCount": "{{count}} séance(s) à traiter",
+    "decisionsCount": "{{count}} décision(s)",
+    "detail": "Séances impactées",
+    "viewSessions": "Séances",
+    "decide": "Décider",
+    "modalTitle": "Décision — séance du {{date}}",
+    "decision": "Décision",
+    "decisionKinds": {
+      "REMPLACEMENT": "Remplacer le professeur",
+      "REPORT": "Reporter la séance",
+      "ANNULATION": "Annuler la séance"
+    },
+    "substitute": "Professeur remplaçant",
+    "newSlot": "Nouveau créneau",
+    "note": "Note / motif",
+    "notePlaceholder": "Absence du titulaire",
+    "saved": "Décision enregistrée.",
+    "decisionCol": "Décision",
+    "pending": "À décider",
+    "decidedBy": "par {{name}}",
+    "substituteOf": "→ {{name}}",
+    "noDecision": "Aucune"
   }
 }
