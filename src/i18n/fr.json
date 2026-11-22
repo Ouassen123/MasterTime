@@ -308,6 +308,59 @@
       "rescheduled": "→ {{date}} {{start}}–{{end}}"
     }
   },
+  "sessions": {
+    "create": "Nouvelle séance",
+    "createTitle": "Créer une séance",
+    "created": "Séance créée.",
+    "masterModule": "Module du master",
+    "masterPick": "Master",
+    "groupsOptional": "Groupes rattachés (optionnel)",
+    "commentField": "Commentaire",
+    "edit": {
+      "action": "Modifier",
+      "title": "Modifier la séance",
+      "date": "Date",
+      "time": "Horaire",
+      "room": "Salle",
+      "professor": "Professeur",
+      "reason": "Motif (optionnel)",
+      "saved": "Séance mise à jour."
+    },
+    "status": {
+      "action": "Statut",
+      "title": "Changer le statut",
+      "toRealisee": "Marquer réalisée",
+      "toReportee": "Reporter",
+      "toAnnulee": "Annuler la séance",
+      "toPrevue": "Remettre prévue",
+      "confirmPrevue": "Réactiver la séance ? Les conflits seront revérifiés sur son créneau.",
+      "corrective": "Corriger le statut (séance réalisée)",
+      "correctiveTitle": "Correction de statut",
+      "targetStatus": "Nouveau statut",
+      "reason": "Motif",
+      "newSlot": "Nouveau créneau",
+      "actual": "Réalisation effective",
+      "updated": "Statut mis à jour."
+    },
+    "groups": {
+      "action": "Groupes",
+      "title": "Groupes rattachés",
+      "hint": "Groupes du master de la séance",
+      "implicit": "Groupe implicite du module",
+      "saved": "Groupes mis à jour."
+    },
+    "delete": {
+      "action": "Supprimer",
+      "title": "Supprimer la séance",
+      "confirm": "Supprimer définitivement cette séance ? L'opération est tracée en audit.",
+      "done": "Séance supprimée."
+    },
+    "refusal": {
+      "title": "Écriture refusée — conflits détectés",
+      "body": "L'opération est bloquée par les conflits suivants (BR-10) :",
+      "overlap": "Chevauchement"
+    }
+  },
   "conflicts": {
     "title": "Conflits",
     "hide": "Masquer",

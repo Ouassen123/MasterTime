@@ -12,6 +12,7 @@ import { registerProfessorHandlers } from './professors';
 import { registerMasterHandlers } from './masters';
 import { registerProfileHandlers } from './profile';
 import { registerTimetableHandlers } from './timetable';
+import { registerSessionHandlers } from './sessions';
 
 export function registerIpcHandlers(getDb: DbGetter): void {
   registerRoomHandlers(getDb);
@@ -20,6 +21,7 @@ export function registerIpcHandlers(getDb: DbGetter): void {
   registerMasterHandlers(getDb);
   registerProfileHandlers(getDb);
   registerTimetableHandlers(getDb);
+  registerSessionHandlers(getDb);
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

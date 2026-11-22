@@ -16,9 +16,11 @@ import type {
   ConflictItem,
   ConflictKind,
   ConflictSummary,
+  PlacementConflict,
+  PlacementQuery,
 } from '../../../shared/types';
 import { apiErr, apiOk, type ApiResult } from '../../../shared/types';
-import { all } from './connection';
+import { all, get } from './connection';
 import { isValidIsoDate } from './date';
 
 const KIND_ORDER: ConflictKind[] = [
@@ -281,6 +283,219 @@ export function detectConflicts(
   items.sort(
     (x, y) =>
       x.date.localeCompare(y.date) ||
+      KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind) ||
+      x.entityLabel.localeCompare(y.entityLabel) ||
+      x.startMin - y.startMin,
+  );
+  return apiOk(items);
+}
+
+// --- Garde d'écriture (P7b — BR-10) ------------------------------------------
+
+/**
+ * Colonnes de la séance adverse `b` confrontée au candidat : fenêtre de
+ * chevauchement + libellés master/module (mêmes jointures que PAIR_JOINS,
+ * côté `b` uniquement — le candidat n'existe pas en base).
+ */
+const ADVERSE_JOINS = `
+  JOIN master_module bm ON bm.id = b.master_module_id
+  JOIN master mab ON mab.id = bm.master_id
+  JOIN module mob ON mob.id = bm.module_id`;
+
+const ADVERSE_COLS = `
+       b.id AS b_id,
+       max(?, b.start_min) AS ov_start, min(?, b.end_min) AS ov_end,
+       mab.name AS b_master, mob.name AS b_module`;
+
+interface AdverseRow {
+  b_id: number;
+  ov_start: number;
+  ov_end: number;
+  b_master: string;
+  b_module: string;
+  entity: string;
+}
+
+function placementItem(
+  kind: ConflictKind,
+  q: PlacementQuery,
+  r: AdverseRow,
+): PlacementConflict {
+  return {
+    kind,
+    date: q.date,
+    startMin: r.ov_start,
+    endMin: r.ov_end,
+    entityLabel: r.entity,
+    sessions: [
+      {
+        id: r.b_id,
+        label: `${r.b_module} — ${r.b_master}`,
+        masterName: r.b_master,
+        moduleName: r.b_module,
+      },
+    ],
+    detail: `${r.entity} ↔ ${r.b_module} (${r.b_master})`,
+  };
+}
+
+/**
+ * Garde d'écriture BR-7→BR-10 : vérifie qu'un CANDIDAT de séance peut
+ * occuper [date, startMin, endMin) — mêmes règles que `detectConflicts`
+ * mais ciblées sur un seul créneau (une requête par kind, pas de
+ * full-scan). `excludeSessionId` retire la séance déplacée de la
+ * comparaison ; `groupIds` est l'ensemble COMPLET des groupes du
+ * candidat (mm.student_group_id + session_group). Retour vide =
+ * placement autorisé ; l'appelant refuse l'écriture sinon.
+ */
+export function checkSessionPlacement(
+  db: DatabaseSync,
+  q: PlacementQuery,
+): ApiResult<PlacementConflict[]> {
+  const date = typeof q?.date === 'string' ? q.date.trim() : '';
+  if (!isValidIsoDate(date)) {
+    return apiErr('Date invalide (AAAA-MM-JJ attendu).');
+  }
+  if (
+    !Number.isInteger(q.startMin) ||
+    !Number.isInteger(q.endMin) ||
+    q.startMin < 0 ||
+    q.startMin >= q.endMin ||
+    q.endMin > 1440
+  ) {
+    return apiErr('Horaire invalide (0 ≤ début < fin ≤ 24h00).');
+  }
+  const isRef = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0;
+  if (!isRef(q.roomId) || !isRef(q.professorId) || !isRef(q.masterId)) {
+    return apiErr('Référence invalide (salle, professeur ou master).');
+  }
+  const master = get<{ academic_year_id: number }>(
+    db,
+    'SELECT academic_year_id FROM master WHERE id = ?',
+    q.masterId,
+  );
+  if (!master) {
+    return apiErr('Master inexistant.');
+  }
+  const exclude = isRef(q.excludeSessionId) ? q.excludeSessionId : -1;
+  const groupIds = Array.isArray(q.groupIds)
+    ? [...new Set(q.groupIds.filter(isRef))]
+    : [];
+  const items: PlacementConflict[] = [];
+
+  // ROOM — même salle, même date, chevauchement strict.
+  for (const r of all<AdverseRow>(
+    db,
+    `SELECT${ADVERSE_COLS}, r.name AS entity
+       FROM session b
+       JOIN room r ON r.id = b.room_id${ADVERSE_JOINS}
+      WHERE b.date = ? AND b.room_id = ?
+        AND b.status != 'ANNULEE' AND b.id != ?
+        AND ? < b.end_min AND b.start_min < ?`,
+    q.startMin, q.endMin, date, q.roomId, exclude, q.startMin, q.endMin,
+  )) {
+    items.push(placementItem('ROOM', { ...q, date }, r));
+  }
+
+  // PROFESSOR — même professeur.
+  for (const r of all<AdverseRow>(
+    db,
+    `SELECT${ADVERSE_COLS}, p.full_name AS entity
+       FROM session b
+       JOIN professor p ON p.id = b.professor_id${ADVERSE_JOINS}
+      WHERE b.date = ? AND b.professor_id = ?
+        AND b.status != 'ANNULEE' AND b.id != ?
+        AND ? < b.end_min AND b.start_min < ?`,
+    q.startMin, q.endMin, date, q.professorId, exclude, q.startMin, q.endMin,
+  )) {
+    items.push(placementItem('PROFESSOR', { ...q, date }, r));
+  }
+
+  // MASTER — même master (via master_module de l'adverse).
+  for (const r of all<AdverseRow>(
+    db,
+    `SELECT${ADVERSE_COLS}, mab.name AS entity
+       FROM session b${ADVERSE_JOINS}
+      WHERE b.date = ? AND bm.master_id = ?
+        AND b.status != 'ANNULEE' AND b.id != ?
+        AND ? < b.end_min AND b.start_min < ?`,
+    q.startMin, q.endMin, date, q.masterId, exclude, q.startMin, q.endMin,
+  )) {
+    items.push(placementItem('MASTER', { ...q, date }, r));
+  }
+
+  // GROUP — le groupe du candidat est un groupe de l'adverse
+  // (mm.student_group_id UNION session_group, même définition que
+  // detectConflicts). Plusieurs groupes communs avec la même séance
+  // adverse → une seule entrée, libellés concaténés.
+  if (groupIds.length > 0) {
+    const bySession = new Map<number, PlacementConflict>();
+    for (const r of all<AdverseRow>(
+      db,
+      `SELECT${ADVERSE_COLS}, gb.name || ' (' || gm.name || ')' AS entity
+         FROM session b${ADVERSE_JOINS}
+         JOIN student_group gb
+           ON (gb.id = bm.student_group_id
+               OR EXISTS (SELECT 1 FROM session_group sg
+                           WHERE sg.session_id = b.id
+                             AND sg.student_group_id = gb.id))
+         JOIN master gm ON gm.id = gb.master_id
+        WHERE b.date = ?
+          AND b.status != 'ANNULEE' AND b.id != ?
+          AND ? < b.end_min AND b.start_min < ?
+          AND gb.id IN (${groupIds.map(() => '?').join(', ')})
+        ORDER BY b.id, entity`,
+      q.startMin, q.endMin, date, exclude, q.startMin, q.endMin, ...groupIds,
+    )) {
+      const prev = bySession.get(r.b_id);
+      if (prev) {
+        prev.entityLabel = `${prev.entityLabel}, ${r.entity}`;
+        prev.detail = `${prev.detail}, ${r.entity}`;
+      } else {
+        const item = placementItem('GROUP', { ...q, date }, r);
+        item.detail = `${r.entity} ↔ ${r.b_module} (${r.b_master})`;
+        bySession.set(r.b_id, item);
+      }
+    }
+    for (const item of bySession.values()) items.push(item);
+  }
+
+  // EXTERNAL — blocage Licence même salle, weekday(date), année du master.
+  interface ExtPlacementRow {
+    ov_start: number;
+    ov_end: number;
+    program: string;
+    groupe: string | null;
+    room_name: string;
+  }
+  for (const r of all<ExtPlacementRow>(
+    db,
+    `SELECT max(?, eo.start_min) AS ov_start, min(?, eo.end_min) AS ov_end,
+            eo.program, eo.groupe, r.name AS room_name
+       FROM external_occupancy eo
+       JOIN room r ON r.id = eo.room_id
+      WHERE eo.room_id = ?
+        AND eo.weekday = ((CAST(strftime('%w', ?) AS integer) + 6) % 7)
+        AND ? < eo.end_min AND eo.start_min < ?
+        AND (eo.academic_year_id IS NULL OR eo.academic_year_id = ?)`,
+    q.startMin, q.endMin, q.roomId, date, q.startMin, q.endMin,
+    master.academic_year_id,
+  )) {
+    const entity = `Licence — ${r.program}${r.groupe ? ` · ${r.groupe}` : ''}`;
+    items.push({
+      kind: 'EXTERNAL',
+      date,
+      startMin: r.ov_start,
+      endMin: r.ov_end,
+      entityLabel: entity,
+      sessions: [], // blocage externe : pas de séance adverse
+      detail: `${entity} occupe ${r.room_name}`,
+    });
+  }
+
+  items.sort(
+    (x, y) =>
       KIND_ORDER.indexOf(x.kind) - KIND_ORDER.indexOf(y.kind) ||
       x.entityLabel.localeCompare(y.entityLabel) ||
       x.startMin - y.startMin,

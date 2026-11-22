@@ -551,6 +551,86 @@ export interface ConflictSummary {
   byKind: Record<ConflictKind, number>;
 }
 
+// ---------------------------------------------------------------------------
+// P7b — Édition des séances : garde d'écriture + mutations historisées
+// ---------------------------------------------------------------------------
+
+/** Conflit de placement d'un candidat — même shape que ConflictItem :
+ * `sessions` contient la ou les séances adverses déjà en base (vide pour
+ * EXTERNAL : le blocage externe n'est pas une séance). */
+export type PlacementConflict = ConflictItem;
+
+/**
+ * Candidat de placement à vérifier (BR-10). `groupIds` = ensemble COMPLET
+ * des groupes du candidat (mm.student_group_id + groupes session_group).
+ */
+export interface PlacementQuery {
+  date: string; // 'YYYY-MM-DD' calendairement valide
+  startMin: number;
+  endMin: number; // 0 ≤ startMin < endMin ≤ 1440
+  roomId: number;
+  professorId: number;
+  /** Master du candidat (conflits MASTER + année pour EXTERNAL). */
+  masterId: number;
+  /** Séance déplacée — exclue de la comparaison (évite le self-conflit). */
+  excludeSessionId?: number;
+  groupIds?: number[];
+}
+
+/** Création manuelle d'une séance (`sessions:create`). */
+export interface SessionCreateInput {
+  master_module_id: number;
+  /** Défaut : professor_id du master-module. */
+  professor_id?: number | null;
+  room_id: number;
+  date: string;
+  start_min: number;
+  end_min: number;
+  /** Groupes supplémentaires (session_group) — master du mm uniquement. */
+  group_ids?: number[];
+  comment?: string | null;
+}
+
+/** Déplacement d'une séance — statut inchangé, historise l'ancien créneau. */
+export interface SessionMoveInput {
+  date?: string;
+  start_min?: number;
+  end_min?: number;
+  room_id?: number;
+  professor_id?: number;
+  reason?: string | null;
+}
+
+/** Changement de statut via `changeSessionStatus` (AD-7, point d'entrée unique). */
+export interface SessionStatusInput {
+  status: SessionStatus;
+  /** Obligatoire pour ANNULEE/REPORTEE et pour toute correction REALISEE. */
+  reason?: string | null;
+  /** Nouveau créneau — obligatoire pour REPORTEE (la séance bascule dessus). */
+  date?: string;
+  start_min?: number;
+  end_min?: number;
+  /** Réalisation effective — défaut = créneau planifié (REALISEE). */
+  actual_date?: string;
+  actual_start_min?: number;
+  actual_end_min?: number;
+  /** Correction admin : autorise la sortie du statut REALISEE (reason requis). */
+  corrective?: boolean;
+}
+
+/**
+ * Résultat d'une mutation de séance : succès → id de la séance ; échec →
+ * message (+ `fields` de validation, + `conflicts` détaillés si refus BR-10).
+ */
+export type SessionEditResult =
+  | { ok: true; data: { sessionId: number } }
+  | {
+      ok: false;
+      error: string;
+      fields?: FieldError[];
+      conflicts?: PlacementConflict[];
+    };
+
 /** Ligne de la vue année : master × semaine ISO (lundi) → compteurs statuts. */
 export interface AnnualRow {
   masterId: number;
@@ -674,6 +754,15 @@ export interface WindowApi {
   };
   sessions: {
     get(id: number): Promise<ApiResult<SessionDetail>>;
+    checkPlacement(q: PlacementQuery): Promise<ApiResult<PlacementConflict[]>>;
+    create(input: SessionCreateInput): Promise<SessionEditResult>;
+    move(id: number, input: SessionMoveInput): Promise<SessionEditResult>;
+    setStatus(
+      id: number,
+      input: SessionStatusInput,
+    ): Promise<SessionEditResult>;
+    setGroups(id: number, groupIds: number[]): Promise<SessionEditResult>;
+    remove(id: number): Promise<SessionEditResult>;
   };
   profile: {
     list(): Promise<ApiResult<AppUser[]>>;

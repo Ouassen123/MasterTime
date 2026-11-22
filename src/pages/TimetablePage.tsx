@@ -17,14 +17,21 @@ import {
   Calendar,
   Card,
   Collapse,
+  DatePicker,
   Descriptions,
   Drawer,
+  Dropdown,
   Empty,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
   Select,
   Skeleton,
   Space,
   Table,
   Tag,
+  TimePicker,
   Timeline,
   Tooltip,
   Typography,
@@ -32,9 +39,14 @@ import {
 } from 'antd';
 import {
   CalendarOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
   LeftOutlined,
+  PlusOutlined,
   ReloadOutlined,
   RightOutlined,
+  TeamOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -47,13 +59,19 @@ import type {
   ConflictItem,
   ConflictKind,
   EffectiveSessionStatus,
+  MasterDetail,
   MasterRow,
   Module,
   OccupancyRow,
+  PlacementConflict,
   ProfessorRow,
   Room,
   SessionDetail,
+  SessionEditResult,
   SessionRow,
+  SessionStatus,
+  SessionStatusInput,
+  StudentGroupRow,
 } from '../../shared/types';
 import { EFFECTIVE_SESSION_STATUSES } from '../../shared/types';
 
@@ -283,6 +301,27 @@ export function TimetablePage(): React.JSX.Element {
   const [detailLoading, setDetailLoading] = useState(false);
   const detailReq = useRef(0);
 
+  // --- Édition P7b (mutations + modals) -------------------------------------------
+  // reloadKey : incrémenté après chaque mutation → recharge semaine/mois/année.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [mutating, setMutating] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [statusAction, setStatusAction] = useState<
+    'REALISEE' | 'REPORTEE' | 'ANNULEE' | 'CORRECTIVE' | null
+  >(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  // Refus BR-10 : Modal détaillée (jamais un simple toast).
+  const [refusal, setRefusal] = useState<PlacementConflict[] | null>(null);
+  // Référentiels des modals Groupes / Création (chargés à la demande).
+  const [masterGroups, setMasterGroups] = useState<StudentGroupRow[]>([]);
+  const [mmGroupId, setMmGroupId] = useState<number | null>(null);
+  const [createDetail, setCreateDetail] = useState<MasterDetail | null>(null);
+  const [editForm] = Form.useForm();
+  const [statusForm] = Form.useForm();
+  const [groupsForm] = Form.useForm();
+  const [createForm] = Form.useForm();
+
   const weekStartIso = weekStart.format('YYYY-MM-DD');
 
   const entityFilter = useMemo(() => {
@@ -433,7 +472,7 @@ export function TimetablePage(): React.JSX.Element {
     };
   }, [
     scope, weekStartIso, monthValue, yearId, entityId,
-    entityFilter, statuses, moduleId,
+    entityFilter, statuses, moduleId, reloadKey,
   ]);
 
   /** Vide le surlignage conflit (navigation, changement d'entité…). */
@@ -473,6 +512,335 @@ export function TimetablePage(): React.JSX.Element {
     setScope('week');
     setEntityId(undefined);
     setWeekStart(mondayOf(dayjs(c.date)));
+  };
+
+  // --- Mutations P7b -----------------------------------------------------------
+
+  /** minutes depuis minuit pour un dayjs (heure de début/fin). */
+  const minOf = (d: Dayjs): number => d.hour() * 60 + d.minute();
+
+  /**
+   * Applique un `SessionEditResult` : succès → toast + reload semaine +
+   * panneau conflits (BR-11) + callback ; refus BR-10 → Modal détaillée
+   * (jamais de toast seul) ; autre échec → toast erreur.
+   */
+  const applyEditResult = (
+    res: SessionEditResult,
+    okMessage: string,
+    onSuccess?: () => void,
+  ): void => {
+    if (res.ok) {
+      void message.success(okMessage);
+      setReloadKey((k) => k + 1);
+      void loadConflicts();
+      onSuccess?.();
+      return;
+    }
+    if (res.conflicts && res.conflicts.length > 0) {
+      setRefusal(res.conflicts);
+    } else {
+      void message.error(res.error);
+    }
+  };
+
+  /** Recharge la fiche du drawer après une mutation (statut + historique). */
+  const refreshDetail = (): void => {
+    if (detail) void openSession(detail.session.id);
+  };
+
+  // -- Modifier (déplacement : date/heure/salle/prof, statut inchangé) --
+
+  const openEdit = (): void => {
+    if (!detail) return;
+    const s = detail.session;
+    const day = dayjs(s.date).startOf('day');
+    editForm.setFieldsValue({
+      date: dayjs(s.date),
+      range: [day.add(s.start_min, 'minute'), day.add(s.end_min, 'minute')],
+      room_id: s.room.id,
+      professor_id: s.professor.id,
+      reason: undefined,
+    });
+    setEditOpen(true);
+  };
+
+  const submitEdit = async (): Promise<void> => {
+    if (!detail) return;
+    const v = (await editForm.validateFields()) as {
+      date: Dayjs;
+      range: [Dayjs, Dayjs];
+      room_id: number;
+      professor_id: number;
+      reason?: string;
+    };
+    setMutating(true);
+    try {
+      const res = await api().sessions.move(detail.session.id, {
+        date: v.date.format('YYYY-MM-DD'),
+        start_min: minOf(v.range[0]),
+        end_min: minOf(v.range[1]),
+        room_id: v.room_id,
+        professor_id: v.professor_id,
+        reason: v.reason?.trim() || null,
+      });
+      applyEditResult(res, t('sessions.edit.saved'), () => {
+        setEditOpen(false);
+        refreshDetail();
+      });
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  // -- Statut --
+
+  /** Actions de statut proposées selon le statut STOCKÉ de la séance. */
+  const statusMenuItems = useMemo(() => {
+    if (!detail) return [];
+    const st = detail.session.status;
+    if (st === 'REALISEE') {
+      return [
+        { key: 'CORRECTIVE', label: t('sessions.status.corrective') },
+      ];
+    }
+    const items: { key: string; label: string }[] = [
+      { key: 'REALISEE', label: t('sessions.status.toRealisee') },
+    ];
+    if (st === 'PREVUE' || st === 'REPORTEE') {
+      items.push(
+        { key: 'REPORTEE', label: t('sessions.status.toReportee') },
+        { key: 'ANNULEE', label: t('sessions.status.toAnnulee') },
+      );
+    }
+    if (st === 'ANNULEE' || st === 'REPORTEE') {
+      items.push({ key: 'PREVUE', label: t('sessions.status.toPrevue') });
+    }
+    return items;
+  }, [detail, t]);
+
+  const doSetStatus = async (input: SessionStatusInput): Promise<void> => {
+    if (!detail) return;
+    setMutating(true);
+    try {
+      const res = await api().sessions.setStatus(detail.session.id, input);
+      applyEditResult(res, t('sessions.status.updated'), () => {
+        setStatusAction(null);
+        refreshDetail();
+      });
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const onStatusMenu = (key: string): void => {
+    if (!detail) return;
+    if (key === 'PREVUE') {
+      // Réactivation : confirm simple, le re-check conflits est côté main.
+      Modal.confirm({
+        title: t('sessions.status.toPrevue'),
+        content: t('sessions.status.confirmPrevue'),
+        okText: t('common.ok'),
+        cancelText: t('common.cancel'),
+        onOk: () => doSetStatus({ status: 'PREVUE' }),
+      });
+      return;
+    }
+    const action = key as 'REALISEE' | 'REPORTEE' | 'ANNULEE' | 'CORRECTIVE';
+    const s = detail.session;
+    const day = dayjs(s.date).startOf('day');
+    statusForm.resetFields();
+    statusForm.setFieldsValue({
+      reason: undefined,
+      target: 'PREVUE',
+      actual_date: dayjs(s.date),
+      actual_range: [
+        day.add(s.start_min, 'minute'),
+        day.add(s.end_min, 'minute'),
+      ],
+      date: undefined,
+      range: undefined,
+    });
+    setStatusAction(action);
+  };
+
+  const submitStatus = async (): Promise<void> => {
+    const v = (await statusForm.validateFields()) as {
+      reason?: string;
+      target?: SessionStatus;
+      actual_date?: Dayjs;
+      actual_range?: [Dayjs, Dayjs];
+      date?: Dayjs;
+      range?: [Dayjs, Dayjs];
+    };
+    const reason = v.reason?.trim() || undefined;
+    let input: SessionStatusInput;
+    if (statusAction === 'REALISEE') {
+      input = {
+        status: 'REALISEE',
+        reason: reason ?? null,
+        actual_date: v.actual_date?.format('YYYY-MM-DD'),
+        actual_start_min: v.actual_range ? minOf(v.actual_range[0]) : undefined,
+        actual_end_min: v.actual_range ? minOf(v.actual_range[1]) : undefined,
+      };
+    } else if (statusAction === 'REPORTEE') {
+      input = {
+        status: 'REPORTEE',
+        reason: reason ?? null,
+        date: v.date?.format('YYYY-MM-DD'),
+        start_min: v.range ? minOf(v.range[0]) : undefined,
+        end_min: v.range ? minOf(v.range[1]) : undefined,
+      };
+    } else if (statusAction === 'ANNULEE') {
+      input = { status: 'ANNULEE', reason: reason ?? null };
+    } else {
+      // CORRECTIVE : sortie de REALISEE (admin) — motif obligatoire.
+      input = {
+        status: v.target ?? 'PREVUE',
+        corrective: true,
+        reason: reason ?? null,
+        ...(v.target === 'REPORTEE'
+          ? {
+              date: v.date?.format('YYYY-MM-DD'),
+              start_min: v.range ? minOf(v.range[0]) : undefined,
+              end_min: v.range ? minOf(v.range[1]) : undefined,
+            }
+          : {}),
+      };
+    }
+    await doSetStatus(input);
+  };
+
+  // -- Groupes (session_group) --
+
+  const openGroups = async (): Promise<void> => {
+    if (!detail) return;
+    try {
+      // Groupes du master + student_group_id du mm (à exclure de la
+      // sélection : il est implicite, pas dans session_group).
+      const res = await api().masters.get(detail.session.master.id);
+      if (!res.ok) {
+        void message.error(errorMessage(res));
+        return;
+      }
+      const mm = res.data.modules.find(
+        (m) => m.id === detail.session.master_module_id,
+      );
+      const mmGid = mm?.student_group_id ?? null;
+      setMasterGroups(res.data.groups);
+      setMmGroupId(mmGid);
+      groupsForm.setFieldsValue({
+        group_ids: detail.groups
+          .filter((g) => g.id !== mmGid)
+          .map((g) => g.id),
+      });
+      setGroupsOpen(true);
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  };
+
+  const submitGroups = async (): Promise<void> => {
+    if (!detail) return;
+    const v = (await groupsForm.validateFields()) as { group_ids?: number[] };
+    setMutating(true);
+    try {
+      const res = await api().sessions.setGroups(
+        detail.session.id,
+        v.group_ids ?? [],
+      );
+      applyEditResult(res, t('sessions.groups.saved'), () => {
+        setGroupsOpen(false);
+        refreshDetail();
+      });
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  // -- Suppression --
+
+  const doDelete = async (): Promise<void> => {
+    if (!detail) return;
+    try {
+      const res = await api().sessions.remove(detail.session.id);
+      applyEditResult(res, t('sessions.delete.done'), () => {
+        setDetailOpen(false);
+        setDetail(null);
+      });
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  };
+
+  // -- Création manuelle --
+
+  const openCreate = (): void => {
+    createForm.resetFields();
+    setCreateDetail(null);
+    setCreateOpen(true);
+  };
+
+  const onCreateMaster = async (masterId: number): Promise<void> => {
+    createForm.setFieldsValue({
+      master_module_id: undefined,
+      professor_id: undefined,
+      group_ids: [],
+    });
+    setCreateDetail(null);
+    try {
+      const res = await api().masters.get(masterId);
+      if (res.ok) setCreateDetail(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  };
+
+  const onCreateMm = (mmId: number): void => {
+    // Le professeur du master-module est proposé par défaut.
+    const mm = createDetail?.modules.find((m) => m.id === mmId);
+    if (mm) createForm.setFieldsValue({ professor_id: mm.professor_id });
+  };
+
+  const submitCreate = async (): Promise<void> => {
+    const v = (await createForm.validateFields()) as {
+      master_module_id: number;
+      professor_id: number;
+      room_id: number;
+      date: Dayjs;
+      range: [Dayjs, Dayjs];
+      group_ids?: number[];
+      comment?: string;
+    };
+    setMutating(true);
+    try {
+      const res = await api().sessions.create({
+        master_module_id: v.master_module_id,
+        professor_id: v.professor_id,
+        room_id: v.room_id,
+        date: v.date.format('YYYY-MM-DD'),
+        start_min: minOf(v.range[0]),
+        end_min: minOf(v.range[1]),
+        group_ids: v.group_ids ?? [],
+        comment: v.comment?.trim() || null,
+      });
+      applyEditResult(res, t('sessions.created'), () => {
+        setCreateOpen(false);
+        // Bascule la vue semaine sur la semaine de la séance créée.
+        setScope('week');
+        setWeekStart(mondayOf(v.date));
+      });
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setMutating(false);
+    }
   };
 
   const weekdays = t('weekdays', { returnObjects: true }) as unknown as string[];
@@ -1003,6 +1371,10 @@ export function TimetablePage(): React.JSX.Element {
             }))}
           />
         )}
+        {/* P7b : création manuelle (BR-24 — les deux profils écrivent) */}
+        <Button icon={<PlusOutlined />} onClick={openCreate}>
+          {t('sessions.create')}
+        </Button>
       </Space>
 
       {error && <Alert type="error" showIcon message={error} />}
@@ -1057,6 +1429,38 @@ export function TimetablePage(): React.JSX.Element {
           <Skeleton active />
         ) : detail ? (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            {/* Actions P7b — BR-24 : les deux profils écrivent */}
+            <Space wrap>
+              <Button icon={<EditOutlined />} onClick={openEdit}>
+                {t('sessions.edit.action')}
+              </Button>
+              <Dropdown
+                menu={{
+                  items: statusMenuItems,
+                  onClick: ({ key }) => onStatusMenu(key),
+                }}
+                disabled={statusMenuItems.length === 0}
+              >
+                <Button>
+                  {t('sessions.status.action')} <DownOutlined />
+                </Button>
+              </Dropdown>
+              <Button icon={<TeamOutlined />} onClick={() => void openGroups()}>
+                {t('sessions.groups.action')}
+              </Button>
+              <Popconfirm
+                title={t('sessions.delete.title')}
+                description={t('sessions.delete.confirm')}
+                okText={t('common.delete')}
+                cancelText={t('common.cancel')}
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void doDelete()}
+              >
+                <Button danger icon={<DeleteOutlined />}>
+                  {t('sessions.delete.action')}
+                </Button>
+              </Popconfirm>
+            </Space>
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label={t('timetable.detail.date')}>
                 {dayjs(detail.session.date).format('dddd DD/MM/YYYY')}
@@ -1170,6 +1574,370 @@ export function TimetablePage(): React.JSX.Element {
           <Empty description={t('common.empty')} />
         )}
       </Drawer>
+
+      {/* Modal Modifier (déplacement) */}
+      <Modal
+        title={t('sessions.edit.title')}
+        open={editOpen}
+        onOk={() => void submitEdit()}
+        onCancel={() => setEditOpen(false)}
+        confirmLoading={mutating}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="date"
+            label={t('sessions.edit.date')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+          </Form.Item>
+          <Form.Item
+            name="range"
+            label={t('sessions.edit.time')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+          </Form.Item>
+          <Form.Item
+            name="room_id"
+            label={t('sessions.edit.room')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={rooms.map((r) => ({ value: r.id, label: r.name }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="professor_id"
+            label={t('sessions.edit.professor')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={professors.map((p) => ({
+                value: p.id,
+                label: p.full_name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="reason" label={t('sessions.edit.reason')}>
+            <Input.TextArea rows={2} maxLength={200} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Modal Statut (réalisée / reportée / annulée / correction) */}
+      <Modal
+        title={
+          statusAction === 'CORRECTIVE'
+            ? t('sessions.status.correctiveTitle')
+            : t('sessions.status.title')
+        }
+        open={statusAction != null}
+        onOk={() => void submitStatus()}
+        onCancel={() => setStatusAction(null)}
+        confirmLoading={mutating}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        destroyOnHidden
+      >
+        <Form form={statusForm} layout="vertical">
+          {statusAction === 'CORRECTIVE' && (
+            <Form.Item
+              name="target"
+              label={t('sessions.status.targetStatus')}
+              rules={[{ required: true, message: t('common.required') }]}
+            >
+              <Select
+                options={(['PREVUE', 'ANNULEE', 'REPORTEE'] as const).map(
+                  (st) => ({ value: st, label: t(`sessionStatus.${st}`) }),
+                )}
+              />
+            </Form.Item>
+          )}
+          <Form.Item
+            name="reason"
+            label={t('sessions.status.reason')}
+            rules={[
+              {
+                required: statusAction !== 'REALISEE',
+                message: t('common.required'),
+              },
+            ]}
+          >
+            <Input.TextArea rows={2} maxLength={200} />
+          </Form.Item>
+          {statusAction === 'REALISEE' && (
+            <>
+              <Form.Item
+                name="actual_date"
+                label={t('sessions.status.actual')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+              <Form.Item
+                name="actual_range"
+                label={t('sessions.edit.time')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+              </Form.Item>
+            </>
+          )}
+          {statusAction === 'REPORTEE' && (
+            <>
+              <Form.Item
+                name="date"
+                label={t('sessions.status.newSlot')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+              <Form.Item
+                name="range"
+                label={t('sessions.edit.time')}
+                rules={[{ required: true, message: t('common.required') }]}
+              >
+                <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+              </Form.Item>
+            </>
+          )}
+          {statusAction === 'CORRECTIVE' && (
+            <Form.Item noStyle shouldUpdate>
+              {() =>
+                statusForm.getFieldValue('target') === 'REPORTEE' ? (
+                  <>
+                    <Form.Item
+                      name="date"
+                      label={t('sessions.status.newSlot')}
+                      rules={[{ required: true, message: t('common.required') }]}
+                    >
+                      <DatePicker
+                        style={{ width: '100%' }}
+                        format="DD/MM/YYYY"
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      name="range"
+                      label={t('sessions.edit.time')}
+                      rules={[{ required: true, message: t('common.required') }]}
+                    >
+                      <TimePicker.RangePicker
+                        format="HH:mm"
+                        minuteStep={5}
+                      />
+                    </Form.Item>
+                  </>
+                ) : null
+              }
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
+
+      {/* Modal Groupes */}
+      <Modal
+        title={t('sessions.groups.title')}
+        open={groupsOpen}
+        onOk={() => void submitGroups()}
+        onCancel={() => setGroupsOpen(false)}
+        confirmLoading={mutating}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        destroyOnHidden
+      >
+        <Alert
+          type="info"
+          showIcon
+          message={
+            mmGroupId != null
+              ? `${t('sessions.groups.hint')} · ${t('sessions.groups.implicit')} : ${
+                  masterGroups.find((g) => g.id === mmGroupId)?.name ?? ''
+                }`
+              : `${t('sessions.groups.hint')} · ${t('groups.wholeMaster')}`
+          }
+          style={{ marginBottom: 12 }}
+        />
+        <Form form={groupsForm} layout="vertical">
+          <Form.Item name="group_ids" label={t('sessions.groups.action')}>
+            <Select
+              mode="multiple"
+              allowClear
+              optionFilterProp="label"
+              options={masterGroups.map((g) => ({
+                value: g.id,
+                label: g.name,
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Modal Création manuelle */}
+      <Modal
+        title={t('sessions.createTitle')}
+        open={createOpen}
+        onOk={() => void submitCreate()}
+        onCancel={() => setCreateOpen(false)}
+        confirmLoading={mutating}
+        okText={t('common.create')}
+        cancelText={t('common.cancel')}
+        width={520}
+        destroyOnHidden
+      >
+        <Form form={createForm} layout="vertical">
+          <Form.Item
+            name="master_id"
+            label={t('sessions.masterPick')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={masters.map((m) => ({
+                value: m.id,
+                label: `${m.code} — ${m.name}`,
+              }))}
+              onChange={(v: number) => void onCreateMaster(v)}
+            />
+          </Form.Item>
+          <Form.Item
+            name="master_module_id"
+            label={t('sessions.masterModule')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              optionFilterProp="label"
+              disabled={createDetail == null}
+              onChange={onCreateMm}
+              options={(createDetail?.modules ?? []).map((mm) => ({
+                value: mm.id,
+                label: `${mm.module_code} — ${mm.module_name}${
+                  mm.group_name ? ` · ${mm.group_name}` : ''
+                }`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="date"
+            label={t('sessions.edit.date')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+          </Form.Item>
+          <Form.Item
+            name="range"
+            label={t('sessions.edit.time')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+          </Form.Item>
+          <Form.Item
+            name="room_id"
+            label={t('sessions.edit.room')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={rooms.map((r) => ({ value: r.id, label: r.name }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="professor_id"
+            label={t('sessions.edit.professor')}
+            rules={[{ required: true, message: t('common.required') }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={professors.map((p) => ({
+                value: p.id,
+                label: p.full_name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="group_ids" label={t('sessions.groupsOptional')}>
+            <Select
+              mode="multiple"
+              allowClear
+              optionFilterProp="label"
+              disabled={createDetail == null}
+              options={(createDetail?.groups ?? []).map((g) => ({
+                value: g.id,
+                label: g.name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="comment" label={t('sessions.commentField')}>
+            <Input.TextArea rows={2} maxLength={200} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Modal refus BR-10 — liste détaillée des conflits (jamais de toast seul) */}
+      <Modal
+        title={
+          <Space>
+            <WarningOutlined style={{ color: '#DC2626' }} />
+            {t('sessions.refusal.title')}
+          </Space>
+        }
+        open={refusal != null}
+        footer={
+          <Button type="primary" onClick={() => setRefusal(null)}>
+            {t('common.ok')}
+          </Button>
+        }
+        onCancel={() => setRefusal(null)}
+      >
+        <Alert
+          type="error"
+          showIcon
+          message={t('sessions.refusal.body')}
+          style={{ marginBottom: 12 }}
+        />
+        <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          {(refusal ?? []).map((c, i) => (
+            <div
+              key={`${c.kind}-${i}`}
+              style={{
+                padding: '6px 8px',
+                border: '1px solid #E5E7EB',
+                borderLeft: `3px solid ${KIND_COLORS[c.kind]}`,
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              <Space size={6}>
+                <Tag color={KIND_COLORS[c.kind]}>
+                  {t(`conflicts.kinds.${c.kind}`)}
+                </Tag>
+                <Text strong dir="auto">
+                  {c.entityLabel}
+                </Text>
+              </Space>
+              <div style={{ marginTop: 2 }}>
+                {dayjs(c.date).format('dddd DD/MM/YYYY')} ·{' '}
+                {t('sessions.refusal.overlap')}{' '}
+                {minToHHMM(c.startMin)}–{minToHHMM(c.endMin)}
+              </div>
+              <div dir="auto" style={{ color: '#6B7280' }}>
+                {c.sessions.length > 0
+                  ? c.sessions.map((s) => s.label).join(' ↔ ')
+                  : c.detail}
+              </div>
+            </div>
+          ))}
+        </Space>
+      </Modal>
     </Space>
   );
 }

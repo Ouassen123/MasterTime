@@ -35,13 +35,19 @@ import type {
   MonthFilter,
   OccupancyFilter,
   OccupancyRow,
+  PlacementConflict,
+  PlacementQuery,
   ProfessorDetail,
   ProfessorInput,
   ProfessorRow,
   Room,
   RoomInput,
+  SessionCreateInput,
   SessionDetail,
+  SessionEditResult,
+  SessionMoveInput,
   SessionRow,
+  SessionStatusInput,
   StudentGroupRow,
   WeekFilter,
   WindowApi,
@@ -173,6 +179,29 @@ const api: WindowApi = {
   sessions: {
     get: (id: number): Promise<ApiResult<SessionDetail>> =>
       ipcRenderer.invoke('sessions:get', id),
+    checkPlacement: (
+      query: PlacementQuery,
+    ): Promise<ApiResult<PlacementConflict[]>> =>
+      ipcRenderer.invoke('sessions:checkPlacement', query),
+    create: (input: SessionCreateInput): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('sessions:create', input),
+    move: (
+      id: number,
+      input: SessionMoveInput,
+    ): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('sessions:move', id, input),
+    setStatus: (
+      id: number,
+      input: SessionStatusInput,
+    ): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('sessions:setStatus', id, input),
+    setGroups: (
+      id: number,
+      groupIds: number[],
+    ): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('sessions:setGroups', id, groupIds),
+    remove: (id: number): Promise<SessionEditResult> =>
+      ipcRenderer.invoke('sessions:remove', id),
   },
   profile: {
     list: (): Promise<ApiResult<AppUser[]>> => ipcRenderer.invoke('profile:list'),
