@@ -1,12 +1,13 @@
 /**
  * Routes — layout AppShell (sidebar 13 entrées + topbar). Actives :
  * Dashboard, Masters, Salles, Modules, Professeurs, Emplois du temps
- * (P7a) ; le reste tombe sur PlaceholderPage (entrées désactivées dans
- * la sidebar).
+ * (P7a), Génération (P8) ; le reste tombe sur PlaceholderPage (entrées
+ * désactivées dans la sidebar).
  */
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { DashboardPage } from './pages/DashboardPage';
+import { GenerationPage } from './pages/GenerationPage';
 import { MastersPage } from './pages/MastersPage';
 import { ModulesPage } from './pages/ModulesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -24,6 +25,7 @@ export default function App(): React.JSX.Element {
         <Route path="professeurs" element={<ProfessorsPage />} />
         <Route path="salles" element={<RoomsPage />} />
         <Route path="emplois-du-temps" element={<TimetablePage />} />
+        <Route path="generation" element={<GenerationPage />} />
         <Route path="*" element={<PlaceholderPage />} />
       </Route>
     </Routes>

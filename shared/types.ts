@@ -574,6 +574,12 @@ export interface PlacementQuery {
   masterId: number;
   /** Séance déplacée — exclue de la comparaison (évite le self-conflit). */
   excludeSessionId?: number;
+  /**
+   * Séances exclues de la comparaison (P8 — REGENERATE : les séances qui
+   * seront annulées à l'application ne bloquent pas les candidates).
+   * Cumulatif avec `excludeSessionId`.
+   */
+  excludeSessionIds?: number[];
   groupIds?: number[];
   /**
    * Restreint la garde à certains kinds (anti-wedging : une retouche
@@ -650,6 +656,167 @@ export interface AnnualRow {
     annulee: number;
     reportee: number;
   };
+}
+
+// ---------------------------------------------------------------------------
+// P8 — Génération automatique de l'emploi du temps (FR-24→29, BR-7→15)
+// ---------------------------------------------------------------------------
+
+export const GENERATION_MODES = ['COMPLETE', 'REGENERATE'] as const;
+export type GenerationMode = (typeof GENERATION_MODES)[number];
+
+export const GENERATION_STATUSES = ['PREVIEW', 'APPLIED', 'ABANDONED'] as const;
+export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
+
+/** Paramètres d'une génération (`generation:run`, stockés en params_json). */
+export interface GenerateParams {
+  semester_id: number;
+  /** Absent/vide = tous les master-modules éligibles du semestre. */
+  master_module_ids?: number[];
+  mode: GenerationMode;
+  date_start: string; // 'YYYY-MM-DD' — intersecté avec sched_start/end
+  date_end: string;
+  /** Pause entre créneaux générés (découpe des time_slot). */
+  pause_min?: number;
+  /** Défaut 2 — pénalité souple au-delà (distribution_rule.max_per_day aussi). */
+  max_sessions_per_day_per_master?: number;
+  /** Reproductibilité — défaut : aléatoire. */
+  seed?: number;
+}
+
+/** Séance proposée par le moteur (jamais écrite avant l'apply — BR-14). */
+export interface ProposedSession {
+  master_module_id: number;
+  module_label: string; // « code — nom »
+  master_id: number;
+  master_label: string; // « code — nom »
+  professor_id: number;
+  professor_name: string;
+  room_id: number;
+  room_name: string;
+  group_id: number | null;
+  group_name: string | null;
+  date: string;
+  start_min: number;
+  end_min: number;
+  /** REGENERATE : séance existante remplacée (ANNULEE à l'apply). */
+  replaces_session_id: number | null;
+  /** Libellé lisible de la séance remplacée (diff en regard). */
+  replaces_label: string | null;
+}
+
+/** Échec partiel BR-15 : séances non plaçées d'un master-module. */
+export interface UnplacedItem {
+  master_module_id: number;
+  module_label: string;
+  master_label: string;
+  professor_name: string;
+  /** Nombre de séances restées non placées. */
+  missing: number;
+  /** Raisons agrégées sur les créneaux examinés (BR-15). */
+  reasons: string[];
+  /** Pistes d'action (BR-15). */
+  suggestions: string[];
+}
+
+/** Résumé chiffré d'une génération (persisté dans result_json). */
+export interface GenerationSummary {
+  /** Séances proposées. */
+  placed: number;
+  /** Séances demandées non placées (Σ UnplacedItem.missing). */
+  unplaced: number;
+  /** Séances existantes marquées REMPLACE (REGENERATE). */
+  replaced: number;
+  /** Jours candidats examinés (union des mm). */
+  days: number;
+}
+
+/** Contenu de `result_json` — diff + rapport d'échec. */
+export interface GenerationPayload {
+  placed: ProposedSession[];
+  unplaced: UnplacedItem[];
+  warnings: string[];
+  summary: GenerationSummary;
+  /** Ids des séances existantes remplacées (REGENERATE, à l'apply). */
+  replaced_ids: number[];
+}
+
+/** Résultat de `generation:run` = payload + id de la preview persistée. */
+export interface GenerationResult extends GenerationPayload {
+  generation_id: number;
+}
+
+/** Ligne de l'historique des générations (`generation:list`). */
+export interface GenerationRow {
+  id: number;
+  created_at: string;
+  created_by: number | null;
+  user_name: string | null;
+  academic_year_id: number | null;
+  semester_id: number | null;
+  semester_label: string | null;
+  mode: GenerationMode | null;
+  placed_count: number | null;
+  /** Σ séances non placées du résultat (0 si absent). */
+  unplaced_count: number;
+  status: GenerationStatus;
+}
+
+/** Filtre optionnel de `generation:list`. */
+export interface GenerationListFilter {
+  status?: GenerationStatus;
+  semesterId?: number;
+}
+
+/** Détail d'une génération (`generation:get`) : row + params + résultat. */
+export interface GenerationDetail {
+  row: GenerationRow;
+  params: GenerateParams | null;
+  result: GenerationPayload | null;
+}
+
+/** Résultat de `generation:apply`. */
+export interface ApplyResult {
+  generationId: number;
+  /** Nouvelles séances insérées (PREVUE). */
+  inserted: number;
+  /** Séances existantes passées ANNULEE (REGENERATE). */
+  cancelled: number;
+}
+
+/**
+ * Résultat d'application — comme `SessionEditResult` : succès → compteurs ;
+ * refus BR-10 (monde changé depuis la preview) → `conflicts` détaillés.
+ */
+export type GenerationApplyResult =
+  | { ok: true; data: ApplyResult }
+  | {
+      ok: false;
+      error: string;
+      fields?: FieldError[];
+      conflicts?: PlacementConflict[];
+    };
+
+/** Master-module éligible à la génération (sélecteur UI, `generation:catalog`). */
+export interface GenerationModuleRef {
+  id: number;
+  master_id: number;
+  master_code: string;
+  master_name: string;
+  module_label: string;
+  professor_name: string;
+  group_name: string | null;
+  planned_sessions: number;
+  sched_start: string;
+  sched_end: string;
+}
+
+/** Catalogue du sélecteur : mm du semestre + fenêtre globale sched. */
+export interface GenerationCatalog {
+  modules: GenerationModuleRef[];
+  /** min(sched_start) / max(sched_end) des mm — plage de dates par défaut. */
+  sched_start: string | null;
+  sched_end: string | null;
 }
 
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
@@ -769,6 +936,16 @@ export interface WindowApi {
     ): Promise<SessionEditResult>;
     setGroups(id: number, groupIds: number[]): Promise<SessionEditResult>;
     remove(id: number): Promise<SessionEditResult>;
+  };
+  generation: {
+    run(params: GenerateParams): Promise<ApiResult<GenerationResult>>;
+    list(
+      filter?: GenerationListFilter,
+    ): Promise<ApiResult<GenerationRow[]>>;
+    get(id: number): Promise<ApiResult<GenerationDetail>>;
+    apply(id: number): Promise<GenerationApplyResult>;
+    abandon(id: number): Promise<ApiResult<null>>;
+    catalog(semesterId: number): Promise<ApiResult<GenerationCatalog>>;
   };
   profile: {
     list(): Promise<ApiResult<AppUser[]>>;

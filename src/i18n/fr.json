@@ -362,6 +362,84 @@
       "overlap": "Chevauchement"
     }
   },
+  "generation": {
+    "title": "Génération automatique",
+    "previewOnly": "Prévisualisation : rien n'est écrit tant que vous n'appliquez pas.",
+    "params": "Paramètres",
+    "semester": "Semestre",
+    "modules": "Modules du semestre",
+    "modulesAll": "Tout le semestre",
+    "mode": "Mode",
+    "modes": {
+      "COMPLETE": "Compléter",
+      "REGENERATE": "Régénérer"
+    },
+    "modeHelp": {
+      "COMPLETE": "Place uniquement les séances manquantes (prévues − existantes), sans rien toucher.",
+      "REGENERATE": "Annule les séances prévues futures des modules ciblés et les replace — les séances passées et réalisées sont conservées."
+    },
+    "range": "Plage de dates",
+    "pause": "Pause entre séances (min)",
+    "maxPerDay": "Séances max / jour / master",
+    "seed": "Graine aléatoire (optionnel)",
+    "run": "Générer l'aperçu",
+    "running": "Génération en cours…",
+    "history": "Historique des générations",
+    "historyEmpty": "Aucune génération — lancez un aperçu.",
+    "cols": {
+      "date": "Date",
+      "author": "Auteur",
+      "semester": "Semestre",
+      "mode": "Mode",
+      "placed": "Placées",
+      "unplaced": "Non placées",
+      "status": "Statut"
+    },
+    "statuses": {
+      "PREVIEW": "Aperçu",
+      "APPLIED": "Appliquée",
+      "ABANDONED": "Abandonnée"
+    },
+    "detailTitle": "Génération #{{id}}",
+    "summary": {
+      "placed": "Séances proposées",
+      "unplaced": "Non placées",
+      "replaced": "Remplacées",
+      "days": "Jours examinés"
+    },
+    "warnings": "Avertissements",
+    "diff": {
+      "title": "Séances proposées",
+      "kind": "Type",
+      "new": "NOUVELLE",
+      "replaces": "REMPLACE",
+      "date": "Date",
+      "time": "Horaire",
+      "module": "Module",
+      "master": "Master",
+      "professor": "Professeur",
+      "room": "Salle",
+      "group": "Groupe",
+      "replacesWhat": "Remplace",
+      "wholeMaster": "Master entier"
+    },
+    "unplacedPanel": {
+      "title": "Séances non placées (BR-15)",
+      "missing": "{{count}} séance(s) non placée(s)",
+      "reasons": "Raisons",
+      "suggestions": "Suggestions"
+    },
+    "apply": "Appliquer",
+    "applyConfirm": "Écrire {{inserted}} séance(s) et annuler {{cancelled}} remplacée(s) ?",
+    "applied": "Génération appliquée : {{inserted}} séance(s) insérée(s), {{cancelled}} annulée(s).",
+    "abandon": "Abandonner",
+    "abandonConfirm": "Abandonner cette prévisualisation ?",
+    "abandoned": "Génération abandonnée.",
+    "viewTimetable": "Voir dans l'emploi du temps",
+    "refusalTitle": "Application refusée — conflits détectés",
+    "refusalBody": "Le monde a changé depuis la prévisualisation. Conflits détectés :",
+    "generatedAt": "Créée le {{date}} par {{author}}"
+  },
   "conflicts": {
     "title": "Conflits",
     "hide": "Masquer",

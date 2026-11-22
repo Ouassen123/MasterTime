@@ -11,6 +11,7 @@ import {
   BankOutlined,
   CalendarOutlined,
   TeamOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -53,7 +54,12 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <CalendarOutlined />,
   },
-  { key: 'generation', path: '/generation', enabled: false },
+  {
+    key: 'generation',
+    path: '/generation',
+    enabled: true,
+    icon: <ThunderboltOutlined />,
+  },
   { key: 'sessions', path: '/seances', enabled: false },
   { key: 'absences', path: '/absences', enabled: false },
   { key: 'reports', path: '/rapports', enabled: false },

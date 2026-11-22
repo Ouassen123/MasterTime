@@ -21,6 +21,13 @@ import type {
   ContextSemesters,
   DbStatus,
   DeleteResult,
+  GenerateParams,
+  GenerationApplyResult,
+  GenerationCatalog,
+  GenerationDetail,
+  GenerationListFilter,
+  GenerationResult,
+  GenerationRow,
   GroupInput,
   ImpactedSession,
   MasterDetail,
@@ -202,6 +209,24 @@ const api: WindowApi = {
       ipcRenderer.invoke('sessions:setGroups', id, groupIds),
     remove: (id: number): Promise<SessionEditResult> =>
       ipcRenderer.invoke('sessions:remove', id),
+  },
+  generation: {
+    run: (params: GenerateParams): Promise<ApiResult<GenerationResult>> =>
+      ipcRenderer.invoke('generation:run', params),
+    list: (
+      filter?: GenerationListFilter,
+    ): Promise<ApiResult<GenerationRow[]>> =>
+      ipcRenderer.invoke('generation:list', filter),
+    get: (id: number): Promise<ApiResult<GenerationDetail>> =>
+      ipcRenderer.invoke('generation:get', id),
+    apply: (id: number): Promise<GenerationApplyResult> =>
+      ipcRenderer.invoke('generation:apply', id),
+    abandon: (id: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('generation:abandon', id),
+    catalog: (
+      semesterId: number,
+    ): Promise<ApiResult<GenerationCatalog>> =>
+      ipcRenderer.invoke('generation:catalog', semesterId),
   },
   profile: {
     list: (): Promise<ApiResult<AppUser[]>> => ipcRenderer.invoke('profile:list'),

@@ -380,7 +380,17 @@ export function checkSessionPlacement(
   if (!master) {
     return apiErr('Master inexistant.');
   }
-  const exclude = isRef(q.excludeSessionId) ? q.excludeSessionId : -1;
+  // Exclusions : `excludeSessionId` (déplacement) + `excludeSessionIds`
+  // (P8 — les séances qui seront annulées à l'apply ne bloquent pas).
+  const excludeIds = new Set<number>();
+  if (isRef(q.excludeSessionId)) excludeIds.add(q.excludeSessionId);
+  if (Array.isArray(q.excludeSessionIds)) {
+    for (const id of q.excludeSessionIds) {
+      if (isRef(id)) excludeIds.add(id);
+    }
+  }
+  const excludeList = excludeIds.size > 0 ? [...excludeIds] : [-1];
+  const excludeClause = ` AND b.id NOT IN (${excludeList.map(() => '?').join(',')})`;
   const groupIds = Array.isArray(q.groupIds)
     ? [...new Set(q.groupIds.filter(isRef))]
     : [];
@@ -397,9 +407,9 @@ export function checkSessionPlacement(
        FROM session b
        JOIN room r ON r.id = b.room_id${ADVERSE_JOINS}
       WHERE b.date = ? AND b.room_id = ?
-        AND b.status != 'ANNULEE' AND b.id != ?
+        AND b.status != 'ANNULEE'${excludeClause}
         AND ? < b.end_min AND b.start_min < ?`,
-    q.startMin, q.endMin, date, q.roomId, exclude, q.startMin, q.endMin,
+    q.startMin, q.endMin, date, q.roomId, ...excludeList, q.startMin, q.endMin,
   )) {
     items.push(placementItem('ROOM', { ...q, date }, r));
   }
@@ -411,9 +421,9 @@ export function checkSessionPlacement(
        FROM session b
        JOIN professor p ON p.id = b.professor_id${ADVERSE_JOINS}
       WHERE b.date = ? AND b.professor_id = ?
-        AND b.status != 'ANNULEE' AND b.id != ?
+        AND b.status != 'ANNULEE'${excludeClause}
         AND ? < b.end_min AND b.start_min < ?`,
-    q.startMin, q.endMin, date, q.professorId, exclude, q.startMin, q.endMin,
+    q.startMin, q.endMin, date, q.professorId, ...excludeList, q.startMin, q.endMin,
   )) {
     items.push(placementItem('PROFESSOR', { ...q, date }, r));
   }
@@ -424,9 +434,9 @@ export function checkSessionPlacement(
     `SELECT${ADVERSE_COLS}, mab.name AS entity
        FROM session b${ADVERSE_JOINS}
       WHERE b.date = ? AND bm.master_id = ?
-        AND b.status != 'ANNULEE' AND b.id != ?
+        AND b.status != 'ANNULEE'${excludeClause}
         AND ? < b.end_min AND b.start_min < ?`,
-    q.startMin, q.endMin, date, q.masterId, exclude, q.startMin, q.endMin,
+    q.startMin, q.endMin, date, q.masterId, ...excludeList, q.startMin, q.endMin,
   )) {
     items.push(placementItem('MASTER', { ...q, date }, r));
   }
@@ -448,11 +458,11 @@ export function checkSessionPlacement(
                              AND sg.student_group_id = gb.id))
          JOIN master gm ON gm.id = gb.master_id
         WHERE b.date = ?
-          AND b.status != 'ANNULEE' AND b.id != ?
+          AND b.status != 'ANNULEE'${excludeClause}
           AND ? < b.end_min AND b.start_min < ?
           AND gb.id IN (${groupIds.map(() => '?').join(', ')})
         ORDER BY b.id, entity`,
-      q.startMin, q.endMin, date, exclude, q.startMin, q.endMin, ...groupIds,
+      q.startMin, q.endMin, date, ...excludeList, q.startMin, q.endMin, ...groupIds,
     )) {
       const prev = bySession.get(r.b_id);
       if (prev) {
