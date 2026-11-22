@@ -345,8 +345,10 @@ function placementItem(
  * mais ciblées sur un seul créneau (une requête par kind, pas de
  * full-scan). `excludeSessionId` retire la séance déplacée de la
  * comparaison ; `groupIds` est l'ensemble COMPLET des groupes du
- * candidat (mm.student_group_id + session_group). Retour vide =
- * placement autorisé ; l'appelant refuse l'écriture sinon.
+ * candidat (mm.student_group_id + session_group). `kinds` restreint la
+ * garde à certains kinds (anti-wedging : un conflit pré-existant
+ * orthogonal ne bloque plus une retouche partielle) — absent = tous.
+ * Retour vide = placement autorisé ; l'appelant refuse l'écriture sinon.
  */
 export function checkSessionPlacement(
   db: DatabaseSync,
@@ -382,10 +384,14 @@ export function checkSessionPlacement(
   const groupIds = Array.isArray(q.groupIds)
     ? [...new Set(q.groupIds.filter(isRef))]
     : [];
+  // Kinds à vérifier : sous-ensemble explicite (anti-wedging) ou tous.
+  const kinds: Set<ConflictKind> = Array.isArray(q.kinds)
+    ? new Set(q.kinds.filter((k) => KIND_ORDER.includes(k)))
+    : new Set(KIND_ORDER);
   const items: PlacementConflict[] = [];
 
   // ROOM — même salle, même date, chevauchement strict.
-  for (const r of all<AdverseRow>(
+  for (const r of !kinds.has('ROOM') ? [] : all<AdverseRow>(
     db,
     `SELECT${ADVERSE_COLS}, r.name AS entity
        FROM session b
@@ -399,7 +405,7 @@ export function checkSessionPlacement(
   }
 
   // PROFESSOR — même professeur.
-  for (const r of all<AdverseRow>(
+  for (const r of !kinds.has('PROFESSOR') ? [] : all<AdverseRow>(
     db,
     `SELECT${ADVERSE_COLS}, p.full_name AS entity
        FROM session b
@@ -413,7 +419,7 @@ export function checkSessionPlacement(
   }
 
   // MASTER — même master (via master_module de l'adverse).
-  for (const r of all<AdverseRow>(
+  for (const r of !kinds.has('MASTER') ? [] : all<AdverseRow>(
     db,
     `SELECT${ADVERSE_COLS}, mab.name AS entity
        FROM session b${ADVERSE_JOINS}
@@ -429,7 +435,7 @@ export function checkSessionPlacement(
   // (mm.student_group_id UNION session_group, même définition que
   // detectConflicts). Plusieurs groupes communs avec la même séance
   // adverse → une seule entrée, libellés concaténés.
-  if (groupIds.length > 0) {
+  if (kinds.has('GROUP') && groupIds.length > 0) {
     const bySession = new Map<number, PlacementConflict>();
     for (const r of all<AdverseRow>(
       db,
@@ -469,7 +475,7 @@ export function checkSessionPlacement(
     groupe: string | null;
     room_name: string;
   }
-  for (const r of all<ExtPlacementRow>(
+  for (const r of !kinds.has('EXTERNAL') ? [] : all<ExtPlacementRow>(
     db,
     `SELECT max(?, eo.start_min) AS ov_start, min(?, eo.end_min) AS ov_end,
             eo.program, eo.groupe, r.name AS room_name

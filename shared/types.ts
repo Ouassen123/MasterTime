@@ -575,6 +575,12 @@ export interface PlacementQuery {
   /** Séance déplacée — exclue de la comparaison (évite le self-conflit). */
   excludeSessionId?: number;
   groupIds?: number[];
+  /**
+   * Restreint la garde à certains kinds (anti-wedging : une retouche
+   * partielle ne re-check que les kinds affectés — un conflit
+   * pré-existant orthogonal ne bloque plus l'écriture). Absent = tous.
+   */
+  kinds?: ConflictKind[];
 }
 
 /** Création manuelle d'une séance (`sessions:create`). */

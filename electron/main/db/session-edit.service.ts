@@ -12,13 +12,21 @@
  *   `moveSession` réutilise le même écrivain interne).
  * - AD-7 temps : `isValidIsoDate` (calendaire, rejette 2026-02-30) et
  *   bornes 0 ≤ start < end ≤ 1440 vérifiées à l'écriture.
- * - REPORTEE : la séance bascule sur le NOUVEAU créneau ; l'historique
- *   conserve l'ancien créneau + motif (DATA-MODEL / BR-3).
+ * - REPORTEE : la séance bascule sur le NOUVEAU créneau (>= aujourd'hui) ;
+ *   l'historique conserve l'ancien créneau + motif (DATA-MODEL / BR-3).
  * - REALISEE : verrouillée — sortie refusée sauf correction
- *   `{ corrective: true, reason }` ; suppression toujours refusée.
+ *   `{ corrective: true, reason }` ; suppression toujours refusée ;
+ *   `actual_date` ne peut pas être dans le futur.
+ * - Anti-wedging : `moveSession` ne re-check que les kinds affectés par
+ *   les champs modifiés — un conflit pré-existant orthogonal ne bloque
+ *   plus une retouche partielle.
+ * - Ressources : salle/professeur `is_active = 0` refusés à la création
+ *   et au déplacement (sauf valeur inchangée au move) ; master `ARCHIVE`
+ *   refusé à la création.
  */
 import { DatabaseSync } from 'node:sqlite';
 import type {
+  ConflictKind,
   FieldError,
   PlacementConflict,
   PlacementQuery,
@@ -30,7 +38,7 @@ import type {
 } from '../../../shared/types';
 import { SESSION_STATUSES } from '../../../shared/types';
 import { all, get, run } from './connection';
-import { isValidIsoDate } from './date';
+import { isValidIsoDate, todayIso } from './date';
 import { withAudit } from './audit.service';
 import { checkSessionPlacement } from './conflict.service';
 
@@ -99,6 +107,9 @@ function isInt(v: unknown): v is number {
 function isNonEmptyStr(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
+
+/** Plafond des textes libres (comment / reason) — intégrité du journal. */
+const MAX_TEXT_LEN = 500;
 
 /** Validation créneau : date calendaire + 0 ≤ start < end ≤ 1440. */
 function validateSlot(
@@ -207,8 +218,9 @@ interface SessionChange {
 /**
  * Écrivain unique de la mutation séance + historique — appelé dans la TX
  * `withAudit`. Trace `session_status_history` systématiquement pour un
- * changement de statut, et seulement si le créneau change pour un
- * déplacement (old_status = new_status = statut courant).
+ * changement de statut, si le créneau change, ou si un motif est fourni
+ * (old_status = new_status = statut courant pour un déplacement ou une
+ * correction REALISEE→REALISEE).
  */
 function applySessionChange(
   db: DatabaseSync,
@@ -239,7 +251,7 @@ function applySessionChange(
     after.date !== before.date ||
     after.start_min !== before.start_min ||
     after.end_min !== before.end_min;
-  if (after.status !== before.status || slotChanged) {
+  if (after.status !== before.status || slotChanged || after.reason != null) {
     run(
       db,
       `INSERT INTO session_status_history
@@ -281,10 +293,14 @@ export function createSession(
         master_id: number;
         professor_id: number;
         student_group_id: number | null;
+        master_status: string;
       }>(
         db,
-        `SELECT id, master_id, professor_id, student_group_id
-           FROM master_module WHERE id = ?`,
+        `SELECT mm.id, mm.master_id, mm.professor_id, mm.student_group_id,
+                m.status AS master_status
+           FROM master_module mm
+           JOIN master m ON m.id = mm.master_id
+          WHERE mm.id = ?`,
         input.master_module_id,
       )
     : undefined;
@@ -293,22 +309,43 @@ export function createSession(
       field: 'master_module_id',
       message: 'Master-module inexistant.',
     });
+  } else if (mm.master_status === 'ARCHIVE') {
+    errors.push({
+      field: 'master_module_id',
+      message: 'Master archivé : création de séance impossible.',
+    });
   }
   const professorId = input.professor_id ?? mm?.professor_id;
+  const prof = isId(professorId)
+    ? get<{ id: number; is_active: number }>(
+        db,
+        'SELECT id, is_active FROM professor WHERE id = ?',
+        professorId,
+      )
+    : undefined;
   if (!isId(professorId)) {
     errors.push({
       field: 'professor_id',
       message: 'Professeur invalide.',
     });
-  } else if (
-    !get(db, 'SELECT id FROM professor WHERE id = ?', professorId)
-  ) {
+  } else if (!prof) {
     errors.push({ field: 'professor_id', message: 'Professeur inexistant.' });
+  } else if (prof.is_active !== 1) {
+    errors.push({ field: 'professor_id', message: 'Professeur désactivé.' });
   }
+  const room = isId(input?.room_id)
+    ? get<{ id: number; is_active: number }>(
+        db,
+        'SELECT id, is_active FROM room WHERE id = ?',
+        input.room_id,
+      )
+    : undefined;
   if (!isId(input?.room_id)) {
     errors.push({ field: 'room_id', message: 'Salle invalide.' });
-  } else if (!get(db, 'SELECT id FROM room WHERE id = ?', input.room_id)) {
+  } else if (!room) {
     errors.push({ field: 'room_id', message: 'Salle inexistante.' });
+  } else if (room.is_active !== 1) {
+    errors.push({ field: 'room_id', message: 'Salle désactivée.' });
   }
   errors.push(
     ...validateSlot(input?.date, input?.start_min, input?.end_min),
@@ -320,13 +357,22 @@ export function createSession(
     errors.push({ field: 'group_ids', message: groupCheck });
   }
   const comment = input.comment != null ? String(input.comment).trim() : '';
+  if (comment.length > MAX_TEXT_LEN) {
+    errors.push({
+      field: 'comment',
+      message: 'Commentaire trop long (500 caractères max).',
+    });
+  }
   if (errors.length > 0) {
     return editErr(
       'Validation impossible : corrigez les champs signalés.',
       errors,
     );
   }
-  const groupIds = groupCheck as number[];
+  // Groupe implicite du mm : déjà porté par la séance — dédup silencieuse.
+  const groupIds = (groupCheck as number[]).filter(
+    (g) => g !== mm!.student_group_id,
+  );
   const profId = professorId as number;
   const candidate = new Set<number>(groupIds);
   if (mm!.student_group_id != null) candidate.add(mm!.student_group_id);
@@ -388,9 +434,14 @@ export function createSession(
 
 /**
  * Déplacement (date/heure/salle/prof) : le statut est INCHANGÉ —
- * déplacement ≠ report (REPORTEE est un statut explicite). Si le créneau
- * change, l'historique consigne old/new date+mins. Garde BR-10 avec
- * exclusion de soi-même.
+ * déplacement ≠ report (REPORTEE est un statut explicite). L'historique
+ * consigne old/new date+mins si le créneau change, et le motif dès qu'il
+ * est fourni. Garde BR-10 ANTI-WEDGING : seuls les kinds affectés par
+ * les champs modifiés sont re-vérifiés (date/heure → tous ; salle →
+ * ROOM+EXTERNAL ; prof → PROFESSOR ; rien changé → pas de check), de
+ * sorte qu'un conflit pré-existant orthogonal ne bloque plus une
+ * retouche partielle. Une séance REPORTEE exige un motif (re-report) ;
+ * salle/prof désactivés refusés sauf valeur inchangée.
  */
 export function moveSession(
   db: DatabaseSync,
@@ -412,16 +463,47 @@ export function moveSession(
   const end = input.end_min !== undefined ? input.end_min : s.end_min;
   errors.push(...validateSlot(date, start, end));
   const roomId = input.room_id !== undefined ? input.room_id : s.room_id;
-  if (!isId(roomId) || !get(db, 'SELECT id FROM room WHERE id = ?', roomId)) {
+  const room = isId(roomId)
+    ? get<{ id: number; is_active: number }>(
+        db,
+        'SELECT id, is_active FROM room WHERE id = ?',
+        roomId,
+      )
+    : undefined;
+  if (!isId(roomId) || !room) {
     errors.push({ field: 'room_id', message: 'Salle inexistante.' });
+  } else if (roomId !== s.room_id && room.is_active !== 1) {
+    // Valeur inchangée : une salle désactivée après coup n'interdit pas
+    // de retoucher la séance ; la CHANGER vers une salle inactive, si.
+    errors.push({ field: 'room_id', message: 'Salle désactivée.' });
   }
   const professorId =
     input.professor_id !== undefined ? input.professor_id : s.professor_id;
-  if (
-    !isId(professorId) ||
-    !get(db, 'SELECT id FROM professor WHERE id = ?', professorId)
-  ) {
+  const prof = isId(professorId)
+    ? get<{ id: number; is_active: number }>(
+        db,
+        'SELECT id, is_active FROM professor WHERE id = ?',
+        professorId,
+      )
+    : undefined;
+  if (!isId(professorId) || !prof) {
     errors.push({ field: 'professor_id', message: 'Professeur inexistant.' });
+  } else if (professorId !== s.professor_id && prof.is_active !== 1) {
+    errors.push({ field: 'professor_id', message: 'Professeur désactivé.' });
+  }
+  const reason = isNonEmptyStr(input.reason) ? input.reason.trim() : null;
+  // Déplacer une séance REPORTEE = re-report : motif obligatoire.
+  if (s.status === 'REPORTEE' && reason == null) {
+    errors.push({
+      field: 'reason',
+      message: 'Le motif est obligatoire pour déplacer une séance reportée.',
+    });
+  }
+  if (reason != null && reason.length > MAX_TEXT_LEN) {
+    errors.push({
+      field: 'reason',
+      message: 'Motif trop long (500 caractères max).',
+    });
   }
   if (errors.length > 0) {
     return editErr(
@@ -429,8 +511,28 @@ export function moveSession(
       errors,
     );
   }
-  // Une séance ANNULEE n'occupe pas de ressource : garde inutile.
-  if (s.status !== 'ANNULEE') {
+  // Anti-wedging : seuls les kinds affectés par les champs modifiés sont
+  // re-vérifiés — un conflit pré-existant orthogonal (ex. PROFESSOR déjà
+  // présent en base) ne bloque plus une retouche de salle/heure.
+  const slotChanged =
+    (date as string).trim() !== s.date ||
+    start !== s.start_min ||
+    end !== s.end_min;
+  const kinds = new Set<ConflictKind>();
+  if (slotChanged) {
+    for (const k of ['ROOM', 'PROFESSOR', 'MASTER', 'GROUP', 'EXTERNAL'] as ConflictKind[]) {
+      kinds.add(k);
+    }
+  } else {
+    if (roomId !== s.room_id) {
+      kinds.add('ROOM');
+      kinds.add('EXTERNAL');
+    }
+    if (professorId !== s.professor_id) kinds.add('PROFESSOR');
+  }
+  // Une séance ANNULEE n'occupe pas de ressource : garde inutile ; rien
+  // de changé → rien à re-checker non plus.
+  if (s.status !== 'ANNULEE' && kinds.size > 0) {
     const guardRes = placementGuard(db, {
       date: (date as string).trim(),
       startMin: start,
@@ -440,6 +542,7 @@ export function moveSession(
       masterId: s.master_id,
       excludeSessionId: id,
       groupIds: sessionGroupIds(db, id, s.mm_group_id),
+      kinds: [...kinds],
     });
     if (typeof guardRes === 'string') return editErr(guardRes);
     if (guardRes.length > 0) {
@@ -461,7 +564,7 @@ export function moveSession(
       actual_date: s.actual_date,
       actual_start_min: s.actual_start_min,
       actual_end_min: s.actual_end_min,
-      reason: isNonEmptyStr(input.reason) ? input.reason.trim() : null,
+      reason,
     });
   });
   return editOk(id);
@@ -488,18 +591,22 @@ const ALLOWED_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
  * - → REALISEE : actual_* par défaut = créneau planifié.
  * - → ANNULEE : motif obligatoire.
  * - → REPORTEE : motif + nouveau créneau (date/start/end) obligatoires ;
- *   la séance bascule sur le nouveau créneau, l'historique conserve
- *   l'ancien (BR-3).
+ *   le nouveau créneau doit être >= aujourd'hui ; la séance bascule
+ *   dessus, l'historique conserve l'ancien (BR-3).
  * - → PREVUE : réactivation depuis ANNULEE (ou REPORTEE) avec re-check
  *   conflits sur le créneau conservé.
  * - REALISEE → autre : refusé sauf `corrective:true` + motif (correction
- *   admin, tracée en audit).
+ *   admin, tracée en audit). REALISEE→REALISEE avec `corrective:true` +
+ *   motif = retouche des `actual_*` seuls (créneau inchangé).
+ * @param today Date 'YYYY-MM-DD' des bornes temporelles (injectable —
+ *   défaut `todayIso()`).
  */
 export function changeSessionStatus(
   db: DatabaseSync,
   userId: number | null,
   id: number,
   input: SessionStatusInput,
+  today: string = todayIso(),
 ): SessionEditResult {
   const s = getSession(db, id);
   if (!s) return editErr('Séance introuvable.');
@@ -513,16 +620,22 @@ export function changeSessionStatus(
   const reason = isNonEmptyStr(input.reason) ? input.reason.trim() : null;
   const corrective = input.corrective === true;
   const reReport = newStatus === 'REPORTEE' && s.status === 'REPORTEE';
-  if (newStatus === s.status && !reReport) {
+  // REALISEE→REALISEE : retouche des actual_* (correction), pas un
+  // no-op — soumise au même verrou corrective + motif.
+  const correctiveRealisee =
+    s.status === 'REALISEE' && newStatus === 'REALISEE';
+  if (newStatus === s.status && !reReport && !correctiveRealisee) {
     return editErr('La séance est déjà dans ce statut.');
   }
   if (s.status === 'REALISEE') {
     if (!corrective || reason == null) {
       return editErr(
-        'Séance réalisée verrouillée : correction avec motif obligatoire.',
+        correctiveRealisee
+          ? 'La séance est déjà dans ce statut.'
+          : 'Séance réalisée verrouillée : correction avec motif obligatoire.',
       );
     }
-    // Correction : REALISEE → tout autre statut autorisé.
+    // Correction : REALISEE → tout statut autorisé (motif tracé en audit).
   } else if (!ALLOWED_TRANSITIONS[s.status].includes(newStatus)) {
     return editErr(
       `Transition ${s.status} → ${newStatus} non autorisée.`,
@@ -536,6 +649,12 @@ export function changeSessionStatus(
   const end = newSlot ? input.end_min : s.end_min;
   const errors: FieldError[] = [];
 
+  if (reason != null && reason.length > MAX_TEXT_LEN) {
+    errors.push({
+      field: 'reason',
+      message: 'Motif trop long (500 caractères max).',
+    });
+  }
   if (newStatus === 'ANNULEE' || newStatus === 'REPORTEE') {
     if (reason == null) {
       errors.push({ field: 'reason', message: 'Le motif est obligatoire.' });
@@ -549,27 +668,48 @@ export function changeSessionStatus(
         message: 'Un nouveau créneau (date + horaire) est obligatoire.',
       });
     } else {
-      errors.push(...validateSlot(date, start, end));
+      const slotErrors = validateSlot(date, start, end);
+      errors.push(...slotErrors);
+      // Un report ne vise jamais le passé.
+      if (
+        !slotErrors.some((e) => e.field === 'date') &&
+        (date as string).trim() < today
+      ) {
+        errors.push({
+          field: 'date',
+          message: 'Le nouveau créneau ne peut pas être dans le passé.',
+        });
+      }
     }
   }
 
-  // Actualisation REALISEE : défaut = créneau planifié.
+  // Actualisation REALISEE : défaut = actual_* existants (correction
+  // REALISEE→REALISEE) sinon créneau planifié.
   let actualDate: string | null = null;
   let actualStart: number | null = null;
   let actualEnd: number | null = null;
   if (newStatus === 'REALISEE') {
     actualDate =
-      input.actual_date !== undefined ? input.actual_date : s.date;
+      input.actual_date !== undefined
+        ? input.actual_date
+        : (s.actual_date ?? s.date);
     actualStart =
       input.actual_start_min !== undefined
         ? input.actual_start_min
-        : s.start_min;
+        : (s.actual_start_min ?? s.start_min);
     actualEnd =
-      input.actual_end_min !== undefined ? input.actual_end_min : s.end_min;
+      input.actual_end_min !== undefined
+        ? input.actual_end_min
+        : (s.actual_end_min ?? s.end_min);
     if (typeof actualDate !== 'string' || !isValidIsoDate(actualDate.trim())) {
       errors.push({
         field: 'actual_date',
         message: 'Date de réalisation invalide (AAAA-MM-JJ).',
+      });
+    } else if (actualDate.trim() > today) {
+      errors.push({
+        field: 'actual_date',
+        message: 'La réalisation ne peut pas être datée dans le futur.',
       });
     }
     if (
@@ -584,6 +724,7 @@ export function changeSessionStatus(
         message: 'Horaire de réalisation invalide (0 ≤ début < fin ≤ 24h00).',
       });
     }
+    if (typeof actualDate === 'string') actualDate = actualDate.trim();
   }
   if (errors.length > 0) {
     return editErr(
@@ -592,11 +733,13 @@ export function changeSessionStatus(
     );
   }
 
-  // Garde BR-10 : REPORTEE occupe le NOUVEAU créneau ; ANNULEE→PREVUE
-  // recrée une occupation sur le créneau conservé — re-check obligatoire.
+  // Garde BR-10 : REPORTEE occupe le NOUVEAU créneau ; toute sortie
+  // d'ANNULEE vers un statut occupant (PREVUE ou REALISEE) recrée une
+  // occupation sur le créneau conservé — re-check obligatoire.
   const needsCheck =
     newStatus === 'REPORTEE' ||
-    (newStatus === 'PREVUE' && s.status === 'ANNULEE');
+    (s.status === 'ANNULEE' &&
+      (newStatus === 'PREVUE' || newStatus === 'REALISEE'));
   if (needsCheck) {
     const guardRes = placementGuard(db, {
       date: (date as string).trim(),
@@ -651,14 +794,22 @@ export function setSessionGroups(
 ): SessionEditResult {
   const s = getSession(db, id);
   if (!s) return editErr('Séance introuvable.');
+  if (s.status === 'REALISEE') {
+    return editErr(
+      'Une séance réalisée est verrouillée : rattachement de groupes ' +
+        'impossible.',
+    );
+  }
   const check = validateGroupIds(db, s.master_id, groupIds);
   if (typeof check === 'string') {
     return editErr('Validation impossible : corrigez les champs signalés.', [
       { field: 'group_ids', message: check },
     ]);
   }
+  // Groupe implicite du mm : déjà porté par la séance — dédup silencieuse.
+  const gids = check.filter((g) => g !== s.mm_group_id);
   if (s.status !== 'ANNULEE') {
-    const candidate = new Set<number>(check);
+    const candidate = new Set<number>(gids);
     if (s.mm_group_id != null) candidate.add(s.mm_group_id);
     const guardRes = placementGuard(db, {
       date: s.date,
@@ -669,20 +820,29 @@ export function setSessionGroups(
       masterId: s.master_id,
       excludeSessionId: id,
       groupIds: [...candidate],
+      kinds: ['GROUP'],
     });
     if (typeof guardRes === 'string') return editErr(guardRes);
-    const groupConflicts = guardRes.filter((c) => c.kind === 'GROUP');
-    if (groupConflicts.length > 0) {
+    if (guardRes.length > 0) {
       return editErr(
         'Rattachement refusé : conflit(s) de groupe détecté(s).',
         undefined,
-        groupConflicts,
+        guardRes,
       );
     }
   }
+  // Audit explicite : le diff `updated_at` de la ligne session peut être
+  // vide (même seconde) — la trace porte les listes de group_ids
+  // avant/après dans la même transaction.
+  const oldGroupIds = all<{ student_group_id: number }>(
+    db,
+    `SELECT student_group_id FROM session_group
+      WHERE session_id = ? ORDER BY student_group_id`,
+    id,
+  ).map((r) => r.student_group_id);
   withAudit(db, userId, 'UPDATE', 'session', id, () => {
     run(db, 'DELETE FROM session_group WHERE session_id = ?', id);
-    for (const gid of check) {
+    for (const gid of gids) {
       run(
         db,
         `INSERT INTO session_group (session_id, student_group_id)
@@ -691,21 +851,41 @@ export function setSessionGroups(
         gid,
       );
     }
-    run(db, "UPDATE session SET updated_at = datetime('now') WHERE id = ?", id);
+    const oldJson = JSON.stringify({ group_ids: oldGroupIds });
+    const newJson = JSON.stringify({
+      group_ids: [...gids].sort((a, b) => a - b),
+    });
+    // Pas de trace superflue pour un rattachement identique.
+    if (oldJson !== newJson) {
+      run(
+        db,
+        `INSERT INTO audit_log
+           (user_id, action, entity, entity_id, old_values, new_values)
+         VALUES (?, 'UPDATE', 'session', ?, ?, ?)`,
+        userId,
+        id,
+        oldJson,
+        newJson,
+      );
+    }
   });
   return editOk(id);
 }
 
 /**
  * Suppression définitive (l'audit trace old_values) — refusée pour une
- * séance REALISEE (historique pédagogique). Les lignes filles
+ * séance REALISEE (historique pédagogique) ou passée (une
+ * NON_ENCORE_REALISEE doit être ANNULEE, pas effacée). Les lignes filles
  * (session_group, historique, attendances) sont supprimées dans la même
  * transaction (FK sans CASCADE).
+ * @param today Date 'YYYY-MM-DD' de la borne « passé » (injectable —
+ *   défaut `todayIso()`).
  */
 export function deleteSession(
   db: DatabaseSync,
   userId: number | null,
   id: number,
+  today: string = todayIso(),
 ): SessionEditResult {
   const s = getSession(db, id);
   if (!s) return editErr('Séance introuvable.');
@@ -713,6 +893,12 @@ export function deleteSession(
     return editErr(
       'Une séance réalisée ne peut pas être supprimée ' +
         '(historique pédagogique).',
+    );
+  }
+  if (s.date < today) {
+    return editErr(
+      'Une séance passée ne peut pas être supprimée : annulez-la ou ' +
+        'marquez-la réalisée.',
     );
   }
   withAudit(db, userId, 'DELETE', 'session', id, () => {

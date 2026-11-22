@@ -50,6 +50,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { FormInstance } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { api, errorMessage, hasApi } from '../api/client';
@@ -322,6 +323,13 @@ export function TimetablePage(): React.JSX.Element {
   const [groupsForm] = Form.useForm();
   const [createForm] = Form.useForm();
 
+  // Groupe implicite du mm choisi en création : exclu des options (il est
+  // déjà porté par la séance, jamais dans session_group).
+  const createMmId = Form.useWatch('master_module_id', createForm);
+  const createMmGroupId =
+    createDetail?.modules.find((m) => m.id === createMmId)
+      ?.student_group_id ?? null;
+
   const weekStartIso = weekStart.format('YYYY-MM-DD');
 
   const entityFilter = useMemo(() => {
@@ -519,14 +527,24 @@ export function TimetablePage(): React.JSX.Element {
   /** minutes depuis minuit pour un dayjs (heure de début/fin). */
   const minOf = (d: Dayjs): number => d.hour() * 60 + d.minute();
 
+  /** Champs service → champs Form (les bornes horaires vivent en RangePicker). */
+  const FIELD_TO_FORM: Record<string, string> = {
+    start_min: 'range',
+    end_min: 'range',
+    actual_start_min: 'actual_range',
+    actual_end_min: 'actual_range',
+  };
+
   /**
    * Applique un `SessionEditResult` : succès → toast + reload semaine +
    * panneau conflits (BR-11) + callback ; refus BR-10 → Modal détaillée
-   * (jamais de toast seul) ; autre échec → toast erreur.
+   * (jamais de toast seul) ; erreurs de validation → surlignées dans le
+   * Form (`res.fields` → `setFields`) ; autre échec → toast erreur.
    */
   const applyEditResult = (
     res: SessionEditResult,
     okMessage: string,
+    form?: FormInstance,
     onSuccess?: () => void,
   ): void => {
     if (res.ok) {
@@ -535,6 +553,16 @@ export function TimetablePage(): React.JSX.Element {
       void loadConflicts();
       onSuccess?.();
       return;
+    }
+    if (form && res.fields && res.fields.length > 0) {
+      const byName = new Map<string, string[]>();
+      for (const f of res.fields) {
+        const name = FIELD_TO_FORM[f.field] ?? f.field;
+        byName.set(name, [...(byName.get(name) ?? []), f.message]);
+      }
+      form.setFields(
+        [...byName].map(([name, errors]) => ({ name, errors })),
+      );
     }
     if (res.conflicts && res.conflicts.length > 0) {
       setRefusal(res.conflicts);
@@ -583,7 +611,7 @@ export function TimetablePage(): React.JSX.Element {
         professor_id: v.professor_id,
         reason: v.reason?.trim() || null,
       });
-      applyEditResult(res, t('sessions.edit.saved'), () => {
+      applyEditResult(res, t('sessions.edit.saved'), editForm, () => {
         setEditOpen(false);
         refreshDetail();
       });
@@ -625,7 +653,7 @@ export function TimetablePage(): React.JSX.Element {
     setMutating(true);
     try {
       const res = await api().sessions.setStatus(detail.session.id, input);
-      applyEditResult(res, t('sessions.status.updated'), () => {
+      applyEditResult(res, t('sessions.status.updated'), statusForm, () => {
         setStatusAction(null);
         refreshDetail();
       });
@@ -752,7 +780,7 @@ export function TimetablePage(): React.JSX.Element {
         detail.session.id,
         v.group_ids ?? [],
       );
-      applyEditResult(res, t('sessions.groups.saved'), () => {
+      applyEditResult(res, t('sessions.groups.saved'), groupsForm, () => {
         setGroupsOpen(false);
         refreshDetail();
       });
@@ -769,7 +797,7 @@ export function TimetablePage(): React.JSX.Element {
     if (!detail) return;
     try {
       const res = await api().sessions.remove(detail.session.id);
-      applyEditResult(res, t('sessions.delete.done'), () => {
+      applyEditResult(res, t('sessions.delete.done'), undefined, () => {
         setDetailOpen(false);
         setDetail(null);
       });
@@ -803,9 +831,18 @@ export function TimetablePage(): React.JSX.Element {
   };
 
   const onCreateMm = (mmId: number): void => {
-    // Le professeur du master-module est proposé par défaut.
+    // Le professeur du master-module est proposé par défaut ; le groupe
+    // implicite du mm est retiré de la sélection s'il y figurait.
     const mm = createDetail?.modules.find((m) => m.id === mmId);
-    if (mm) createForm.setFieldsValue({ professor_id: mm.professor_id });
+    if (mm) {
+      const picked =
+        (createForm.getFieldValue('group_ids') as number[] | undefined) ??
+        [];
+      createForm.setFieldsValue({
+        professor_id: mm.professor_id,
+        group_ids: picked.filter((g) => g !== mm.student_group_id),
+      });
+    }
   };
 
   const submitCreate = async (): Promise<void> => {
@@ -830,7 +867,7 @@ export function TimetablePage(): React.JSX.Element {
         group_ids: v.group_ids ?? [],
         comment: v.comment?.trim() || null,
       });
-      applyEditResult(res, t('sessions.created'), () => {
+      applyEditResult(res, t('sessions.created'), createForm, () => {
         setCreateOpen(false);
         // Bascule la vue semaine sur la semaine de la séance créée.
         setScope('week');
@@ -1429,11 +1466,24 @@ export function TimetablePage(): React.JSX.Element {
           <Skeleton active />
         ) : detail ? (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            {/* Actions P7b — BR-24 : les deux profils écrivent */}
+            {/* Actions P7b — BR-24 : les deux profils écrivent ; REALISEE
+                verrouille Modifier/Supprimer (correction via Statut). */}
             <Space wrap>
-              <Button icon={<EditOutlined />} onClick={openEdit}>
-                {t('sessions.edit.action')}
-              </Button>
+              <Tooltip
+                title={
+                  detail.session.status === 'REALISEE'
+                    ? t('sessions.edit.lockedRealisee')
+                    : undefined
+                }
+              >
+                <Button
+                  icon={<EditOutlined />}
+                  onClick={openEdit}
+                  disabled={detail.session.status === 'REALISEE'}
+                >
+                  {t('sessions.edit.action')}
+                </Button>
+              </Tooltip>
               <Dropdown
                 menu={{
                   items: statusMenuItems,
@@ -1448,18 +1498,30 @@ export function TimetablePage(): React.JSX.Element {
               <Button icon={<TeamOutlined />} onClick={() => void openGroups()}>
                 {t('sessions.groups.action')}
               </Button>
-              <Popconfirm
-                title={t('sessions.delete.title')}
-                description={t('sessions.delete.confirm')}
-                okText={t('common.delete')}
-                cancelText={t('common.cancel')}
-                okButtonProps={{ danger: true }}
-                onConfirm={() => void doDelete()}
+              <Tooltip
+                title={
+                  detail.session.status === 'REALISEE'
+                    ? t('sessions.edit.lockedRealisee')
+                    : undefined
+                }
               >
-                <Button danger icon={<DeleteOutlined />}>
-                  {t('sessions.delete.action')}
-                </Button>
-              </Popconfirm>
+                <Popconfirm
+                  title={t('sessions.delete.title')}
+                  description={t('sessions.delete.confirm')}
+                  okText={t('common.delete')}
+                  cancelText={t('common.cancel')}
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => void doDelete()}
+                >
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={detail.session.status === 'REALISEE'}
+                  >
+                    {t('sessions.delete.action')}
+                  </Button>
+                </Popconfirm>
+              </Tooltip>
             </Space>
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label={t('timetable.detail.date')}>
@@ -1609,7 +1671,18 @@ export function TimetablePage(): React.JSX.Element {
             <Select
               showSearch
               optionFilterProp="label"
-              options={rooms.map((r) => ({ value: r.id, label: r.name }))}
+              options={rooms
+                .filter(
+                  (r) =>
+                    r.is_active === 1 || r.id === detail?.session.room.id,
+                )
+                .map((r) => ({
+                  value: r.id,
+                  label:
+                    r.is_active === 1
+                      ? r.name
+                      : `${r.name} ${t('masterModules.inactiveSuffix')}`,
+                }))}
             />
           </Form.Item>
           <Form.Item
@@ -1620,10 +1693,19 @@ export function TimetablePage(): React.JSX.Element {
             <Select
               showSearch
               optionFilterProp="label"
-              options={professors.map((p) => ({
-                value: p.id,
-                label: p.full_name,
-              }))}
+              options={professors
+                .filter(
+                  (p) =>
+                    p.is_active === 1 ||
+                    p.id === detail?.session.professor.id,
+                )
+                .map((p) => ({
+                  value: p.id,
+                  label:
+                    p.is_active === 1
+                      ? p.full_name
+                      : `${p.full_name} ${t('masterModules.inactiveSuffix')}`,
+                }))}
             />
           </Form.Item>
           <Form.Item name="reason" label={t('sessions.edit.reason')}>
@@ -1771,10 +1853,12 @@ export function TimetablePage(): React.JSX.Element {
               mode="multiple"
               allowClear
               optionFilterProp="label"
-              options={masterGroups.map((g) => ({
-                value: g.id,
-                label: g.name,
-              }))}
+              options={masterGroups
+                .filter((g) => g.id !== mmGroupId)
+                .map((g) => ({
+                  value: g.id,
+                  label: g.name,
+                }))}
             />
           </Form.Item>
         </Form>
@@ -1847,7 +1931,9 @@ export function TimetablePage(): React.JSX.Element {
             <Select
               showSearch
               optionFilterProp="label"
-              options={rooms.map((r) => ({ value: r.id, label: r.name }))}
+              options={rooms
+                .filter((r) => r.is_active === 1)
+                .map((r) => ({ value: r.id, label: r.name }))}
             />
           </Form.Item>
           <Form.Item
@@ -1858,10 +1944,9 @@ export function TimetablePage(): React.JSX.Element {
             <Select
               showSearch
               optionFilterProp="label"
-              options={professors.map((p) => ({
-                value: p.id,
-                label: p.full_name,
-              }))}
+              options={professors
+                .filter((p) => p.is_active === 1)
+                .map((p) => ({ value: p.id, label: p.full_name }))}
             />
           </Form.Item>
           <Form.Item name="group_ids" label={t('sessions.groupsOptional')}>
@@ -1870,10 +1955,12 @@ export function TimetablePage(): React.JSX.Element {
               allowClear
               optionFilterProp="label"
               disabled={createDetail == null}
-              options={(createDetail?.groups ?? []).map((g) => ({
-                value: g.id,
-                label: g.name,
-              }))}
+              options={(createDetail?.groups ?? [])
+                .filter((g) => g.id !== createMmGroupId)
+                .map((g) => ({
+                  value: g.id,
+                  label: g.name,
+                }))}
             />
           </Form.Item>
           <Form.Item name="comment" label={t('sessions.commentField')}>

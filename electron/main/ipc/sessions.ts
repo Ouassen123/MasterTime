@@ -32,7 +32,8 @@ function isIdArray(v: unknown): v is number[] {
 
 export function registerSessionHandlers(getDb: DbGetter): void {
   ipcMain.handle('sessions:checkPlacement', (_e, query: unknown) =>
-    !isObject(query)
+    !isObject(query) ||
+    (query.groupIds !== undefined && !Array.isArray(query.groupIds))
       ? apiErr('Paramètres invalides.')
       : guard(getDb, (db) =>
           checkSessionPlacement(db, query as unknown as PlacementQuery),

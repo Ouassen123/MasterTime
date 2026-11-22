@@ -105,3 +105,50 @@ attendance (Phase 9).
 ## Vérification
 `npx vitest run` vert · typecheck · build · sur copie base réelle :
 déplacer une séance Salle 6 samedi → conflit refusé affiché.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. `changeSessionStatus` : `needsCheck` étendu — toute sortie de `ANNULEE`
+   vers statut occupant (PREVUE **ou REALISEE**) re-check les conflits.
+2. `setSessionGroups` : refusé si `status='REALISEE'` ; audit explicite
+   (ligne `audit_log` avec old/new `group_ids` JSON — le diff `updated_at`
+   seul est insuffisant et peut produire 0 ligne).
+3. Refus ressources inactives : `room.is_active=0` et `professor.is_active=0`
+   refusés dans createSession/moveSession (sauf valeur inchangée au move) ;
+   Selects UI filtrés `is_active` (sauf valeur courante).
+4. `createSession` refusé si le master du mm est `ARCHIVE`.
+5. Anti-wedging : `checkSessionPlacement` accepte `kinds?: ConflictKind[]` ;
+   moveSession ne re-check que les kinds affectés par les champs modifiés
+   (date/heure → tous ; room → ROOM+EXTERNAL ; professor → PROFESSOR ;
+   inchangé → pas de check). Un conflit pré-existant orthogonal ne bloque
+   plus une retouche partielle — documenté.
+6. `REALISEE→REALISEE` corrective : autorisée avec `corrective:true` +
+   reason → met à jour `actual_*` seuls (pas de nouveau créneau).
+7. `actual_date` trimée au stockage ; `reason` de moveSession écrite dans
+   l'historique même sans changement de créneau.
+8. `applyEditResult` : mapper `res.fields` sur les Forms (`setFields`)
+   pour surligner le champ fautif.
+9. UI : groupe implicite du mm exclu des options Groupes/Création ;
+   service ignore `mm.student_group_id` dans `group_ids` (dédup silencieuse).
+10. `moveSession` sur REPORTEE exige `reason` (cohérent re-report).
+11. UI : boutons Modifier/Supprimer désactivés sur REALISEE.
+12. `comment`/`reason` plafonnés à 500 caractères côté service.
+13. `checkPlacement` IPC : `groupIds` non-array → `apiErr`.
+14. Bornes temporelles : `REPORTEE` nouveau créneau `>= today` refusé sinon ;
+    `actual_date > today` refusée ; `deleteSession` refusée si `date < today`
+    (une NON_ENCORE_REALISEE doit être ANNULEE, pas effacée).
+15. Tests : ANNULEE→REALISEE bloquée sur créneau occupé + OK si libre ;
+    REPORTEE→REPORTEE ; REPORTEE passé refusée ; actual futur refusée ;
+    inactive room/prof ; ARCHIVE master ; corrective REALISEE→REALISEE ;
+    uid GESTIONNAIRE écrit (BR-24) ; move partiel non bloqué par conflit
+    orthogonal ; setGroups REALISEE refusé ; bornes 0/1440 acceptées ;
+    not-found des 4 mutations.
+
+Décision : corrective accessible aux deux profils (BR-24 littéral —
+le gestionnaire gère l'EDT au quotidien ; « correction admin » du spec
+désigne le mécanisme, pas un rôle).
+
+Différé/noté : `sessions:checkPlacement` IPC non câblé (pré-validation
+live future) ; drag&drop toujours hors périmètre.
