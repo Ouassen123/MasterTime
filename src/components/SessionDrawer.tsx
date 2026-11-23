@@ -20,11 +20,14 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
+  Segmented,
   Select,
   Skeleton,
   Space,
+  Table,
   Tag,
   TimePicker,
   Timeline,
@@ -44,6 +47,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { api, errorMessage } from '../api/client';
 import type {
+  AttendanceDetail,
   ConflictKind,
   EffectiveSessionStatus,
   PlacementConflict,
@@ -53,6 +57,7 @@ import type {
   SessionEditResult,
   SessionStatus,
   SessionStatusInput,
+  StudentAttendanceStatus,
   StudentGroupRow,
 } from '../../shared/types';
 
@@ -148,6 +153,302 @@ export function SessionConflictsModal(props: {
         ))}
       </Space>
     </Modal>
+  );
+}
+
+// --- Présences (P9b) ----------------------------------------------------------
+
+/**
+ * Section « Présences » du drawer (visible uniquement si la séance est
+ * REALISEE — une présence n'a de sens que sur un cours tenu, BR-1) :
+ * - registre vide → formulaire comptage (présents/absents + note) ;
+ * - registre non vide → nominatif possible ; si des lignes nominatives
+ *   existent déjà, ouverture directe en nominatif, sinon comptage par
+ *   défaut avec lien « Passer en nominatif ».
+ * Mode nominatif : une ligne par étudiant (segmented P/A/J), boutons
+ * « Tous présents » / « Tous absents », compteur live ; l'ensemble du
+ * roster est envoyé (le service n'écrit que les lignes fournies et
+ * recalcule les compteurs — un JUSTIFIE reste un absent comptablement).
+ */
+function AttendanceSection({
+  sessionId,
+}: {
+  sessionId: number;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [data, setData] = useState<AttendanceDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uiMode, setUiMode] = useState<'COUNT' | 'NOMINATIVE'>('COUNT');
+  const [present, setPresent] = useState<number>(0);
+  const [absent, setAbsent] = useState<number>(0);
+  const [note, setNote] = useState('');
+  const [marks, setMarks] = useState<Record<number, StudentAttendanceStatus>>(
+    {},
+  );
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const res = await api().attendance.get(sessionId);
+      if (!res.ok) {
+        void message.error(errorMessage(res));
+        setData(null);
+        return;
+      }
+      const d = res.data;
+      setData(d);
+      setPresent(d.counts?.present_count ?? 0);
+      setAbsent(d.counts?.absent_count ?? 0);
+      setNote(d.counts?.note ?? '');
+      const m: Record<number, StudentAttendanceStatus> = {};
+      // Défaut UI : tout le roster PRESENT, puis statuts enregistrés.
+      for (const r of d.roster) m[r.student_id] = 'PRESENT';
+      for (const n of d.nominative) m[n.student_id] = n.status;
+      setMarks(m);
+      setUiMode(d.mode === 'NOMINATIVE' ? 'NOMINATIVE' : 'COUNT');
+    } catch (err) {
+      void message.error(errorMessage(err));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** Compteur live du mode nominatif (PRESENT / ABSENT+JUSTIFIE). */
+  const live = useMemo(() => {
+    let p = 0;
+    let j = 0;
+    for (const r of data?.roster ?? []) {
+      const st = marks[r.student_id] ?? 'PRESENT';
+      if (st === 'PRESENT') p += 1;
+      else if (st === 'JUSTIFIE') j += 1;
+    }
+    const total = data?.roster.length ?? 0;
+    return { present: p, absent: total - p, justified: j };
+  }, [data, marks]);
+
+  const submitCounts = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      const res = await api().attendance.setCounts(sessionId, {
+        present_count: present,
+        absent_count: absent,
+        note: note.trim() || null,
+      });
+      if (res.ok) {
+        void message.success(t('attendance.saved'));
+        void load();
+      } else {
+        void message.error(res.error);
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitNominative = async (): Promise<void> => {
+    if (!data) return;
+    setSaving(true);
+    try {
+      const res = await api().attendance.setNominative(
+        sessionId,
+        data.roster.map((r) => ({
+          student_id: r.student_id,
+          status: marks[r.student_id] ?? 'PRESENT',
+        })),
+      );
+      if (res.ok) {
+        void message.success(t('attendance.saved'));
+        void load();
+      } else {
+        void message.error(res.error);
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doClear = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      const res = await api().attendance.clear(sessionId);
+      if (res.ok) {
+        void message.success(t('attendance.cleared'));
+        void load();
+      } else {
+        void message.error(res.error);
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setAll = (status: StudentAttendanceStatus): void => {
+    const m: Record<number, StudentAttendanceStatus> = {};
+    for (const r of data?.roster ?? []) m[r.student_id] = status;
+    setMarks(m);
+  };
+
+  if (loading) return <Skeleton active paragraph={{ rows: 2 }} />;
+  if (!data) return <Empty description={t('common.empty')} />;
+
+  const hasSaved = data.counts != null || data.nominative.length > 0;
+  const nominativeMode = uiMode === 'NOMINATIVE' && data.roster.length > 0;
+
+  const countsForm = (
+    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space wrap>
+        <label>
+          {t('attendance.present')}{' '}
+          <InputNumber
+            min={0}
+            value={present}
+            onChange={(v) => setPresent(v ?? 0)}
+          />
+        </label>
+        <label>
+          {t('attendance.absent')}{' '}
+          <InputNumber
+            min={0}
+            value={absent}
+            onChange={(v) => setAbsent(v ?? 0)}
+          />
+        </label>
+      </Space>
+      <Input.TextArea
+        rows={2}
+        maxLength={500}
+        dir="auto"
+        placeholder={t('attendance.notePlaceholder')}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <Space wrap>
+        <Button
+          type="primary"
+          loading={saving}
+          onClick={() => void submitCounts()}
+        >
+          {t('common.save')}
+        </Button>
+        {data.roster.length > 0 && (
+          <Button type="link" onClick={() => setUiMode('NOMINATIVE')}>
+            {t('attendance.switchToNominative')}
+          </Button>
+        )}
+      </Space>
+    </Space>
+  );
+
+  const nominativeTable = (
+    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space wrap>
+        <Button size="small" onClick={() => setAll('PRESENT')}>
+          {t('attendance.allPresent')}
+        </Button>
+        <Button size="small" onClick={() => setAll('ABSENT')}>
+          {t('attendance.allAbsent')}
+        </Button>
+        <Text type="secondary">
+          {t('attendance.counter', {
+            present: live.present,
+            absent: live.absent,
+            justified: live.justified,
+          })}
+        </Text>
+      </Space>
+      <Table<AttendanceDetail['roster'][number]>
+        size="small"
+        rowKey="student_id"
+        dataSource={data.roster}
+        pagination={false}
+        columns={[
+          {
+            key: 'student',
+            title: t('attendance.student'),
+            dataIndex: 'full_name',
+            render: (v: string) => <span dir="auto">{v}</span>,
+          },
+          {
+            key: 'group',
+            title: t('attendance.group'),
+            dataIndex: 'group_name',
+            render: (v: string) => <span dir="auto">{v}</span>,
+          },
+          {
+            key: 'status',
+            title: t('timetable.detail.status'),
+            render: (_v, r) => (
+              <Segmented<StudentAttendanceStatus>
+                size="small"
+                value={marks[r.student_id] ?? 'PRESENT'}
+                onChange={(v) =>
+                  setMarks((m) => ({ ...m, [r.student_id]: v }))
+                }
+                options={[
+                  { value: 'PRESENT', label: t('attendance.statuses.PRESENT') },
+                  { value: 'ABSENT', label: t('attendance.statuses.ABSENT') },
+                  { value: 'JUSTIFIE', label: t('attendance.statuses.JUSTIFIE') },
+                ]}
+              />
+            ),
+          },
+        ]}
+      />
+      <Space wrap>
+        <Button
+          type="primary"
+          loading={saving}
+          onClick={() => void submitNominative()}
+        >
+          {t('common.save')}
+        </Button>
+        {data.nominative.length === 0 && (
+          <Button type="link" onClick={() => setUiMode('COUNT')}>
+            {t('attendance.switchToCount')}
+          </Button>
+        )}
+      </Space>
+    </Space>
+  );
+
+  return (
+    <div>
+      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+        <Text strong>{t('attendance.title')}</Text>
+        <Space>
+          <Tag>{t(nominativeMode ? 'attendance.modeNominative' : 'attendance.modeCount')}</Tag>
+          {hasSaved && (
+            <Popconfirm
+              title={t('attendance.clearTitle')}
+              description={t('attendance.clearConfirm')}
+              okText={t('common.delete')}
+              cancelText={t('common.cancel')}
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void doClear()}
+            >
+              <Button size="small" danger>
+                {t('attendance.clear')}
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      </Space>
+      <div style={{ marginTop: 8 }}>
+        {nominativeMode ? nominativeTable : countsForm}
+      </div>
+    </div>
   );
 }
 
@@ -614,6 +915,10 @@ export function SessionDrawer(props: {
                 </Descriptions.Item>
               )}
             </Descriptions>
+            {/* Présences (P9b) : uniquement sur une séance réalisée. */}
+            {detail.session.status === 'REALISEE' && (
+              <AttendanceSection sessionId={detail.session.id} />
+            )}
             <div>
               <Text strong>{t('timetable.detail.history')}</Text>
               {detail.history.length === 0 ? (

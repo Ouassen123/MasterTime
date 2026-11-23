@@ -9,6 +9,8 @@ import type {
   AbsenceInput,
   AbsenceListRow,
   AbsenceRow,
+  AttendanceCountsInput,
+  AttendanceDetail,
   AnnualFilter,
   AnnualRow,
   ApiResult,
@@ -43,6 +45,7 @@ import type {
   Module,
   ModuleInput,
   MonthFilter,
+  NominativeItem,
   OccupancyFilter,
   OccupancyRow,
   PlacementConflict,
@@ -63,6 +66,8 @@ import type {
   SessionRow,
   SessionStatusInput,
   StudentGroupRow,
+  StudentInput,
+  StudentRow,
   WeekFilter,
   WindowApi,
 } from '../../shared/types';
@@ -239,6 +244,33 @@ const api: WindowApi = {
       input: AbsenceDecisionInput,
     ): Promise<SessionEditResult> =>
       ipcRenderer.invoke('absences:decide', absenceId, sessionId, input),
+  },
+  attendance: {
+    get: (sessionId: number): Promise<ApiResult<AttendanceDetail>> =>
+      ipcRenderer.invoke('attendance:get', sessionId),
+    setCounts: (
+      sessionId: number,
+      input: AttendanceCountsInput,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('attendance:setCounts', sessionId, input),
+    setNominative: (
+      sessionId: number,
+      items: NominativeItem[],
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('attendance:setNominative', sessionId, items),
+    clear: (sessionId: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('attendance:clear', sessionId),
+  },
+  students: {
+    list: (groupId: number): Promise<ApiResult<StudentRow[]>> =>
+      ipcRenderer.invoke('students:list', groupId),
+    add: (
+      groupId: number,
+      input: StudentInput,
+    ): Promise<ApiResult<StudentRow>> =>
+      ipcRenderer.invoke('students:add', groupId, input),
+    remove: (id: number): Promise<DeleteResult> =>
+      ipcRenderer.invoke('students:remove', id),
   },
   generation: {
     run: (params: GenerateParams): Promise<ApiResult<GenerationResult>> =>

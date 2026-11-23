@@ -962,6 +962,75 @@ export interface RemainingResult {
   remaining: number;
 }
 
+// ---------------------------------------------------------------------------
+// P9b — Présences étudiants (Module G : FR-39, BR-19) + registre minimal
+// ---------------------------------------------------------------------------
+
+/** Statut de présence nominatif (CHECK `student_attendance.status`). */
+export const ATTENDANCE_STATUSES = ['PRESENT', 'ABSENT', 'JUSTIFIE'] as const;
+export type StudentAttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** Compteurs du mode « comptage » (`session_attendance`). */
+export interface AttendanceCounts {
+  present_count: number;
+  absent_count: number;
+  note: string | null;
+}
+
+/** Entrée du mode « comptage » (`attendance:setCounts`). */
+export interface AttendanceCountsInput {
+  present_count: number;
+  absent_count: number;
+  note?: string | null;
+}
+
+/** Ligne nominative enregistrée (student_attendance + étudiant + groupe). */
+export interface AttendanceNominativeRow {
+  student_id: number;
+  full_name: string;
+  status: StudentAttendanceStatus;
+  group_name: string;
+}
+
+/** Étudiant éligible à la saisie nominative (groupes candidats de la séance). */
+export interface AttendanceRosterRow {
+  student_id: number;
+  full_name: string;
+  group_name: string;
+}
+
+/** Mode de saisie déduit de l'état stocké. */
+export type AttendanceMode = 'COUNT' | 'NOMINATIVE' | 'NONE';
+
+/** Payload de `attendance:get` : compteurs, nominatif, roster et mode. */
+export interface AttendanceDetail {
+  counts: AttendanceCounts | null;
+  nominative: AttendanceNominativeRow[];
+  roster: AttendanceRosterRow[];
+  mode: AttendanceMode;
+}
+
+/** Entrée nominative de `attendance:setNominative` (remplace l'ensemble). */
+export interface NominativeItem {
+  student_id: number;
+  status: StudentAttendanceStatus;
+}
+
+/** Étudiant du registre (`students:list`) + protection BR-22. */
+export interface StudentRow {
+  id: number;
+  student_group_id: number;
+  full_name: string;
+  external_id: string | null;
+  /** student_attendance référençant l'étudiant — blocage suppression (BR-22). */
+  linkedCount: number;
+}
+
+export interface StudentInput {
+  full_name: string;
+  external_id?: string | null;
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -1105,6 +1174,23 @@ export interface WindowApi {
       sessionId: number,
       input: AbsenceDecisionInput,
     ): Promise<SessionEditResult>;
+  };
+  attendance: {
+    get(sessionId: number): Promise<ApiResult<AttendanceDetail>>;
+    setCounts(
+      sessionId: number,
+      input: AttendanceCountsInput,
+    ): Promise<ApiResult<null>>;
+    setNominative(
+      sessionId: number,
+      items: NominativeItem[],
+    ): Promise<ApiResult<null>>;
+    clear(sessionId: number): Promise<ApiResult<null>>;
+  };
+  students: {
+    list(groupId: number): Promise<ApiResult<StudentRow[]>>;
+    add(groupId: number, input: StudentInput): Promise<ApiResult<StudentRow>>;
+    remove(id: number): Promise<DeleteResult>;
   };
   profile: {
     list(): Promise<ApiResult<AppUser[]>>;

@@ -52,6 +52,7 @@ import {
   type Module,
   type ProfessorRow,
   type StudentGroupRow,
+  type StudentRow,
 } from '../../shared/types';
 
 const { Title, Text } = Typography;
@@ -494,6 +495,159 @@ function ModulesTab({
   );
 }
 
+// --- Registre étudiants d'un groupe (P9b — saisie manuelle pré-import) ---------
+
+/**
+ * Sous-liste des étudiants d'un groupe (fiche Master → Groupes) :
+ * ajout minimal (nom obligatoire, external_id optionnel — clé d'import
+ * Phase I) et suppression protégée BR-22 (refus chiffré si des présences
+ * nominatives référencent l'étudiant).
+ */
+function GroupStudents({
+  group,
+  onChanged,
+}: {
+  group: StudentGroupRow;
+  onChanged: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [students, setStudents] = useState<StudentRow[] | null>(null);
+  const [form] = Form.useForm<{ full_name: string; external_id?: string }>();
+
+  const load = useCallback(async (): Promise<void> => {
+    try {
+      const res = await api().students.list(group.id);
+      if (res.ok) setStudents(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      void message.error(errorMessage(err));
+    }
+  }, [group.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const submit = async (values: {
+    full_name: string;
+    external_id?: string;
+  }): Promise<void> => {
+    const res = await api().students.add(group.id, {
+      full_name: values.full_name,
+      external_id: values.external_id?.trim() || null,
+    });
+    if (res.ok) {
+      void message.success(t('students.added'));
+      form.resetFields();
+      void load();
+      onChanged(); // linkedCount du groupe + compteurs du master bougent
+    } else {
+      if (res.fields) {
+        form.setFields(
+          res.fields.map((f) => ({ name: f.field, errors: [f.message] })) as never,
+        );
+      }
+      void message.error(res.error);
+    }
+  };
+
+  const confirmRemove = (s: StudentRow): void => {
+    Modal.confirm({
+      title: t('students.removeTitle'),
+      content: t('students.removeConfirm', { name: s.full_name }),
+      okText: t('common.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        const res = await api().students.remove(s.id);
+        if (res.ok) {
+          void message.success(t('students.removed'));
+          void load();
+          onChanged();
+        } else {
+          // Refus BR-22 chiffré (présences nominatives liées).
+          Modal.error({ title: t('students.removeTitle'), content: res.error });
+        }
+      },
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      {students == null ? null : students.length === 0 ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t('students.empty')}
+        </Text>
+      ) : (
+        students.map((s) => (
+          <div
+            key={s.id}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '2px 0',
+            }}
+          >
+            <Space size={8}>
+              <span dir="auto">{s.full_name}</span>
+              {s.external_id != null && (
+                <Text type="secondary" style={{ fontSize: 11 }} dir="auto">
+                  {s.external_id}
+                </Text>
+              )}
+            </Space>
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t('common.delete')}
+              onClick={() => confirmRemove(s)}
+            />
+          </div>
+        ))
+      )}
+      <Form
+        form={form}
+        layout="inline"
+        onFinish={(v) => void submit(v)}
+        style={{ marginTop: 6 }}
+      >
+        <Form.Item
+          name="full_name"
+          rules={[{ required: true, message: t('common.required') }]}
+        >
+          <Input
+            dir="auto"
+            size="small"
+            placeholder={t('students.name')}
+            style={{ width: 200 }}
+          />
+        </Form.Item>
+        <Form.Item name="external_id">
+          <Input
+            dir="auto"
+            size="small"
+            placeholder={t('students.externalId')}
+            style={{ width: 140 }}
+          />
+        </Form.Item>
+        <Form.Item>
+          <Button
+            size="small"
+            type="primary"
+            htmlType="submit"
+            icon={<PlusOutlined />}
+          >
+            {t('students.add')}
+          </Button>
+        </Form.Item>
+      </Form>
+    </div>
+  );
+}
+
 // --- Onglet Groupes (student_group) -------------------------------------------
 
 function GroupsTab({
@@ -596,15 +750,19 @@ function GroupsTab({
               />,
             ]}
           >
-            <Space>
-              <span dir="auto">{g.name}</span>
-              {g.size != null && <Text type="secondary">({g.size})</Text>}
-              {g.linkedCount > 0 && (
-                <Tag>
-                  {t('groups.linked')} : {g.linkedCount}
-                </Tag>
-              )}
-            </Space>
+            <div style={{ width: '100%' }}>
+              <Space>
+                <span dir="auto">{g.name}</span>
+                {g.size != null && <Text type="secondary">({g.size})</Text>}
+                {g.linkedCount > 0 && (
+                  <Tag>
+                    {t('groups.linked')} : {g.linkedCount}
+                  </Tag>
+                )}
+              </Space>
+              {/* Registre étudiants du groupe (P9b — mini-CRUD pré-import). */}
+              <GroupStudents group={g} onChanged={onChanged} />
+            </div>
           </List.Item>
         )}
       />

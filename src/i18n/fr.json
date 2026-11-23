@@ -575,5 +575,43 @@
     "decidedBy": "par {{name}}",
     "substituteOf": "→ {{name}}",
     "noDecision": "Aucune"
+  },
+  "attendance": {
+    "title": "Présences",
+    "modeCount": "Comptage",
+    "modeNominative": "Nominatif",
+    "switchToNominative": "Passer en nominatif",
+    "switchToCount": "Revenir au comptage",
+    "present": "Présents",
+    "absent": "Absents",
+    "note": "Note",
+    "notePlaceholder": "Observation (optionnel)",
+    "saved": "Présences enregistrées.",
+    "clear": "Effacer",
+    "clearTitle": "Effacer les présences",
+    "clearConfirm": "Supprimer les présences saisies pour cette séance ?",
+    "cleared": "Présences effacées.",
+    "allPresent": "Tous présents",
+    "allAbsent": "Tous absents",
+    "counter": "{{present}} présent(s) · {{absent}} absent(s) (dont {{justified}} justifié(s))",
+    "statuses": {
+      "PRESENT": "P",
+      "ABSENT": "A",
+      "JUSTIFIE": "J"
+    },
+    "student": "Étudiant",
+    "group": "Groupe",
+    "empty": "Aucun étudiant au registre pour cette séance"
+  },
+  "students": {
+    "title": "Étudiants",
+    "name": "Nom complet",
+    "externalId": "Identifiant externe",
+    "add": "Ajouter un étudiant",
+    "added": "Étudiant ajouté.",
+    "removed": "Étudiant supprimé.",
+    "empty": "Aucun étudiant au registre",
+    "removeTitle": "Supprimer l'étudiant",
+    "removeConfirm": "Supprimer « {{name}} » ?"
   }
 }
