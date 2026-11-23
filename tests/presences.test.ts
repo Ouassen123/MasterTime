@@ -285,6 +285,31 @@ describe('getAttendance', () => {
       [f.st1, f.st2].sort(),
     );
   });
+
+  it('roster ∪ orphelines : ligne hors groupe listée avec flag', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // Séance G1 seul : st3 (G2) n'est PAS candidat mais a déjà une ligne.
+    const sid = addSession(db, f);
+    run(
+      db,
+      "INSERT INTO student_attendance (session_id, student_id, status) VALUES (?, ?, 'ABSENT')",
+      sid,
+      f.st3,
+    );
+    const res = getAttendance(db, sid);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.roster.map((r) => r.student_id).sort()).toEqual(
+      [f.st1, f.st2, f.st3].sort(),
+    );
+    const orphan = res.data.roster.find((r) => r.student_id === f.st3)!;
+    expect(orphan.out_of_roster).toBe(1);
+    expect(orphan.group_name).toBe('G2');
+    for (const r of res.data.roster) {
+      if (r.student_id !== f.st3) expect(r.out_of_roster).toBe(0);
+    }
+  });
 });
 
 describe('setCounts', () => {
@@ -352,6 +377,33 @@ describe('setCounts', () => {
     });
     expect(bad2.ok).toBe(false);
     expect(all(db, 'SELECT session_id FROM session_attendance')).toHaveLength(0);
+  });
+
+  it('borne 5000 : 5000 accepté, 5001 refusé', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const sid = addSession(db, f);
+    const ok = setCounts(db, uid(db), sid, {
+      present_count: 5000,
+      absent_count: 5000,
+    });
+    expect(ok.ok).toBe(true);
+    const over = setCounts(db, uid(db), sid, {
+      present_count: 5001,
+      absent_count: 0,
+    });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.fields?.some((x) => x.field === 'present_count')).toBe(true);
+    }
+    const over2 = setCounts(db, uid(db), sid, {
+      present_count: 0,
+      absent_count: 5001,
+    });
+    expect(over2.ok).toBe(false);
+    if (!over2.ok) {
+      expect(over2.fields?.some((x) => x.field === 'absent_count')).toBe(true);
+    }
   });
 
   it('note > 500 refusée', () => {
@@ -463,6 +515,119 @@ describe('setNominative', () => {
     ).toHaveLength(1);
   });
 
+  it('student_id invalide → message dédié (distinct du statut)', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const sid = addSession(db, f);
+    const res = setNominative(db, uid(db), sid, [
+      { student_id: -5, status: 'PRESENT' },
+    ]);
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const msg = res.fields?.find((x) => x.field === 'items')?.message ?? '';
+      expect(msg).toContain('étudiant');
+      expect(msg).not.toContain('Statut');
+    }
+    const resObj = setNominative(db, uid(db), sid, [
+      // Payload forgé : student_id non numérique.
+      { student_id: 'x' as never, status: 'PRESENT' },
+    ]);
+    expect(resObj.ok).toBe(false);
+    expect(
+      all(db, 'SELECT id FROM student_attendance WHERE session_id = ?', sid),
+    ).toHaveLength(0);
+  });
+
+  it('orpheline : étudiant hors groupe conservé au submit', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // Séance G1 seul + ligne existante sur st3 (G2) = orpheline acceptée.
+    const sid = addSession(db, f);
+    run(
+      db,
+      "INSERT INTO student_attendance (session_id, student_id, status) VALUES (?, ?, 'ABSENT')",
+      sid,
+      f.st3,
+    );
+    const res = setNominative(db, uid(db), sid, [
+      { student_id: f.st1, status: 'PRESENT' },
+      { student_id: f.st2, status: 'PRESENT' },
+      { student_id: f.st3, status: 'JUSTIFIE' }, // orpheline conservée
+    ]);
+    expect(res.ok).toBe(true);
+    const rows = all<{ student_id: number; status: string }>(
+      db,
+      'SELECT student_id, status FROM student_attendance WHERE session_id = ? ORDER BY student_id',
+      sid,
+    );
+    expect(rows).toEqual([
+      { student_id: f.st1, status: 'PRESENT' },
+      { student_id: f.st2, status: 'PRESENT' },
+      { student_id: f.st3, status: 'JUSTIFIE' },
+    ]);
+    // Omise au submit suivant = « Retirer » UI : sa ligne disparaît.
+    const drop = setNominative(db, uid(db), sid, [
+      { student_id: f.st1, status: 'PRESENT' },
+    ]);
+    expect(drop.ok).toBe(true);
+    expect(
+      all(
+        db,
+        'SELECT student_id FROM student_attendance WHERE session_id = ?',
+        sid,
+      ).map((r) => (r as { student_id: number }).student_id),
+    ).toEqual([f.st1]);
+  });
+
+  it('liste vide = purge complète (nominatif ET compteurs, note comprise)', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const sid = addSession(db, f);
+    setNominative(db, uid(db), sid, [
+      { student_id: f.st1, status: 'PRESENT' },
+      { student_id: f.st2, status: 'ABSENT' },
+    ]);
+    run(
+      db,
+      "UPDATE session_attendance SET note = 'Note à purger' WHERE session_id = ?",
+      sid,
+    );
+    const before = auditRows(db).length;
+    const res = setNominative(db, uid(db), sid, []);
+    expect(res.ok).toBe(true);
+    expect(
+      all(db, 'SELECT id FROM student_attendance WHERE session_id = ?', sid),
+    ).toHaveLength(0);
+    expect(
+      all(
+        db,
+        'SELECT session_id FROM session_attendance WHERE session_id = ?',
+        sid,
+      ),
+    ).toHaveLength(0);
+    const g = getAttendance(db, sid);
+    expect(g.ok && g.data.mode).toBe('NONE');
+    const audit = auditRows(db).slice(before);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].action).toBe('DELETE');
+    expect(audit[0].entity).toBe('student_attendance');
+    const old = JSON.parse(audit[0].old_values!);
+    expect(old.items).toHaveLength(2);
+    expect(old.counts.note).toBe('Note à purger');
+    expect(audit[0].new_values).toBeNull();
+  });
+
+  it('purge aussi les compteurs seuls (mode COUNT → NONE)', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const sid = addSession(db, f);
+    setCounts(db, uid(db), sid, { present_count: 7, absent_count: 1 });
+    const res = setNominative(db, uid(db), sid, []);
+    expect(res.ok).toBe(true);
+    const g = getAttendance(db, sid);
+    expect(g.ok && g.data.mode).toBe('NONE');
+  });
+
   it('statut invalide et étudiant hors groupes refusés — rien n’écrit', () => {
     const db = freshDb();
     const f = seedFixture(db);
@@ -508,22 +673,33 @@ describe('setNominative', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('audit explicite : old/new JSON de la liste nominative', () => {
+  it('audit explicite : CREATE à la 1re saisie, UPDATE ensuite', () => {
     const db = freshDb();
     const f = seedFixture(db);
     const sid = addSession(db, f);
     setNominative(db, uid(db), sid, [
       { student_id: f.st1, status: 'PRESENT' },
     ]);
+    setNominative(db, uid(db), sid, [
+      { student_id: f.st1, status: 'ABSENT' },
+    ]);
     const audit = auditRows(db).filter(
       (a) => a.entity === 'student_attendance',
     );
-    expect(audit).toHaveLength(1);
+    expect(audit).toHaveLength(2);
+    expect(audit[0].action).toBe('CREATE');
     expect(audit[0].entity_id).toBe(sid);
     expect(JSON.parse(audit[0].new_values!).items).toEqual([
       { student_id: f.st1, status: 'PRESENT' },
     ]);
     expect(JSON.parse(audit[0].old_values!).items).toEqual([]);
+    expect(audit[1].action).toBe('UPDATE');
+    expect(JSON.parse(audit[1].new_values!).items).toEqual([
+      { student_id: f.st1, status: 'ABSENT' },
+    ]);
+    expect(JSON.parse(audit[1].old_values!).items).toEqual([
+      { student_id: f.st1, status: 'PRESENT' },
+    ]);
   });
 
   it('note du comptage conservée au recalcul nominatif', () => {

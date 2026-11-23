@@ -41,6 +41,9 @@ import { withAudit } from './audit.service';
 /** Plafond de la note libre (cohérent avec MAX_TEXT_LEN session-edit). */
 const MAX_NOTE_LEN = 500;
 
+/** Borne haute des compteurs (anti-payload aberrant, ~amphithéâtre ×10). */
+const MAX_COUNT = 5000;
+
 // --- Lecture ----------------------------------------------------------------
 
 interface SessionCtx {
@@ -97,16 +100,47 @@ export function candidateGroupIds(
   return [...ids];
 }
 
-/** Registre éligible au nominatif : étudiants des groupes candidats. */
-function rosterRows(db: DatabaseSync, groupIds: number[]): AttendanceRosterRow[] {
-  if (groupIds.length === 0) return [];
+/**
+ * Registre éligible au nominatif : étudiants des groupes candidats
+ * (`out_of_roster = 0`) UNION étudiants ayant déjà une ligne
+ * `student_attendance` sur la séance dont le groupe n'est plus candidat
+ * (`out_of_roster = 1` — « orpheline », affichée « hors groupe » dans
+ * l'UI et conservée au submit : pas d'effacement silencieux).
+ */
+function rosterRows(
+  db: DatabaseSync,
+  sessionId: number,
+  groupIds: number[],
+): AttendanceRosterRow[] {
+  const candidateClause =
+    groupIds.length > 0
+      ? `st.student_group_id IN (${groupIds.map(() => '?').join(', ')})`
+      : '0 = 1';
+  const excludeClause =
+    groupIds.length > 0
+      ? ` AND st2.student_group_id NOT IN (${groupIds
+          .map(() => '?')
+          .join(', ')})`
+      : '';
   return all<AttendanceRosterRow>(
     db,
-    `SELECT st.id AS student_id, st.full_name, g.name AS group_name
-       FROM student st
-       JOIN student_group g ON g.id = st.student_group_id
-      WHERE st.student_group_id IN (${groupIds.map(() => '?').join(', ')})
-      ORDER BY g.name COLLATE NOCASE, st.full_name COLLATE NOCASE, st.id`,
+    `SELECT * FROM (
+        SELECT st.id AS student_id, st.full_name, g.name AS group_name,
+               0 AS out_of_roster
+          FROM student st
+          JOIN student_group g ON g.id = st.student_group_id
+         WHERE ${candidateClause}
+        UNION
+        SELECT st2.id, st2.full_name, g2.name, 1
+          FROM student_attendance sa
+          JOIN student st2 ON st2.id = sa.student_id
+          JOIN student_group g2 ON g2.id = st2.student_group_id
+         WHERE sa.session_id = ?${excludeClause}
+      )
+      ORDER BY group_name COLLATE NOCASE, full_name COLLATE NOCASE,
+               student_id`,
+    ...groupIds,
+    sessionId,
     ...groupIds,
   );
 }
@@ -155,7 +189,7 @@ export function getAttendance(
   if (!ctx) return apiErr('Séance introuvable.');
   const counts = countsRow(db, sessionId);
   const nominative = nominativeRows(db, sessionId);
-  const roster = rosterRows(db, candidateGroupIds(db, ctx));
+  const roster = rosterRows(db, sessionId, candidateGroupIds(db, ctx));
   return apiOk({
     counts,
     nominative,
@@ -231,16 +265,24 @@ export function setCounts(
   const errors: FieldError[] = [];
   const present = input?.present_count;
   const absent = input?.absent_count;
-  if (!Number.isInteger(present) || (present as number) < 0) {
+  if (
+    !Number.isInteger(present) ||
+    (present as number) < 0 ||
+    (present as number) > MAX_COUNT
+  ) {
     errors.push({
       field: 'present_count',
-      message: 'Le nombre de présents doit être un entier ≥ 0.',
+      message: `Le nombre de présents doit être un entier entre 0 et ${MAX_COUNT}.`,
     });
   }
-  if (!Number.isInteger(absent) || (absent as number) < 0) {
+  if (
+    !Number.isInteger(absent) ||
+    (absent as number) < 0 ||
+    (absent as number) > MAX_COUNT
+  ) {
     errors.push({
       field: 'absent_count',
-      message: 'Le nombre d’absents doit être un entier ≥ 0.',
+      message: `Le nombre d’absents doit être un entier entre 0 et ${MAX_COUNT}.`,
     });
   }
   const note =
@@ -330,10 +372,13 @@ function nominativeState(
  * JUSTIFIE (un justifié reste un absent comptablement — la justification
  * garde sa valeur disciplinaire au niveau nominatif), note conservée.
  *
- * Chaque `student_id` doit appartenir à un groupe candidat de la séance ;
- * le service n'écrit que les lignes fournies (un étudiant absent de la
- * liste est PRESENT à l'init UI — l'UI envoie l'ensemble du roster).
- * Liste vide = purge du nominatif (compteurs ramenés à 0/0).
+ * Chaque `student_id` doit appartenir au roster de la séance : groupes
+ * candidats ∪ étudiants ayant déjà une ligne (orphelines — leur
+ * conservation au submit n'efface pas la trace).
+ * Liste vide après déduplication = purge complète : les deux tables sont
+ * vidées (mode → NONE) plutôt qu'un résidu 0/0 non tracé.
+ * Audit explicite : CREATE à la première saisie, UPDATE ensuite,
+ * DELETE pour la purge.
  */
 export function setNominative(
   db: DatabaseSync,
@@ -347,18 +392,24 @@ export function setNominative(
     return apiErr('Paramètres invalides.');
   }
 
-  // Validation du payload (IPC forgé possible) : ids + statuts stricts,
-  // dédupliqués par student_id (le dernier fourni l'emporte).
+  // Validation du payload (IPC forgé possible) : ids et statuts
+  // vérifiés séparément — messages dédiés ; dédupliqués par student_id
+  // (le dernier fourni l'emporte).
   const byStudent = new Map<number, string>();
   for (const item of items) {
     if (
       item == null ||
       typeof item !== 'object' ||
-      !isId((item as NominativeItem).student_id) ||
-      typeof (item as NominativeItem).status !== 'string' ||
-      !(ATTENDANCE_STATUSES as readonly string[]).includes(
-        (item as NominativeItem).status,
-      )
+      !isId((item as NominativeItem).student_id)
+    ) {
+      return apiErr(
+        'Validation impossible : corrigez les champs signalés.',
+        [{ field: 'items', message: 'Identifiant étudiant invalide.' }],
+      );
+    }
+    if (
+      typeof item.status !== 'string' ||
+      !(ATTENDANCE_STATUSES as readonly string[]).includes(item.status)
     ) {
       return apiErr(
         'Validation impossible : corrigez les champs signalés.',
@@ -374,9 +425,12 @@ export function setNominative(
     byStudent.set(item.student_id, item.status);
   }
 
-  // Chaque étudiant doit appartenir à un groupe candidat de la séance.
+  // Chaque étudiant doit appartenir au roster : groupes candidats ∪
+  // orphelines (lignes nominatives existantes — revue patch 2).
   const rosterIds = new Set(
-    rosterRows(db, candidateGroupIds(db, ctx)).map((r) => r.student_id),
+    rosterRows(db, sessionId, candidateGroupIds(db, ctx)).map(
+      (r) => r.student_id,
+    ),
   );
   const outsiders = [...byStudent.keys()].filter((id) => !rosterIds.has(id));
   if (outsiders.length > 0) {
@@ -394,9 +448,33 @@ export function setNominative(
   }
 
   const entries = [...byStudent.entries()].sort((a, b) => a[0] - b[0]);
+  const oldItems = nominativeState(db, sessionId);
+  const oldCounts = countsRow(db, sessionId);
+
+  // Liste vide = purge complète (revue patch 3) : nominatif ET compteurs
+  // (note comprise) — mode résultant NONE, trace DELETE explicite.
+  if (entries.length === 0) {
+    if (oldItems.length === 0 && oldCounts == null) {
+      return apiOk(null); // rien à purger — pas de trace superflue
+    }
+    withAudit(db, userId, 'DELETE', 'session', sessionId, () => {
+      run(db, 'DELETE FROM student_attendance WHERE session_id = ?', sessionId);
+      run(db, 'DELETE FROM session_attendance WHERE session_id = ?', sessionId);
+      auditLine(
+        db,
+        userId,
+        'DELETE',
+        'student_attendance',
+        sessionId,
+        { items: oldItems, counts: oldCounts },
+        null,
+      );
+    });
+    return apiOk(null);
+  }
+
   const presentCount = entries.filter(([, st]) => st === 'PRESENT').length;
   const absentCount = entries.length - presentCount; // ABSENT + JUSTIFIE
-  const oldItems = nominativeState(db, sessionId);
 
   withAudit(db, userId, 'UPDATE', 'session', sessionId, () => {
     run(db, 'DELETE FROM student_attendance WHERE session_id = ?', sessionId);
@@ -424,7 +502,7 @@ export function setNominative(
     auditLine(
       db,
       userId,
-      'UPDATE',
+      oldItems.length === 0 ? 'CREATE' : 'UPDATE',
       'student_attendance',
       sessionId,
       { items: oldItems },

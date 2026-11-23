@@ -992,11 +992,19 @@ export interface AttendanceNominativeRow {
   group_name: string;
 }
 
-/** Étudiant éligible à la saisie nominative (groupes candidats de la séance). */
+/**
+ * Étudiant éligible à la saisie nominative : groupes candidats de la
+ * séance ∪ étudiants ayant déjà une ligne `student_attendance` —
+ * ces derniers sont « orphelins » (`out_of_roster = 1`, tag UI « hors
+ * groupe ») : leur groupe n'est plus candidat mais leur ligne ne doit
+ * pas être effacée silencieusement.
+ */
 export interface AttendanceRosterRow {
   student_id: number;
   full_name: string;
   group_name: string;
+  /** 1 = ligne nominative existante hors groupes candidats (orpheline). */
+  out_of_roster: number;
 }
 
 /** Mode de saisie déduit de l'état stocké. */

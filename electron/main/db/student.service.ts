@@ -104,6 +104,9 @@ const DUPLICATE_EXT_FIELDS: FieldError[] = [
   },
 ];
 
+/** Borne des champs texte du registre (anti-payload aberrant). */
+const MAX_FIELD_LEN = 200;
+
 /**
  * Ajout manuel : `full_name` obligatoire, `external_id` optionnel (clé
  * d'import Phase I — aucune contrainte de format). External_id omis →
@@ -127,6 +130,11 @@ export function addStudent(
       field: 'full_name',
       message: 'Le nom de l’étudiant est obligatoire.',
     });
+  } else if (name.length > MAX_FIELD_LEN) {
+    errors.push({
+      field: 'full_name',
+      message: `Le nom est trop long (${MAX_FIELD_LEN} caractères max).`,
+    });
   }
   let externalId: string | null = null;
   if (input?.external_id != null) {
@@ -134,6 +142,12 @@ export function addStudent(
       errors.push({ field: 'external_id', message: 'Identifiant invalide.' });
     } else {
       externalId = input.external_id.trim() || null;
+      if (externalId != null && externalId.length > MAX_FIELD_LEN) {
+        errors.push({
+          field: 'external_id',
+          message: `L'identifiant est trop long (${MAX_FIELD_LEN} caractères max).`,
+        });
+      }
     }
   }
   if (errors.length > 0) {

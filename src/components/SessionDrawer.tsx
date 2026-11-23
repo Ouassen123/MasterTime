@@ -169,7 +169,14 @@ export function SessionConflictsModal(props: {
  * « Tous présents » / « Tous absents », compteur live ; l'ensemble du
  * roster est envoyé (le service n'écrit que les lignes fournies et
  * recalcule les compteurs — un JUSTIFIE reste un absent comptablement).
+ * Orphelines (ligne nominative hors groupes candidats, `out_of_roster`) :
+ * tag « hors groupe », incluses au submit avec leur statut — l'option
+ * segmented « Retirer » les exclut explicitement (pas d'effacement
+ * silencieux).
  */
+/** Statut affiché au segmented — 'REMOVE' = orpheline à exclure du submit. */
+type AttendanceMark = StudentAttendanceStatus | 'REMOVE';
+
 function AttendanceSection({
   sessionId,
 }: {
@@ -183,9 +190,7 @@ function AttendanceSection({
   const [present, setPresent] = useState<number>(0);
   const [absent, setAbsent] = useState<number>(0);
   const [note, setNote] = useState('');
-  const [marks, setMarks] = useState<Record<number, StudentAttendanceStatus>>(
-    {},
-  );
+  const [marks, setMarks] = useState<Record<number, AttendanceMark>>({});
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -201,7 +206,7 @@ function AttendanceSection({
       setPresent(d.counts?.present_count ?? 0);
       setAbsent(d.counts?.absent_count ?? 0);
       setNote(d.counts?.note ?? '');
-      const m: Record<number, StudentAttendanceStatus> = {};
+      const m: Record<number, AttendanceMark> = {};
       // Défaut UI : tout le roster PRESENT, puis statuts enregistrés.
       for (const r of d.roster) m[r.student_id] = 'PRESENT';
       for (const n of d.nominative) m[n.student_id] = n.status;
@@ -219,18 +224,26 @@ function AttendanceSection({
     void load();
   }, [load]);
 
-  /** Compteur live du mode nominatif (PRESENT / ABSENT+JUSTIFIE). */
+  /** Compteur live du mode nominatif — les orphelines « Retirer » sortent du décompte. */
   const live = useMemo(() => {
     let p = 0;
     let j = 0;
+    let total = 0;
     for (const r of data?.roster ?? []) {
       const st = marks[r.student_id] ?? 'PRESENT';
+      if (st === 'REMOVE') continue; // exclue du submit et du décompte
+      total += 1;
       if (st === 'PRESENT') p += 1;
       else if (st === 'JUSTIFIE') j += 1;
     }
-    const total = data?.roster.length ?? 0;
     return { present: p, absent: total - p, justified: j };
   }, [data, marks]);
+
+  /** Message d'erreur service complet : erreur + champs concaténés. */
+  const submitError = (res: { error: string; fields?: { message: string }[] }): void => {
+    const fieldMsgs = (res.fields ?? []).map((f) => f.message).join(' ');
+    void message.error(fieldMsgs ? `${res.error} ${fieldMsgs}` : res.error);
+  };
 
   const submitCounts = async (): Promise<void> => {
     setSaving(true);
@@ -244,7 +257,7 @@ function AttendanceSection({
         void message.success(t('attendance.saved'));
         void load();
       } else {
-        void message.error(res.error);
+        submitError(res);
       }
     } catch (err) {
       void message.error(errorMessage(err));
@@ -259,16 +272,20 @@ function AttendanceSection({
     try {
       const res = await api().attendance.setNominative(
         sessionId,
-        data.roster.map((r) => ({
-          student_id: r.student_id,
-          status: marks[r.student_id] ?? 'PRESENT',
-        })),
+        // Orphelines : incluses avec leur statut sauf « Retirer » explicite.
+        data.roster
+          .filter((r) => marks[r.student_id] !== 'REMOVE')
+          .map((r) => ({
+            student_id: r.student_id,
+            status: (marks[r.student_id] ??
+              'PRESENT') as StudentAttendanceStatus,
+          })),
       );
       if (res.ok) {
         void message.success(t('attendance.saved'));
         void load();
       } else {
-        void message.error(res.error);
+        submitError(res);
       }
     } catch (err) {
       void message.error(errorMessage(err));
@@ -295,7 +312,7 @@ function AttendanceSection({
   };
 
   const setAll = (status: StudentAttendanceStatus): void => {
-    const m: Record<number, StudentAttendanceStatus> = {};
+    const m: Record<number, AttendanceMark> = {};
     for (const r of data?.roster ?? []) m[r.student_id] = status;
     setMarks(m);
   };
@@ -313,6 +330,8 @@ function AttendanceSection({
           {t('attendance.present')}{' '}
           <InputNumber
             min={0}
+            max={5000}
+            precision={0}
             value={present}
             onChange={(v) => setPresent(v ?? 0)}
           />
@@ -321,6 +340,8 @@ function AttendanceSection({
           {t('attendance.absent')}{' '}
           <InputNumber
             min={0}
+            max={5000}
+            precision={0}
             value={absent}
             onChange={(v) => setAbsent(v ?? 0)}
           />
@@ -378,7 +399,14 @@ function AttendanceSection({
             key: 'student',
             title: t('attendance.student'),
             dataIndex: 'full_name',
-            render: (v: string) => <span dir="auto">{v}</span>,
+            render: (v: string, r) => (
+              <Space size={6}>
+                <span dir="auto">{v}</span>
+                {r.out_of_roster === 1 && (
+                  <Tag color="orange">{t('attendance.outOfGroup')}</Tag>
+                )}
+              </Space>
+            ),
           },
           {
             key: 'group',
@@ -390,7 +418,7 @@ function AttendanceSection({
             key: 'status',
             title: t('timetable.detail.status'),
             render: (_v, r) => (
-              <Segmented<StudentAttendanceStatus>
+              <Segmented<AttendanceMark>
                 size="small"
                 value={marks[r.student_id] ?? 'PRESENT'}
                 onChange={(v) =>
@@ -400,6 +428,16 @@ function AttendanceSection({
                   { value: 'PRESENT', label: t('attendance.statuses.PRESENT') },
                   { value: 'ABSENT', label: t('attendance.statuses.ABSENT') },
                   { value: 'JUSTIFIE', label: t('attendance.statuses.JUSTIFIE') },
+                  // « Retirer » : exclusion explicite, orphelines seulement
+                  // (un candidat non soumis = simplement pas de ligne).
+                  ...(r.out_of_roster === 1
+                    ? [
+                        {
+                          value: 'REMOVE' as AttendanceMark,
+                          label: t('attendance.statuses.REMOVE'),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             ),
@@ -915,9 +953,14 @@ export function SessionDrawer(props: {
                 </Descriptions.Item>
               )}
             </Descriptions>
-            {/* Présences (P9b) : uniquement sur une séance réalisée. */}
+            {/* Présences (P9b) : uniquement sur une séance réalisée.
+                key=session.id : remontée complète entre séances — pas
+                d'état résiduel ni de roster périmé au submit. */}
             {detail.session.status === 'REALISEE' && (
-              <AttendanceSection sessionId={detail.session.id} />
+              <AttendanceSection
+                key={detail.session.id}
+                sessionId={detail.session.id}
+              />
             )}
             <div>
               <Text strong>{t('timetable.detail.history')}</Text>

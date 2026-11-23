@@ -584,7 +584,6 @@
     "switchToCount": "Revenir au comptage",
     "present": "Présents",
     "absent": "Absents",
-    "note": "Note",
     "notePlaceholder": "Observation (optionnel)",
     "saved": "Présences enregistrées.",
     "clear": "Effacer",
@@ -597,14 +596,14 @@
     "statuses": {
       "PRESENT": "P",
       "ABSENT": "A",
-      "JUSTIFIE": "J"
+      "JUSTIFIE": "J",
+      "REMOVE": "Retirer"
     },
     "student": "Étudiant",
     "group": "Groupe",
-    "empty": "Aucun étudiant au registre pour cette séance"
+    "outOfGroup": "Hors groupe"
   },
   "students": {
-    "title": "Étudiants",
     "name": "Nom complet",
     "externalId": "Identifiant externe",
     "add": "Ajouter un étudiant",

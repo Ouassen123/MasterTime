@@ -104,3 +104,30 @@ requireRole (BR-24).
   disciplinaire au niveau nominatif).
 - `student.external_id` = clé d'import Phase I ; pas de contrainte
   de format en saisie manuelle.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. `AttendanceSection` montée avec `key={session.id}` (race + état
+   résiduel entre séances, roster mismatch au submit).
+2. Orphelines : `roster` de `getAttendance` = étudiants des groupes
+   candidats **∪** étudiants ayant déjà une ligne `student_attendance`
+   sur la séance ; l'UI affiche ces derniers avec tag « hors groupe »
+   et les inclut au submit (pas d'effacement silencieux).
+3. `setNominative([])` = purge complète : supprime les lignes
+   `student_attendance` ET `session_attendance` (mode → NONE),
+   auditée — plus de résidu 0/0 non tracé.
+4. Audit nominatif : action CREATE à la 1re saisie, UPDATE ensuite ;
+   `setCounts` borne 0–5000 ; `student_id` invalide → message dédié
+   (distinct du statut).
+5. UI : `InputNumber precision={0}` ; erreurs `res.fields` concaténées
+   dans le message ; `full_name`/`external_id` ≤ 200 côté service ;
+   clés i18n mortes retirées.
+6. Tests : `setNominative([])` purge complète ; roster ∪ orphelines
+   (étudiant hors groupe toujours listé + conservé au submit) ; borne
+   5000 ; message student_id.
+
+Noté/différé : mutation `mm.student_group_id` après saisie (les
+orphelines sont désormais visibles ; garde produit à trancher plus
+tard) ; `is_demo` des étudiants saisis manuellement.
