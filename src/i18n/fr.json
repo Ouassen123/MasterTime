@@ -470,6 +470,47 @@
       "EXTERNAL": "Externe"
     }
   },
+  "reports": {
+    "title": "Rapports & statistiques",
+    "groups": {
+      "timetable": "Emplois du temps",
+      "suivi": "Suivi",
+      "occupation": "Occupation"
+    },
+    "items": {
+      "edt_hebdo": "Emploi du temps hebdomadaire",
+      "salles_planning": "Planning d'occupation des salles",
+      "prof_programme": "Programme des professeurs",
+      "bilan_heures": "Bilan des heures (prévu / effectué)",
+      "non_realisees": "Séances non réalisées",
+      "annulees_reportees": "Séances annulées et reportées",
+      "absences": "Absences des professeurs",
+      "avancement": "Avancement par master",
+      "occupation_salles": "Taux d'occupation des salles",
+      "conflits_restes": "Conflits restants et reste à placer"
+    },
+    "filters": {
+      "week": "Semaine",
+      "dateFrom": "Du",
+      "dateTo": "Au",
+      "master": "Master",
+      "professor": "Professeur",
+      "room": "Salle",
+      "run": "Générer le rapport"
+    },
+    "export": {
+      "csv": "Exporter CSV",
+      "pdf": "Exporter PDF",
+      "done": "Rapport exporté.",
+      "cancelled": "Export annulé.",
+      "file": "Fichier : {{path}}"
+    },
+    "empty": "Aucune ligne",
+    "rows": "{{count}} ligne(s)",
+    "periodAll": "Toute la période",
+    "periodRange": "{{from}} → {{to}}",
+    "editedOn": "Édité le {{date}}"
+  },
   "placeholder": {
     "title": "Fonctionnalité à venir",
     "body": "Cette section sera disponible dans une phase ultérieure du projet."

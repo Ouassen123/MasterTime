@@ -57,6 +57,11 @@ import type {
   RegistryPage,
   RegistryResult,
   RemainingResult,
+  Report,
+  ReportExportFile,
+  ReportFilter,
+  ReportId,
+  ReportPdfInput,
   Room,
   RoomInput,
   SessionCreateInput,
@@ -289,6 +294,19 @@ const api: WindowApi = {
       semesterId: number,
     ): Promise<ApiResult<GenerationCatalog>> =>
       ipcRenderer.invoke('generation:catalog', semesterId),
+  },
+  reports: {
+    run: (
+      id: ReportId,
+      filter?: ReportFilter,
+    ): Promise<ApiResult<Report>> =>
+      ipcRenderer.invoke('reports:run', id, filter),
+    exportCsv: (report: Report): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('reports:exportCsv', report),
+    exportPdf: (
+      input: ReportPdfInput,
+    ): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('reports:exportPdf', input),
   },
   profile: {
     list: (): Promise<ApiResult<AppUser[]>> => ipcRenderer.invoke('profile:list'),

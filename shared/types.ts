@@ -1039,6 +1039,83 @@ export interface StudentInput {
   external_id?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// P10 — Rapports & statistiques (Module H : FR-40→44)
+// ---------------------------------------------------------------------------
+
+/** Les 10 rapports obligatoires (FR-40). */
+export const REPORT_IDS = [
+  'edt_hebdo',
+  'salles_planning',
+  'prof_programme',
+  'bilan_heures',
+  'non_realisees',
+  'annulees_reportees',
+  'absences',
+  'avancement',
+  'occupation_salles',
+  'conflits_restes',
+] as const;
+export type ReportId = (typeof REPORT_IDS)[number];
+
+/**
+ * Filtres communs des rapports (FR-43) — tous optionnels ; seul `week`
+ * (lundi ISO) est exigé par `edt_hebdo`. Les bornes dates sont inclusives.
+ */
+export interface ReportFilter {
+  date_from?: string;
+  date_to?: string;
+  master_id?: number;
+  professor_id?: number;
+  room_id?: number;
+  semester_id?: number;
+  /** Lundi ISO de la semaine demandée (`edt_hebdo` uniquement). */
+  week?: string;
+}
+
+/** Colonne d'un rapport — `label` est l'en-tête français (CSV/PDF inclus). */
+export interface ReportColumn {
+  key: string;
+  label: string;
+}
+
+/** Valeur de cellule : primitives sérialisables (jamais d'objet imbriqué). */
+export type ReportCell = string | number | null;
+export type ReportRow = Record<string, ReportCell>;
+
+/** Carte récapitulative affichée au-dessus du tableau (optionnel). */
+export interface ReportSummaryItem {
+  key: string;
+  label: string;
+  value: string | number;
+}
+
+/**
+ * Rapport générique (FR-44 : tout est calculé en SQL côté main, aucune
+ * valeur saisie ni stockée) — la même shape alimente la table UI, le CSV
+ * et le HTML du PDF sans duplication.
+ */
+export interface Report {
+  id: ReportId;
+  title: string;
+  columns: ReportColumn[];
+  rows: ReportRow[];
+  summary?: ReportSummaryItem[];
+}
+
+/** Payload de `reports:exportPdf` — HTML autonome généré côté renderer. */
+export interface ReportPdfInput {
+  report_id: ReportId;
+  /** Document HTML complet (table print + en-tête, `dir="auto"`). */
+  html: string;
+}
+
+/** Résultat d'un export : `path` du fichier écrit, ou `cancelled`. */
+export interface ReportExportFile {
+  path: string | null;
+  cancelled: boolean;
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -1204,6 +1281,11 @@ export interface WindowApi {
     list(): Promise<ApiResult<AppUser[]>>;
     current(): Promise<ApiResult<AppUser | null>>;
     set(id: number): Promise<ApiResult<AppUser>>;
+  };
+  reports: {
+    run(id: ReportId, filter?: ReportFilter): Promise<ApiResult<Report>>;
+    exportCsv(report: Report): Promise<ApiResult<ReportExportFile>>;
+    exportPdf(input: ReportPdfInput): Promise<ApiResult<ReportExportFile>>;
   };
   audit: {
     list(limit?: number): Promise<ApiResult<AuditEntry[]>>;

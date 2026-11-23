@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Layout, Menu, Select, Space, Tooltip, Typography, message } from 'antd';
 import {
   BankOutlined,
+  BarChartOutlined,
   CalendarOutlined,
   TeamOutlined,
   ThunderboltOutlined,
@@ -62,7 +63,12 @@ const NAV: NavEntry[] = [
   },
   { key: 'sessions', path: '/seances', enabled: true },
   { key: 'absences', path: '/absences', enabled: false },
-  { key: 'reports', path: '/rapports', enabled: false },
+  {
+    key: 'reports',
+    path: '/rapports',
+    enabled: true,
+    icon: <BarChartOutlined />,
+  },
   { key: 'importExport', path: '/import-export', enabled: false },
   { key: 'settings', path: '/parametres', enabled: false, adminOnly: true },
   { key: 'backups', path: '/sauvegardes', enabled: false, adminOnly: true },

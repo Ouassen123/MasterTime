@@ -18,6 +18,7 @@ import { registerRegistryHandlers } from './registry';
 import { registerAbsenceHandlers } from './absences';
 import { registerAttendanceHandlers } from './attendance';
 import { registerStudentHandlers } from './students';
+import { registerReportHandlers } from './reports';
 
 export function registerIpcHandlers(getDb: DbGetter): void {
   registerRoomHandlers(getDb);
@@ -32,6 +33,7 @@ export function registerIpcHandlers(getDb: DbGetter): void {
   registerAbsenceHandlers(getDb);
   registerAttendanceHandlers(getDb);
   registerStudentHandlers(getDb);
+  registerReportHandlers(getDb);
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

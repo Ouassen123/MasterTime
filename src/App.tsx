@@ -12,6 +12,7 @@ import { MastersPage } from './pages/MastersPage';
 import { ModulesPage } from './pages/ModulesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { ProfessorsPage } from './pages/ProfessorsPage';
+import { ReportsPage } from './pages/ReportsPage';
 import { RoomsPage } from './pages/RoomsPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { TimetablePage } from './pages/TimetablePage';
@@ -28,6 +29,7 @@ export default function App(): React.JSX.Element {
         <Route path="emplois-du-temps" element={<TimetablePage />} />
         <Route path="generation" element={<GenerationPage />} />
         <Route path="seances" element={<SessionsPage />} />
+        <Route path="rapports" element={<ReportsPage />} />
         <Route path="*" element={<PlaceholderPage />} />
       </Route>
     </Routes>
