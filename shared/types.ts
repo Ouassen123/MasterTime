@@ -1101,6 +1101,11 @@ export interface Report {
   columns: ReportColumn[];
   rows: ReportRow[];
   summary?: ReportSummaryItem[];
+  /**
+   * `true` si le résultat dépassait le cap de lignes (50 000) et a été
+   * tronqué — l'UI affiche un avertissement « précisez les filtres ».
+   */
+  truncated?: boolean;
 }
 
 /** Payload de `reports:exportPdf` — HTML autonome généré côté renderer. */

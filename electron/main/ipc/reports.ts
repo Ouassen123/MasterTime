@@ -24,12 +24,11 @@ import type {
   ReportPdfInput,
 } from '../../../shared/types';
 import { apiErr, apiOk, REPORT_IDS } from '../../../shared/types';
-import { reportCsv, runReport } from '../db/report.service';
+import { reportCsv, runReport, MAX_REPORT_ROWS } from '../db/report.service';
 import { todayIso } from '../db/date';
 import { guard, isObject, type DbGetter } from './helpers';
 
 /** Bornes anti-payload forgé : rapport « raisonnable » pour l'export. */
-const MAX_ROWS = 50_000;
 const MAX_COLS = 50;
 const MAX_HTML_LEN = 16_000_000;
 
@@ -52,11 +51,9 @@ function isReportShape(v: unknown): v is Report {
   ) {
     return false;
   }
-  return (
-    Array.isArray(v.rows) &&
-    v.rows.length <= MAX_ROWS &&
-    v.rows.every((r) => isObject(r))
-  );
+  // Pas de cap de refus sur rows.length : au-delà de MAX_REPORT_ROWS le
+  // handler tronque plutôt qu'échouer (cohérent avec runReport).
+  return Array.isArray(v.rows) && v.rows.every((r) => isObject(r));
 }
 
 function exportErr(err: unknown, label: string): ApiResult<never> {
@@ -88,8 +85,18 @@ export function registerReportHandlers(getDb: DbGetter): void {
         if (res.canceled || !res.filePath) {
           return apiOk({ path: null, cancelled: true });
         }
+        // Cap de lignes : tronqué plutôt qu'échec opaque (un payload
+        // forgé ou un rapport non régénéré peut dépasser MAX_REPORT_ROWS).
+        const out: Report =
+          report.rows.length > MAX_REPORT_ROWS
+            ? {
+                ...report,
+                rows: report.rows.slice(0, MAX_REPORT_ROWS),
+                truncated: true,
+              }
+            : report;
         // BOM UTF-8 déjà inclus par reportCsv — writeFileSync 'utf8' le conserve.
-        fs.writeFileSync(res.filePath, reportCsv(report), 'utf8');
+        fs.writeFileSync(res.filePath, reportCsv(out), 'utf8');
         return apiOk({ path: res.filePath, cancelled: false });
       } catch (err) {
         return exportErr(err, 'exportCsv');
@@ -122,6 +129,10 @@ export function registerReportHandlers(getDb: DbGetter): void {
           sandbox: true,
         },
       });
+      // Le HTML vient du renderer (non fiable) : aucune navigation hors
+      // du document ni ouverture de fenêtre ne doit être possible.
+      win.webContents.on('will-navigate', (e) => e.preventDefault());
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       // Le HTML transite par un fichier temporaire : plus robuste qu'une
       // data URL (les gros rapports dépassent les limites pratiques des
       // URLs `data:`) et supprimé dans le finally.

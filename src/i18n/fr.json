@@ -507,6 +507,7 @@
     },
     "empty": "Aucune ligne",
     "rows": "{{count}} ligne(s)",
+    "truncated": "Rapport tronqué aux {{count}} premières lignes — précisez les filtres.",
     "periodAll": "Toute la période",
     "periodRange": "{{from}} → {{to}}",
     "editedOn": "Édité le {{date}}"

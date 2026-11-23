@@ -110,3 +110,51 @@ actual/ANNULEE/REPORTEE + absence + décision) :
 - `time_slot` couvre 08–18 → taux d'occupation salles réaliste.
 - Rapport `conflits_restes` réutilise `detectConflicts` existant —
   pas de nouvelle logique de détection.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. `occupation_salles` : `taux_moyen` = Σ heures utilisées /
+   (ouvrables × nb salles) — jamais la capacité d'une seule salle.
+   Le taux peut dépasser 100 % avec les recouvrements réels → libellé
+   explicite « heures réservées, recouvrements inclus » (pas de
+   plafonnement : les collisions sont de l'information).
+2. `salles_planning` : jours itérés = weekdays `time_slot` ∪ weekdays
+   présents dans les séances/blocages de la période (jour sans slot
+   affiché avec `creneaux_ouverts` vide) — une séance dimanche ne
+   doit plus être invisible.
+3. CSV : préfixe `'` sur les **chaînes** commençant par `= + - @` ou
+   tab (injection formule Excel) ; nombres décimaux formatés avec `,`
+   (Excel FR) ; BOM via `'\uFEFF'` explicite.
+4. `non_realisees` + `avancement.modules_en_retard` : inclure
+   `REPORTEE` passée (`status IN ('PREVUE','REPORTEE') AND date<today`
+   — cohérent avec absence.service qui la traite comme ouverte).
+5. `resolvePeriod` : re-valider `from<=to` après le fallback année ;
+   `ORDER BY` sur les requêtes d'année (is_current fallback +
+   yearIdAt).
+6. `conflits_restes` : filtre master par `master_id` (résoudre via les
+   ids de séances des conflits → session.master_module_id →
+   master_id), jamais par nom.
+7. `absences` : `nb_impactees`/`nb_decisions` comptés sur
+   l'intersection fenêtre ∩ filtre période.
+8. `bilan_heures` : durée effectuée = paire complète
+   (`actual_start` ET `actual_end` non NULL → réel, sinon planifié) ;
+   filtre professeur = `s.professor_id` (intervenant réel) ; colonne
+   affichée = titulaire `mm.professor_id` (documenter).
+9. `occupation_salles`/`salles_planning` : jours `calendar_exception`
+   exclus des ouvrables et des occurrences Licence ; salles
+   `is_active=0` incluses mais taggées « désactivée ».
+10. PDF : `webContents.on('will-navigate', e=>e.preventDefault())` +
+    `setWindowOpenHandler` deny sur la fenêtre cachée.
+11. `runReport` : cap de lignes (50k) avec `truncated:true` +
+    message explicite « précisez les filtres » plutôt qu'échec
+    opaque à l'export ; `exportCsv` idem.
+12. Divers : colonne « Créneau précédent » (pas « initial » — dernier
+    history) ; format `master` uniforme `code — name` ; `minToHHMM`
+    cap affiché 24:00.
+13. Tests : taux_moyen exact multi-salles ; jour sans time_slot
+    visible ; REPORTEE passée dans non_realisees ; période partielle
+    inversée → erreur ; CSV préfixe formule + décimale `,` ; filtre
+    master conflits homonymes ; exception déduite des ouvrables ;
+    truncation message.

@@ -91,10 +91,11 @@ function isId(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0;
 }
 
-/** 'HH:MM' depuis des minutes depuis minuit. */
+/** 'HH:MM' depuis des minutes depuis minuit — affichage cappé à '24:00'. */
 function minToHHMM(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
+  const capped = Math.max(0, Math.min(min, 1440));
+  const h = Math.floor(capped / 60);
+  const m = capped % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
@@ -122,18 +123,53 @@ function addDays(iso: string, days: number): string {
 
 /**
  * Nombre d'occurrences d'un jour de semaine (0=lun) dans [from, to]
- * inclus — utilisé pour matérialiser les blocages Licence récurrents
- * et les heures ouvrables `time_slot`.
+ * inclus, HORS jours `calendar_exception` — utilisé pour matérialiser
+ * les blocages Licence récurrents et les heures ouvrables `time_slot`
+ * (un férié n'est ni ouvrable ni une occurrence Licence).
  */
-function weekdayOccurrences(weekday: number, from: string, to: string): number {
+function weekdayOccurrences(
+  weekday: number,
+  from: string,
+  to: string,
+  exceptions: Set<string>,
+): number {
+  let n = 0;
   const offset = (weekday - weekdayOf(from) + 7) % 7;
-  const first = addDays(from, offset);
-  if (first > to) return 0;
-  return Math.floor(
-    (new Date(`${to}T00:00:00Z`).getTime() -
-      new Date(`${first}T00:00:00Z`).getTime()) /
-      (7 * 24 * 3600 * 1000),
-  ) + 1;
+  for (let d = addDays(from, offset); d <= to; d = addDays(d, 7)) {
+    if (!exceptions.has(d)) n++;
+  }
+  return n;
+}
+
+/**
+ * Jours `calendar_exception` (fériés, examens, fermetures, vacances)
+ * sous forme de Set de dates ISO — chargé UNE fois par rapport. Les
+ * lignes à bornes invalides sont ignorées (cohérent avec
+ * `generation.service` — sinon la boucle d'expansion divergerait).
+ */
+function loadExceptionDays(db: DatabaseSync): Set<string> {
+  const set = new Set<string>();
+  for (const ex of all<{ start_date: string; end_date: string }>(
+    db,
+    'SELECT start_date, end_date FROM calendar_exception ORDER BY start_date, id',
+  )) {
+    if (
+      !isValidIsoDate(ex.start_date) ||
+      !isValidIsoDate(ex.end_date) ||
+      ex.start_date > ex.end_date
+    ) {
+      continue;
+    }
+    for (let d = ex.start_date; d <= ex.end_date; d = addDays(d, 1)) {
+      set.add(d);
+    }
+  }
+  return set;
+}
+
+/** Libellé salle : suffixe « (désactivée) » pour `is_active = 0`. */
+function roomLabel(name: string, isActive: number): string {
+  return isActive ? name : `${name} (désactivée)`;
 }
 
 // --- Filtre normalisé ----------------------------------------------------------
@@ -200,7 +236,7 @@ function resolvePeriod(
     const year =
       get<{ start_date: string; end_date: string }>(
         db,
-        'SELECT start_date, end_date FROM academic_year WHERE ? BETWEEN start_date AND end_date',
+        'SELECT start_date, end_date FROM academic_year WHERE ? BETWEEN start_date AND end_date ORDER BY id LIMIT 1',
         today,
       ) ??
       get<{ start_date: string; end_date: string }>(
@@ -213,6 +249,11 @@ function resolvePeriod(
   if (from == null || to == null) {
     return apiErr('Période requise : indiquez une plage de dates.');
   }
+  // Re-validation après le fallback année : une borne fournie hors de
+  // l'année peut inverser la période (ex. date_from > fin d'année).
+  if (from > to) {
+    return apiErr('La date de fin doit être postérieure à la date de début.');
+  }
   return apiOk({ from, to });
 }
 
@@ -221,7 +262,7 @@ function yearIdAt(db: DatabaseSync, date: string): number | null {
   return (
     get<{ id: number }>(
       db,
-      'SELECT id FROM academic_year WHERE ? BETWEEN start_date AND end_date',
+      'SELECT id FROM academic_year WHERE ? BETWEEN start_date AND end_date ORDER BY id LIMIT 1',
       date,
     )?.id ?? null
   );
@@ -368,11 +409,12 @@ function reportSallesPlanning(
   if (!period.ok) return period;
   const { from, to } = period.data;
   const yearId = yearIdAt(db, from);
+  const exceptions = loadExceptionDays(db);
 
   const roomCond = f.roomId != null ? ' AND r.id = ?' : '';
-  const rooms = all<{ id: number; name: string }>(
+  const rooms = all<{ id: number; name: string; is_active: number }>(
     db,
-    `SELECT r.id, r.name FROM room r WHERE 1 = 1${roomCond}
+    `SELECT r.id, r.name, r.is_active FROM room r WHERE 1 = 1${roomCond}
       ORDER BY r.name COLLATE NOCASE`,
     ...(f.roomId != null ? [f.roomId] : []),
   );
@@ -425,7 +467,16 @@ function reportSallesPlanning(
       .join(' ; ');
 
   const rows: ReportRow[] = [];
-  const weekdaysPresent = [...slotsByDay.keys()].sort((a, b) => a - b);
+  // Jours itérés : weekdays des time_slot ∪ weekdays présents dans les
+  // séances/blocages de la période — un jour sans créneau déclaré (ex.
+  // dimanche) reste visible avec `creneaux_ouverts` vide.
+  const weekdaysPresent = [
+    ...new Set<number>([
+      ...slotsByDay.keys(),
+      ...sessRows.map((r) => r.weekday),
+      ...licRows.map((r) => r.weekday),
+    ]),
+  ].sort((a, b) => a - b);
   for (const room of rooms) {
     for (const wd of weekdaysPresent) {
       const sess = sessRows
@@ -435,14 +486,14 @@ function reportSallesPlanning(
         .filter((r) => r.room_id === room.id && r.weekday === wd)
         .map((r) => ({
           ...r,
-          n: weekdayOccurrences(wd, from, to),
+          n: weekdayOccurrences(wd, from, to, exceptions),
         }))
         .filter((r) => r.n > 0);
       const nbSessions = sess.reduce((acc, r) => acc + r.n, 0);
       const nbLic = lic.reduce((acc, r) => acc + r.n, 0);
       if (nbSessions === 0 && nbLic === 0) continue; // jour sans occupation
       rows.push({
-        salle: room.name,
+        salle: roomLabel(room.name, room.is_active),
         jour: WEEKDAYS_FR[wd],
         creneaux_ouverts: (slotsByDay.get(wd) ?? [])
           .map((s) => horaire(s.start_min, s.end_min))
@@ -507,7 +558,7 @@ function reportProfProgramme(
       professeur: r.professor_name,
       date: r.date,
       horaire: horaire(r.start_min, r.end_min),
-      master: r.master_name,
+      master: `${r.master_code} — ${r.master_name}`,
       module: r.module_name,
       salle: r.room_name,
       statut: statusLabel(r.status, r.date, today),
@@ -521,10 +572,14 @@ function reportProfProgramme(
 /**
  * Prévu vs effectué par master-module : `prevu_min` = Σ(end−start) des
  * séances non ANNULEE ; `realise_min` = Σ(actual_end−actual_start) des
- * REALISEE — fallback sur le créneau planifié si actual_* NULL (règle
- * P7b). `ecart_min` = réalisé − prévu (négatif = reste à effectuer).
- * Les bornes de dates s'appliquent aux séances (dans le LEFT JOIN pour
- * conserver les mm sans séance sur la période).
+ * REALISEE dont la paire actual_* est COMPLÈTE — fallback sur le créneau
+ * planifié si l'un des deux est NULL (règle P7b : une durée réelle à
+ * moitié saisie n'est pas fiable). `ecart_min` = réalisé − prévu
+ * (négatif = reste à effectuer). Les bornes de dates s'appliquent aux
+ * séances (dans le LEFT JOIN pour conserver les mm sans séance sur la
+ * période). Filtre `professor_id` = intervenant RÉEL (`s.professor_id`)
+ * ; la colonne « Professeur » affichée reste le titulaire déclaré
+ * (`mm.professor_id`) — un remplaçant ne change pas le titulaire.
  */
 function reportBilanHeures(
   db: DatabaseSync,
@@ -556,11 +611,14 @@ function reportBilanHeures(
     mmParams.push(f.semesterId);
   }
   if (f.professorId != null) {
-    mmClauses.push('mm.professor_id = ?');
+    // Intervenant réel (s.professor_id) — le WHERE réduit aussi aux mm
+    // où ce prof a effectivement assuré ≥ 1 séance (s.* NULL exclus).
+    mmClauses.push('s.professor_id = ?');
     mmParams.push(f.professorId);
   }
   const mmWhere = mmClauses.length > 0 ? ` WHERE ${mmClauses.join(' AND ')}` : '';
   const rows = all<{
+    master_code: string;
     master_name: string;
     module_name: string;
     professor_name: string;
@@ -571,15 +629,18 @@ function reportBilanHeures(
     realise_min: number;
   }>(
     db,
-    `SELECT m.name AS master_name, mo.name AS module_name,
+    `SELECT m.code AS master_code, m.name AS master_name,
+            mo.name AS module_name,
             p.full_name AS professor_name, mm.volume_min,
             COALESCE(sum(s.status != 'ANNULEE'), 0) AS nb_prevues,
             COALESCE(sum(s.status = 'REALISEE'), 0) AS nb_realisees,
             COALESCE(sum(CASE WHEN s.status != 'ANNULEE'
                          THEN s.end_min - s.start_min END), 0) AS prevu_min,
             COALESCE(sum(CASE WHEN s.status = 'REALISEE'
-                         THEN COALESCE(s.actual_end_min, s.end_min)
-                            - COALESCE(s.actual_start_min, s.start_min)
+                         THEN CASE WHEN s.actual_start_min IS NOT NULL
+                                    AND s.actual_end_min IS NOT NULL
+                                   THEN s.actual_end_min - s.actual_start_min
+                                   ELSE s.end_min - s.start_min END
                          END), 0) AS realise_min
        FROM master_module mm
        JOIN master m ON m.id = mm.master_id
@@ -610,7 +671,7 @@ function reportBilanHeures(
     title: REPORT_TITLES.bilan_heures,
     columns,
     rows: rows.map((r) => ({
-      master: r.master_name,
+      master: `${r.master_code} — ${r.master_name}`,
       module: r.module_name,
       professeur: r.professor_name,
       prevu_min: r.prevu_min,
@@ -631,9 +692,11 @@ function reportBilanHeures(
 // --- 5. non_realisees ------------------------------------------------------------------
 
 /**
- * Séances PREVUE passées — statut 'NON_ENCORE_REALISEE' DÉRIVÉ via
- * `today` injectable (jamais stocké, AD-7) : retard en jours depuis la
- * date prévue, triées de la plus ancienne (plus grand retard).
+ * Séances PREVUE ou REPORTEE passées — statut 'NON_ENCORE_REALISEE'
+ * DÉRIVÉ via `today` injectable (jamais stocké, AD-7 ; REPORTEE reste
+ * une séance ouverte — même définition que absence.service) : retard en
+ * jours depuis la date prévue, triées de la plus ancienne (plus grand
+ * retard).
  */
 function reportNonRealisees(
   db: DatabaseSync,
@@ -646,7 +709,7 @@ function reportNonRealisees(
     `SELECT${SESSION_LITE_COLS},
             CAST(julianday(?) - julianday(s.date) AS INTEGER) AS retard_jours
        ${SESSION_JOINS}
-      WHERE s.status = 'PREVUE' AND s.date < ?${where}
+      WHERE s.status IN ('PREVUE', 'REPORTEE') AND s.date < ?${where}
       ORDER BY s.date, s.start_min, s.id`,
     today,
     today,
@@ -669,7 +732,7 @@ function reportNonRealisees(
       date: r.date,
       retard_jours: r.retard_jours,
       horaire: horaire(r.start_min, r.end_min),
-      master: r.master_name,
+      master: `${r.master_code} — ${r.master_name}`,
       module: r.module_name,
       professeur: r.professor_name,
       salle: r.room_name,
@@ -720,7 +783,7 @@ function reportAnnuleesReportees(
   const columns: ReportColumn[] = [
     { key: 'date', label: 'Date' },
     { key: 'statut', label: 'Statut' },
-    { key: 'origine', label: 'Créneau initial' },
+    { key: 'origine', label: 'Créneau précédent' },
     { key: 'horaire', label: 'Horaire' },
     { key: 'master', label: 'Master' },
     { key: 'module', label: 'Module' },
@@ -744,7 +807,7 @@ function reportAnnuleesReportees(
             }`
           : null,
       horaire: horaire(r.start_min, r.end_min),
-      master: r.master_name,
+      master: `${r.master_code} — ${r.master_name}`,
       module: r.module_name,
       professeur: r.professor_name,
       salle: r.room_name,
@@ -771,7 +834,8 @@ function reportAnnuleesReportees(
  * Absences professeurs : fenêtre intersectée avec la période demandée,
  * motif, résolution stockée, nb de séances encore ouvertes impactées
  * (PREVUE/REPORTEE — même définition que absence.service) et nb de
- * décisions enregistrées (`absence_decision`).
+ * décisions enregistrées (`absence_decision`). Les deux compteurs sont
+ * mesurés sur l'intersection fenêtre d'absence ∩ période du filtre.
  */
 function reportAbsences(db: DatabaseSync, f: NormFilter): ApiResult<Report> {
   const clauses: string[] = [];
@@ -789,6 +853,9 @@ function reportAbsences(db: DatabaseSync, f: NormFilter): ApiResult<Report> {
     params.push(f.to);
   }
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
+  // Bornes de l'intersection fenêtre ∩ filtre (compteurs ci-dessous).
+  const lo = f.from ?? '0000-01-01';
+  const hi = f.to ?? '9999-12-31';
   const rows = all<{
     professor_name: string;
     start_date: string;
@@ -804,12 +871,20 @@ function reportAbsences(db: DatabaseSync, f: NormFilter): ApiResult<Report> {
             (SELECT count(*) FROM session s
               WHERE s.professor_id = a.professor_id
                 AND s.status IN ('PREVUE','REPORTEE')
-                AND s.date BETWEEN a.start_date AND a.end_date) AS nb_impactees,
+                AND s.date BETWEEN max(a.start_date, ?)
+                                AND min(a.end_date, ?)) AS nb_impactees,
             (SELECT count(*) FROM absence_decision d
-              WHERE d.absence_id = a.id) AS nb_decisions
+              JOIN session ds ON ds.id = d.session_id
+              WHERE d.absence_id = a.id
+                AND ds.date BETWEEN max(a.start_date, ?)
+                                 AND min(a.end_date, ?)) AS nb_decisions
        FROM professor_absence a
        JOIN professor p ON p.id = a.professor_id${where}
       ORDER BY a.start_date DESC, a.id DESC`,
+    lo,
+    hi,
+    lo,
+    hi,
     ...params,
   );
   const columns: ReportColumn[] = [
@@ -851,8 +926,9 @@ function reportAbsences(db: DatabaseSync, f: NormFilter): ApiResult<Report> {
 /**
  * Avancement par master : séances réalisées / prévues (non ANNULEE),
  * taux %, restant à effectuer, modules « à l'heure » vs « en retard »
- * (un master-module est en retard dès qu'il a ≥ 1 séance PREVUE passée
- * — NON_ENCORE_REALISEE dérivée via `today`).
+ * (un master-module est en retard dès qu'il a ≥ 1 séance PREVUE ou
+ * REPORTEE passée — séances encore ouvertes, même définition que
+ * absence.service ; NON_ENCORE_REALISEE dérivée via `today`).
  */
 function reportAvancement(
   db: DatabaseSync,
@@ -901,7 +977,8 @@ function reportAvancement(
               AS prevues,
             count(DISTINCT mm.id) AS nb_modules,
             count(DISTINCT CASE
-                      WHEN s.status = 'PREVUE' AND s.date < ? THEN mm.id
+                      WHEN s.status IN ('PREVUE','REPORTEE') AND s.date < ?
+                        THEN mm.id
                     END) AS modules_en_retard
        FROM master m
        LEFT JOIN master_module mm ON mm.master_id = m.id${mmCond}
@@ -957,9 +1034,11 @@ function reportAvancement(
  * Taux d'occupation par salle sur la période : heures réservées
  * (séances Masters non annulées) + heures Licence (blocages récurrents
  * matérialisés par weekday) vs heures ouvrables = Σ `time_slot` ∩ jours
- * de la période (08–18 sur les jours déclarés). Les deux indicateurs
- * Master/Licence sont séparés ; un éventuel recouvrement des deux est
- * compté dans les deux (indicateur, pas une mesure disjointe).
+ * de la période (08–18 sur les jours déclarés), jours
+ * `calendar_exception` déduits (ni ouvrables ni occurrences Licence).
+ * Les deux indicateurs Master/Licence sont séparés ; un éventuel
+ * recouvrement des deux est compté dans les deux (indicateur, pas une
+ * mesure disjointe — le taux peut dépasser 100 %, non plafonné).
  */
 function reportOccupationSalles(
   db: DatabaseSync,
@@ -970,8 +1049,11 @@ function reportOccupationSalles(
   if (!period.ok) return period;
   const { from, to } = period.data;
   const yearId = yearIdAt(db, from);
+  const exceptions = loadExceptionDays(db);
 
-  // Heures ouvrables par jour de semaine (time_slot, AD-7).
+  // Heures ouvrables par jour de semaine (time_slot, AD-7), jours
+  // d'exception déduits — un weekday sans time_slot ne gonfle PAS les
+  // ouvrables même si des séances y sont placées.
   const slotMin = new Map<number, number>();
   for (const r of all<{ weekday: number; m: number }>(
     db,
@@ -981,7 +1063,7 @@ function reportOccupationSalles(
   }
   let ouvrables = 0;
   for (const [wd, m] of slotMin) {
-    ouvrables += m * weekdayOccurrences(wd, from, to);
+    ouvrables += m * weekdayOccurrences(wd, from, to, exceptions);
   }
 
   // Heures Masters réservées par salle (non ANNULEE sur la période).
@@ -1011,7 +1093,7 @@ function reportOccupationSalles(
       WHERE eo.academic_year_id IS NULL OR eo.academic_year_id = ?`,
     yearId ?? -1,
   )) {
-    const occ = weekdayOccurrences(r.weekday, from, to);
+    const occ = weekdayOccurrences(r.weekday, from, to, exceptions);
     if (occ <= 0) continue;
     const cur = licByRoom.get(r.room_id) ?? { min: 0, n: 0 };
     cur.min += r.dur * occ;
@@ -1019,9 +1101,9 @@ function reportOccupationSalles(
     licByRoom.set(r.room_id, cur);
   }
 
-  const rooms = all<{ id: number; name: string }>(
+  const rooms = all<{ id: number; name: string; is_active: number }>(
     db,
-    `SELECT r.id, r.name FROM room r WHERE 1 = 1
+    `SELECT r.id, r.name, r.is_active FROM room r WHERE 1 = 1
        ${f.roomId != null ? ' AND r.id = ?' : ''}
       ORDER BY r.name COLLATE NOCASE`,
     ...(f.roomId != null ? [f.roomId] : []),
@@ -1034,7 +1116,7 @@ function reportOccupationSalles(
     const masterMin = masterByRoom.get(room.id)?.min ?? 0;
     const licMin = licByRoom.get(room.id)?.min ?? 0;
     return {
-      salle: room.name,
+      salle: roomLabel(room.name, room.is_active),
       heures_master_min: masterMin,
       heures_licence_min: licMin,
       heures_ouvrables_min: ouvrables,
@@ -1046,7 +1128,10 @@ function reportOccupationSalles(
     { key: 'heures_master_min', label: 'Heures Masters (min)' },
     { key: 'heures_licence_min', label: 'Heures Licence (min)' },
     { key: 'heures_ouvrables_min', label: 'Heures ouvrables (min)' },
-    { key: 'taux_occupation', label: "Taux d'occupation (%)" },
+    {
+      key: 'taux_occupation',
+      label: "Taux d'occupation (%) — heures réservées, recouvrements inclus",
+    },
   ];
   const totMaster = rows.reduce((a, r) => a + (r.heures_master_min as number), 0);
   const totLic = rows.reduce((a, r) => a + (r.heures_licence_min as number), 0);
@@ -1056,9 +1141,18 @@ function reportOccupationSalles(
     { key: 'heures_master', label: 'Heures Masters (min)', value: totMaster },
     { key: 'heures_licence', label: 'Heures Licence (min)', value: totLic },
     {
+      // Σ heures utilisées / (ouvrables × nb salles) — jamais la
+      // capacité d'une seule salle ; non plafonné (les collisions sont
+      // de l'information).
       key: 'taux_moyen',
-      label: "Taux moyen (%)",
-      value: pct(totMaster + totLic) ?? '—',
+      label:
+        "Taux moyen (%) — heures réservées, recouvrements inclus",
+      value:
+        ouvrables > 0 && rooms.length > 0
+          ? Math.round(
+              ((totMaster + totLic) / (ouvrables * rooms.length)) * 1000,
+            ) / 10
+          : '—',
     },
   ];
   return apiOk({
@@ -1088,16 +1182,34 @@ function reportConflitsRestes(
   });
   if (!res.ok) return res;
   let items: ConflictItem[] = res.data;
-  // Filtre entité : conflits touchant le master demandé.
+  // Filtre entité : conflits dont ≥ 1 séance appartient au master
+  // demandé — résolution PAR ID (session.master_module_id →
+  // mm.master_id) en une requête, jamais par nom (homonymes possibles).
   if (f.masterId != null) {
-    const master = get<{ name: string }>(
+    const master = get<{ id: number }>(
       db,
-      'SELECT name FROM master WHERE id = ?',
+      'SELECT id FROM master WHERE id = ?',
       f.masterId,
     );
     if (master == null) return apiErr('Master inexistant.');
+    const sessionIds = new Set<number>();
+    for (const c of items) for (const s of c.sessions) sessionIds.add(s.id);
+    const ofMaster = new Set<number>();
+    if (sessionIds.size > 0) {
+      const ph = [...sessionIds].map(() => '?').join(', ');
+      for (const r of all<{ id: number }>(
+        db,
+        `SELECT s.id FROM session s
+          JOIN master_module mm ON mm.id = s.master_module_id
+         WHERE mm.master_id = ? AND s.id IN (${ph})`,
+        f.masterId,
+        ...sessionIds,
+      )) {
+        ofMaster.add(r.id);
+      }
+    }
     items = items.filter((c) =>
-      c.sessions.some((s) => s.masterName === master.name),
+      c.sessions.some((s) => ofMaster.has(s.id)),
     );
   }
   // Groupé par kind (ordre métier) puis date.
@@ -1192,9 +1304,15 @@ function reportConflitsRestes(
 
 // --- Dispatch -----------------------------------------------------------------------------
 
+/** Cap de lignes d'un rapport — au-delà, tronqué + `truncated: true`. */
+export const MAX_REPORT_ROWS = 50_000;
+
 /**
  * Exécute un rapport par id — lecture seule (FR-44). `today` injectable
  * pour la dérivation NON_ENCORE_REALISEE et les défauts de période.
+ * Au-delà de `MAX_REPORT_ROWS` lignes produites le résultat est tronqué
+ * (`truncated: true` + item de summary explicite) plutôt qu'un échec
+ * opaque à l'export.
  */
 export function runReport(
   db: DatabaseSync,
@@ -1208,40 +1326,75 @@ export function runReport(
   const nf = normFilter(filter);
   if (!nf.ok) return nf;
   const f = nf.data;
+  let res: ApiResult<Report>;
   switch (id) {
     case 'edt_hebdo':
-      return reportEdtHebdo(db, f, today);
+      res = reportEdtHebdo(db, f, today);
+      break;
     case 'salles_planning':
-      return reportSallesPlanning(db, f, today);
+      res = reportSallesPlanning(db, f, today);
+      break;
     case 'prof_programme':
-      return reportProfProgramme(db, f, today);
+      res = reportProfProgramme(db, f, today);
+      break;
     case 'bilan_heures':
-      return reportBilanHeures(db, f);
+      res = reportBilanHeures(db, f);
+      break;
     case 'non_realisees':
-      return reportNonRealisees(db, f, today);
+      res = reportNonRealisees(db, f, today);
+      break;
     case 'annulees_reportees':
-      return reportAnnuleesReportees(db, f);
+      res = reportAnnuleesReportees(db, f);
+      break;
     case 'absences':
-      return reportAbsences(db, f);
+      res = reportAbsences(db, f);
+      break;
     case 'avancement':
-      return reportAvancement(db, f, today);
+      res = reportAvancement(db, f, today);
+      break;
     case 'occupation_salles':
-      return reportOccupationSalles(db, f, today);
+      res = reportOccupationSalles(db, f, today);
+      break;
     case 'conflits_restes':
-      return reportConflitsRestes(db, f);
+      res = reportConflitsRestes(db, f);
+      break;
   }
+  if (res.ok && res.data.rows.length > MAX_REPORT_ROWS) {
+    res.data.rows = res.data.rows.slice(0, MAX_REPORT_ROWS);
+    res.data.truncated = true;
+    res.data.summary = [
+      ...(res.data.summary ?? []),
+      {
+        key: 'truncated',
+        label: 'Rapport tronqué — précisez les filtres',
+        value: MAX_REPORT_ROWS,
+      },
+    ];
+  }
+  return res;
 }
 
 // --- Export CSV -------------------------------------------------------------------------
 
 /**
- * CSV compatible Excel (FR-41) : préfixe BOM UTF-8 (`﻿`), séparateur
+ * CSV compatible Excel (FR-41) : préfixe BOM UTF-8 (`'\uFEFF'`), séparateur
  * `;`, quoting `"…"` quand la valeur contient `;`, `"` ou un retour
  * ligne (les `"` internes sont doublés), fins de ligne CRLF.
+ * Anti-injection de formule : les CHAÎNES commençant par `=`, `+`, `-`,
+ * `@` ou une tabulation sont préfixées d'une apostrophe (Excel les
+ * force en texte) ; les nombres ne sont JAMAIS préfixés et leurs
+ * décimales sont formatées avec `,` (Excel FR lit « 3,3 »).
  */
 export function reportCsv(report: Report): string {
   const esc = (v: unknown): string => {
-    const s = v == null ? '' : String(v);
+    if (v == null) return '';
+    let s: string;
+    if (typeof v === 'number') {
+      s = Number.isInteger(v) ? String(v) : String(v).replace('.', ',');
+    } else {
+      s = String(v);
+      if (/^[=+\-@\t]/.test(s)) s = `'${s}`;
+    }
     return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [report.columns.map((c) => esc(c.label)).join(';')];
@@ -1249,5 +1402,5 @@ export function reportCsv(report: Report): string {
     lines.push(report.columns.map((c) => esc(row[c.key])).join(';'));
   }
   // BOM UTF-8 explicite — Excel n'ouvre les accents correctement qu'avec.
-  return '﻿' + lines.join('\r\n');
+  return '\uFEFF' + lines.join('\r\n');
 }

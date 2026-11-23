@@ -407,15 +407,17 @@ describe('bilan_heures', () => {
 });
 
 describe('non_realisees', () => {
-  it('PREVUE passée dérivée via today injecté : retard exact en jours', () => {
+  it('PREVUE/REPORTEE passées dérivées via today injecté : retard exact', () => {
     const db = freshDb();
     seedFixture(db);
     const r = runOk(db, 'non_realisees', {});
-    expect(r.rows).toHaveLength(1);
-    expect(r.rows[0].date).toBe('2026-10-05');
-    // 2026-11-15 − 2026-10-05 = 41 jours.
+    // s1 PREVUE (10-05) + s5 REPORTEE (10-09) — ouvertes et passées.
+    expect(r.rows.map((x) => x.date)).toEqual(['2026-10-05', '2026-10-09']);
+    // 2026-11-15 − 2026-10-05 = 41 jours ; − 2026-10-09 = 37.
     expect(r.rows[0].retard_jours).toBe(41);
+    expect(r.rows[1].retard_jours).toBe(37);
     expect(r.summary?.find((s) => s.key === 'retard_max')?.value).toBe(41);
+    expect(r.summary?.find((s) => s.key === 'total')?.value).toBe(2);
   });
 
   it('today plus tôt → aucune non réalisée', () => {
@@ -567,6 +569,195 @@ describe('reportCsv', () => {
     expect(lines[1]).toBe('"Droit; privé";Été « chaud »');
     expect(lines[2]).toBe('"Nom ""guillemets""";'); // b null → cellule vide
     expect(lines[3]).toBe('"ligne\nbas";éèê');
+  });
+});
+
+describe('revue 3 couches — correctifs', () => {
+  it('taux_moyen = Σ heures utilisées / (ouvrables × nb salles)', () => {
+    const db = freshDb();
+    seedFixture(db);
+    const r = runOk(db, 'occupation_salles', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    // (360 Master + 120 Licence) / (3 600 ouvrables × 2 salles) = 6,67 %.
+    expect(r.summary?.find((s) => s.key === 'taux_moyen')?.value).toBe(6.7);
+    expect(r.summary?.find((s) => s.key === 'taux_moyen')?.label).toContain(
+      'recouvrements inclus',
+    );
+  });
+
+  it('jour sans time_slot visible dans salles_planning, hors ouvrables', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // Séance un dimanche (jour sans créneau time_slot déclaré).
+    addSession(db, f.mmId, f.profId, f.roomA, '2026-10-11', 540, 660, 'PREVUE');
+    const r = runOk(db, 'salles_planning', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    const dim = r.rows.find(
+      (x) => x.salle === 'Salle A' && x.jour === 'Dimanche',
+    );
+    expect(dim).toBeDefined();
+    expect(dim!.creneaux_ouverts).toBe('');
+    expect(dim!.seances_masters).toBe('09:00–11:00 ×1');
+    // …mais le dimanche ne gonfle PAS les heures ouvrables (réservée: oui).
+    const occ = runOk(db, 'occupation_salles', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    const a = occ.rows.find((x) => x.salle === 'Salle A')!;
+    expect(a.heures_ouvrables_min).toBe(3600); // lun–sam seulement
+    expect(a.heures_master_min).toBe(480); // 360 + dimanche 120
+  });
+
+  it('REPORTEE passée comptée non réalisée (cohérent absence.service)', () => {
+    const db = freshDb();
+    seedFixture(db);
+    const r = runOk(db, 'non_realisees', {});
+    const rep = r.rows.find((x) => x.date === '2026-10-09');
+    expect(rep).toBeDefined();
+    expect(rep!.retard_jours).toBe(37); // 2026-11-15 − 2026-10-09
+  });
+
+  it('période partielle inversée après fallback année → erreur', () => {
+    const db = freshDb();
+    seedFixture(db);
+    // date_from seul postérieur à la fin de l'année → from > to après
+    // fallback sur les bornes de l'année universitaire.
+    for (const id of ['occupation_salles', 'salles_planning'] as const) {
+      const res = runReport(db, id, { date_from: '2028-01-01' }, TODAY);
+      expect(res.ok).toBe(false);
+    }
+    // Cas sain de contrôle : borne seule dans l'année → OK.
+    expect(
+      runReport(db, 'occupation_salles', { date_from: '2026-10-01' }, TODAY).ok,
+    ).toBe(true);
+  });
+
+  it('CSV : préfixe anti-formule sur chaînes, décimales FR, nombres non préfixés', () => {
+    const report: Report = {
+      id: 'bilan_heures',
+      title: 'T',
+      columns: [
+        { key: 'a', label: 'A' },
+        { key: 'b', label: 'B' },
+      ],
+      rows: [
+        { a: '=1+1', b: 3.3 },
+        { a: '@cmd', b: -5 },
+        { a: '-texte', b: 12.0 },
+        { a: '\ttab', b: null },
+      ],
+    };
+    const lines = reportCsv(report).slice(1).split('\r\n');
+    expect(lines[0]).toBe('A;B');
+    expect(lines[1]).toBe("'=1+1;3,3"); // chaîne =… préfixée, décimale FR
+    expect(lines[2]).toBe("'@cmd;-5"); // nombre négatif : PAS de préfixe
+    expect(lines[3]).toBe("'-texte;12"); // 12.0 entier → '12'
+    expect(lines[4]).toBe("'\ttab;");
+  });
+
+  it('conflits_restes : filtre master par id — homonymes de nom exclus', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // Deuxième master portant LE MÊME NOM : le filtre par nom aurait
+    // inclus à tort les conflits de l'autre master.
+    const master2 = Number(
+      run(
+        db,
+        "INSERT INTO master (code, name, academic_year_id, semester_id) VALUES ('M-U', 'Master Test', ?, ?)",
+        f.yearId,
+        f.semId,
+      ).lastInsertRowid,
+    );
+    // Le conflit EXTERNAL (s6 ↔ blocage Licence) appartient à f.masterId.
+    const m1 = runOk(db, 'conflits_restes', { master_id: f.masterId });
+    expect(
+      m1.rows.filter((x) => x.kind !== 'Reste à placer'),
+    ).toHaveLength(1);
+    // Homonyme : AUCUN conflit malgré le nom identique.
+    const m2 = runOk(db, 'conflits_restes', { master_id: master2 });
+    expect(
+      m2.rows.filter((x) => x.kind !== 'Reste à placer'),
+    ).toHaveLength(0);
+    expect(m2.summary?.find((s) => s.key === 'total')?.value).toBe(0);
+  });
+
+  it('calendar_exception déduite des ouvrables ET des occurrences Licence', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    run(
+      db,
+      "INSERT INTO calendar_exception (start_date, end_date, type, label) VALUES ('2026-10-07', '2026-10-07', 'FERMETURE', 'Inventaire')",
+    );
+    run(
+      db,
+      "INSERT INTO calendar_exception (start_date, end_date, type, label) VALUES ('2026-12-07', '2026-12-07', 'FERMETURE', 'Inventaire')",
+    );
+    // Ouvrables : 6 jours − mercredi 07/10 = 5 × 600 min = 3 000.
+    const occ = runOk(db, 'occupation_salles', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    for (const row of occ.rows) {
+      expect(row.heures_ouvrables_min).toBe(3000);
+    }
+    // Semaine du 07/12 : le blocage Licence du lundi (jour férié) a 0
+    // occurrence, mais la séance s6 reste une occupation réelle.
+    const dec = runOk(db, 'salles_planning', {
+      date_from: '2026-12-07',
+      date_to: '2026-12-13',
+      room_id: f.roomB,
+    });
+    const lun = dec.rows.find((x) => x.jour === 'Lundi');
+    expect(lun).toBeDefined();
+    expect(lun!.blocages_licence).toBe('');
+    expect(lun!.nb_blocages).toBe(0);
+    expect(lun!.seances_masters).toBe('10:00–12:00 ×1');
+  });
+
+  it('salle désactivée incluse et taggée « (désactivée) »', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    run(db, 'UPDATE room SET is_active = 0 WHERE id = ?', f.roomB);
+    const r = runOk(db, 'occupation_salles', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    const b = r.rows.find((x) => x.salle === 'Salle B (désactivée)')!;
+    expect(b).toBeDefined();
+    expect(b.heures_licence_min).toBe(120);
+    const plan = runOk(db, 'salles_planning', {
+      date_from: '2026-10-05',
+      date_to: '2026-10-11',
+    });
+    expect(
+      plan.rows.some((x) => x.salle === 'Salle B (désactivée)'),
+    ).toBe(true);
+  });
+
+  it('runReport tronque à 50 000 lignes avec message explicite', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const ins = db.prepare(
+      `INSERT INTO session
+         (master_module_id, professor_id, room_id, date, start_min, end_min,
+          status)
+       VALUES (?, ?, ?, '2027-01-04', 480, 600, 'PREVUE')`,
+    );
+    db.exec('BEGIN');
+    try {
+      for (let i = 0; i < 50_001; i++) ins.run(f.mmId, f.profId, f.roomA);
+    } finally {
+      db.exec('COMMIT');
+    }
+    const r = runOk(db, 'prof_programme', {});
+    expect(r.rows).toHaveLength(50_000);
+    expect(r.truncated).toBe(true);
+    const item = r.summary?.find((s) => s.key === 'truncated');
+    expect(item?.label).toBe('Rapport tronqué — précisez les filtres');
   });
 });
 

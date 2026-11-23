@@ -439,6 +439,15 @@ export function ReportsPage(): React.JSX.Element {
 
       {error && <Alert type="error" showIcon message={error} />}
 
+      {/* Avertissement quand le résultat a été tronqué (cap 50 000). */}
+      {report?.truncated === true && (
+        <Alert
+          type="warning"
+          showIcon
+          message={t('reports.truncated', { count: report.rows.length })}
+        />
+      )}
+
       {/* Cartes récap quand le rapport expose un summary. */}
       {report?.summary && report.summary.length > 0 && (
         <Space wrap size="large">
