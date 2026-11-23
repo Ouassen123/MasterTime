@@ -512,6 +512,69 @@
     "periodRange": "{{from}} → {{to}}",
     "editedOn": "Édité le {{date}}"
   },
+  "importExport": {
+    "title": "Import / Export",
+    "tabs": {
+      "import": "Importer",
+      "export": "Exporter"
+    },
+    "entity": {
+      "salles": "Salles",
+      "professeurs": "Professeurs",
+      "modules": "Modules",
+      "masters": "Masters",
+      "etudiants": "Étudiants",
+      "master_modules": "Master-modules",
+      "seances": "Séances"
+    },
+    "type": "Type de données",
+    "template": "Télécharger le gabarit",
+    "templateDone": "Gabarit enregistré.",
+    "cancelled": "Opération annulée.",
+    "drop": {
+      "title": "Cliquez ou glissez un fichier CSV ici",
+      "hint": "CSV UTF-8 — séparateur « ; » ou « , » détecté automatiquement, 5 Mo max, 10 000 lignes max."
+    },
+    "fileTooBig": "Fichier trop volumineux (5 Mo max).",
+    "fileReadError": "Impossible de lire le fichier.",
+    "preview": {
+      "unknownColumns": "Colonnes inconnues ignorées : {{cols}}",
+      "ok": "Valides",
+      "doublon": "Doublons",
+      "erreur": "En erreur",
+      "line": "Ligne",
+      "status": "Statut",
+      "errors": "Erreurs",
+      "statuses": {
+        "OK": "Valide",
+        "DOUBLON": "Doublon",
+        "ERREUR": "Erreur"
+      }
+    },
+    "strategy": {
+      "title": "Stratégie sur les doublons",
+      "IGNORER": "Ignorer — les doublons sont sautés",
+      "FUSIONNER": "Fusionner — les champs fournis non vides mettent à jour l'existant",
+      "REMPLACER": "Remplacer — les champs fournis remplacent (les vides effacent)"
+    },
+    "apply": "Importer",
+    "adminOnly": "L'import est réservé au profil Administrateur.",
+    "result": {
+      "title": "Résultat de l'import",
+      "inserted": "Insérées",
+      "merged": "Fusionnées",
+      "ignored": "Ignorées",
+      "errors": "Erreurs",
+      "done": "Import terminé : {{inserted}} insérée(s), {{merged}} fusionnée(s), {{ignored}} ignorée(s).",
+      "line": "Ligne",
+      "message": "Erreur"
+    },
+    "export": {
+      "hint": "Dump par entité — CSV « ; » avec BOM UTF-8, compatible Excel.",
+      "done": "Export enregistré.",
+      "file": "Fichier : {{path}}"
+    }
+  },
   "placeholder": {
     "title": "Fonctionnalité à venir",
     "body": "Cette section sera disponible dans une phase ultérieure du projet."

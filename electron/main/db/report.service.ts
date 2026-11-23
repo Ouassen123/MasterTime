@@ -28,6 +28,7 @@ import { apiErr, apiOk, REPORT_IDS } from '../../../shared/types';
 import { all, get } from './connection';
 import { isValidIsoDate, todayIso } from './date';
 import { detectConflicts } from './conflict.service';
+import { csvText } from './csv';
 
 // --- Libellés français (les rapports alimentent CSV/PDF sans i18n renderer) ---
 
@@ -1377,30 +1378,9 @@ export function runReport(
 // --- Export CSV -------------------------------------------------------------------------
 
 /**
- * CSV compatible Excel (FR-41) : préfixe BOM UTF-8 (`'\uFEFF'`), séparateur
- * `;`, quoting `"…"` quand la valeur contient `;`, `"` ou un retour
- * ligne (les `"` internes sont doublés), fins de ligne CRLF.
- * Anti-injection de formule : les CHAÎNES commençant par `=`, `+`, `-`,
- * `@` ou une tabulation sont préfixées d'une apostrophe (Excel les
- * force en texte) ; les nombres ne sont JAMAIS préfixés et leurs
- * décimales sont formatées avec `,` (Excel FR lit « 3,3 »).
+ * CSV compatible Excel (FR-41) — délégué à `csvText` (`./csv`, format
+ * « Excel FR » unique : BOM UTF-8, `;`, quoting, anti-injection).
  */
 export function reportCsv(report: Report): string {
-  const esc = (v: unknown): string => {
-    if (v == null) return '';
-    let s: string;
-    if (typeof v === 'number') {
-      s = Number.isInteger(v) ? String(v) : String(v).replace('.', ',');
-    } else {
-      s = String(v);
-      if (/^[=+\-@\t]/.test(s)) s = `'${s}`;
-    }
-    return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [report.columns.map((c) => esc(c.label)).join(';')];
-  for (const row of report.rows) {
-    lines.push(report.columns.map((c) => esc(row[c.key])).join(';'));
-  }
-  // BOM UTF-8 explicite — Excel n'ouvre les accents correctement qu'avec.
-  return '\uFEFF' + lines.join('\r\n');
+  return csvText(report.columns, report.rows);
 }

@@ -11,6 +11,7 @@ import {
   BankOutlined,
   BarChartOutlined,
   CalendarOutlined,
+  SwapOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -69,7 +70,12 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <BarChartOutlined />,
   },
-  { key: 'importExport', path: '/import-export', enabled: false },
+  {
+    key: 'importExport',
+    path: '/import-export',
+    enabled: true,
+    icon: <SwapOutlined />,
+  },
   { key: 'settings', path: '/parametres', enabled: false, adminOnly: true },
   { key: 'backups', path: '/sauvegardes', enabled: false, adminOnly: true },
 ];

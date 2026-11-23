@@ -33,8 +33,13 @@ import type {
   GenerationListFilter,
   GenerationResult,
   GenerationRow,
+  ExportEntityType,
   GroupInput,
   ImpactedSession,
+  ImportApplyResult,
+  ImportEntityType,
+  ImportPreview,
+  ImportStrategy,
   MasterDetail,
   MasterInput,
   MasterListFilter,
@@ -318,6 +323,27 @@ const api: WindowApi = {
   audit: {
     list: (limit?: number): Promise<ApiResult<AuditEntry[]>> =>
       ipcRenderer.invoke('audit:list', limit),
+  },
+  importExport: {
+    preview: (
+      type: ImportEntityType,
+      csvText: string,
+    ): Promise<ApiResult<ImportPreview>> =>
+      ipcRenderer.invoke('import:preview', type, csvText),
+    apply: (
+      type: ImportEntityType,
+      csvText: string,
+      strategy: ImportStrategy,
+    ): Promise<ApiResult<ImportApplyResult>> =>
+      ipcRenderer.invoke('import:apply', type, csvText, strategy),
+    template: (
+      type: ImportEntityType,
+    ): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('import:template', type),
+    exportEntity: (
+      type: ExportEntityType,
+    ): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('export:entity', type),
   },
 };
 

@@ -1121,6 +1121,77 @@ export interface ReportExportFile {
   cancelled: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// P11 — Import / Export CSV (Module I : FR-45→49, BR-21)
+// ---------------------------------------------------------------------------
+
+/** Types importables (FR-45) — les entités référentielles + étudiants. */
+export const IMPORT_TYPES = [
+  'salles',
+  'professeurs',
+  'modules',
+  'masters',
+  'etudiants',
+] as const;
+export type ImportEntityType = (typeof IMPORT_TYPES)[number];
+
+/** Types exportables (FR-48) — import + master_modules + séances (dump). */
+export const EXPORT_TYPES = [
+  ...IMPORT_TYPES,
+  'master_modules',
+  'seances',
+] as const;
+export type ExportEntityType = (typeof EXPORT_TYPES)[number];
+
+/** Stratégie de conflit par lot (BR-21) — explicite, pas de mixte en v1. */
+export const IMPORT_STRATEGIES = [
+  'IGNORER',
+  'FUSIONNER',
+  'REMPLACER',
+] as const;
+export type ImportStrategy = (typeof IMPORT_STRATEGIES)[number];
+
+/** Statut d'une ligne en aperçu (`import:preview`, FR-46). */
+export type ImportRowStatus = 'OK' | 'DOUBLON' | 'ERREUR';
+
+/**
+ * Ligne d'aperçu : `n` = numéro de ligne de données (1-based, hors en-tête),
+ * `raw` = cellules brutes, `parsed` = valeurs par colonne reconnue,
+ * `match_id` = id de l'entité existante en cas de doublon NOCASE.
+ */
+export interface ImportRow {
+  n: number;
+  raw: string[];
+  parsed: Record<string, string>;
+  status: ImportRowStatus;
+  errors: FieldError[];
+  match_id?: number;
+}
+
+/** Résultat de `import:preview`. */
+export interface ImportPreview {
+  /** En-têtes FR reconnues (dans l'ordre du fichier). */
+  columns: string[];
+  /** En-têtes présentes mais inconnues — warning non bloquant. */
+  unknownColumns: string[];
+  rows: ImportRow[];
+}
+
+/** Résultat de `import:apply` (FR-47, BR-21 — transactionnel par lot). */
+export interface ImportApplyResult {
+  inserted: number;
+  merged: number;
+  ignored: number;
+  errors: { n: number; message: string }[];
+}
+
+/** Dump d'une entité exportée (FR-48) — colonnes FR + lignes lisibles. */
+export interface EntityExport {
+  title: string;
+  columns: ReportColumn[];
+  rows: ReportRow[];
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -1294,5 +1365,23 @@ export interface WindowApi {
   };
   audit: {
     list(limit?: number): Promise<ApiResult<AuditEntry[]>>;
+  };
+  importExport: {
+    preview(
+      type: ImportEntityType,
+      csvText: string,
+    ): Promise<ApiResult<ImportPreview>>;
+    /** Réservé ADMIN côté main (BR-24 — import massif = administration). */
+    apply(
+      type: ImportEntityType,
+      csvText: string,
+      strategy: ImportStrategy,
+    ): Promise<ApiResult<ImportApplyResult>>;
+    /** Gabarit CSV (en-têtes + exemple) via save dialog (FR-49). */
+    template(type: ImportEntityType): Promise<ApiResult<ReportExportFile>>;
+    /** Dump CSV d'une entité via save dialog (FR-48). */
+    exportEntity(
+      type: ExportEntityType,
+    ): Promise<ApiResult<ReportExportFile>>;
   };
 }

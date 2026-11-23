@@ -8,6 +8,7 @@ import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { DashboardPage } from './pages/DashboardPage';
 import { GenerationPage } from './pages/GenerationPage';
+import { ImportExportPage } from './pages/ImportExportPage';
 import { MastersPage } from './pages/MastersPage';
 import { ModulesPage } from './pages/ModulesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
@@ -30,6 +31,7 @@ export default function App(): React.JSX.Element {
         <Route path="generation" element={<GenerationPage />} />
         <Route path="seances" element={<SessionsPage />} />
         <Route path="rapports" element={<ReportsPage />} />
+        <Route path="import-export" element={<ImportExportPage />} />
         <Route path="*" element={<PlaceholderPage />} />
       </Route>
     </Routes>
