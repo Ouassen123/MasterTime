@@ -162,6 +162,12 @@ const IMPORT_SPECS: Record<ImportEntityType, ImportColumn[]> = {
       example: 'Dr A. Bennani',
     },
     { key: 'semester', header: 'semestre', required: false, example: '3' },
+    {
+      key: 'temps_amenage',
+      header: 'temps_amenage(0/1)',
+      required: false,
+      example: '0',
+    },
   ],
   etudiants: [
     { key: 'group', header: 'groupe', required: true, example: 'G1' },
@@ -352,6 +358,8 @@ type NormValues =
       responsibleName: string | null;
       semesterId: number | null;
       academicYearId: number;
+      /** 0/1 — master « temps aménagé » (colonne optionnelle, défaut 0). */
+      tempsAmenage: number;
     }
   | {
       kind: 'etudiants';
@@ -375,10 +383,14 @@ function parseFlag(
   v: string,
   field: string,
   errors: FieldError[],
+  label = 'actif',
 ): number | null {
   if (v === '') return null;
   if (v === '0' || v === '1') return Number(v);
-  errors.push({ field, message: 'La valeur « actif » doit être 0 ou 1.' });
+  errors.push({
+    field,
+    message: `La valeur « ${label} » doit être 0 ou 1.`,
+  });
   return null;
 }
 
@@ -545,6 +557,14 @@ function normalizeRow(
           semesterId = sem.id;
         }
       }
+      // Colonne optionnelle (P14) : absente ou vide → 0 ; autre valeur
+      // que 0/1 → ERREUR de ligne (jamais d'insertion silencieuse).
+      const tempsAmenage = parseFlag(
+        parsed.temps_amenage ?? '',
+        'temps_amenage',
+        errors,
+        'temps aménagé',
+      );
       if (errors.length === 0) {
         values = {
           kind: 'masters',
@@ -555,6 +575,7 @@ function normalizeRow(
           responsibleName: (parsed.responsible_name ?? '') || null,
           semesterId,
           academicYearId: ctx.academicYearId ?? -1,
+          tempsAmenage: tempsAmenage ?? 0,
         };
       }
       break;
@@ -1022,8 +1043,9 @@ function insertRow(
           run(
             db,
             `INSERT INTO master (code, name, filiere, department,
-               responsible_name, academic_year_id, semester_id, status, is_demo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIF', 0)`,
+               responsible_name, academic_year_id, semester_id, status,
+               temps_amenage, is_demo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIF', ?, 0)`,
             v.code,
             v.name,
             v.filiere,
@@ -1031,6 +1053,7 @@ function insertRow(
             v.responsibleName,
             v.academicYearId,
             v.semesterId,
+            v.tempsAmenage,
           ).lastInsertRowid,
         ),
       ).id;
@@ -1164,6 +1187,8 @@ function updateRow(
         null,
       );
       const semester = merge('semester', v.semesterId, null);
+      // REMPLACER + colonne fournie vide → 0 (flag non nullable).
+      const tempsAmenage = merge('temps_amenage', v.tempsAmenage, 0);
       return auditedWrite(db, userId, 'UPDATE', 'master', id, () => {
         run(
           db,
@@ -1171,7 +1196,8 @@ function updateRow(
              filiere = CASE WHEN ? THEN filiere ELSE ? END,
              department = CASE WHEN ? THEN department ELSE ? END,
              responsible_name = CASE WHEN ? THEN responsible_name ELSE ? END,
-             semester_id = CASE WHEN ? THEN semester_id ELSE ? END
+             semester_id = CASE WHEN ? THEN semester_id ELSE ? END,
+             temps_amenage = CASE WHEN ? THEN temps_amenage ELSE ? END
            WHERE id = ?`,
           v.code,
           v.name,
@@ -1183,6 +1209,8 @@ function updateRow(
           responsible === KEEP ? null : responsible,
           semester === KEEP ? 1 : 0,
           semester === KEEP ? null : semester,
+          tempsAmenage === KEEP ? 1 : 0,
+          tempsAmenage === KEEP ? null : tempsAmenage,
           id,
         );
       }).changed;
@@ -1438,13 +1466,14 @@ const EXPORT_DEFS: Record<
       { key: 'semestre', label: 'semestre' },
       { key: 'annee', label: 'annee' },
       { key: 'statut', label: 'statut' },
+      { key: 'temps_amenage', label: 'temps_amenage(0/1)' },
     ],
     rows: (db) =>
       all<ReportRow>(
         db,
         `SELECT m.code, m.name AS nom, m.filiere, m.department AS departement,
                 m.responsible_name AS responsable, sem.ordinal AS semestre,
-                y.label AS annee, m.status AS statut
+                y.label AS annee, m.status AS statut, m.temps_amenage
            FROM master m
            JOIN academic_year y ON y.id = m.academic_year_id
            LEFT JOIN semester sem ON sem.id = m.semester_id

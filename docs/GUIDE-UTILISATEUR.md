@@ -91,6 +91,14 @@ compteurs. Clic sur une ligne → fiche à onglets :
 La suppression d'un master est **protégée** : si des données y sont
 rattachées, le refus chiffré propose l'**archivage** à la place.
 
+**Temps aménagé (payant)** : cochez cette case dans le formulaire du
+master pour marquer les masters en temps aménagé — le badge bleu
+« Temps aménagé » apparaît alors dans la liste et la fiche. Ce
+marquage servira au futur rapport de service économique (paiement) ;
+aucun traitement n'y est encore associé en v1. La colonne
+`temps_amenage(0/1)` est aussi reconnue à l'import CSV et présente
+dans l'export Masters.
+
 ### Professeurs
 
 Table avec recherche (nom, référence, email), filtre actif/inactif et
@@ -130,6 +138,13 @@ Lecture seule, plusieurs vues :
 des chevauchements restés en base (ex. collisions présentes dans les
 documents officiels). Cliquez une séance → **fiche de détail** (drawer)
 avec toutes les informations et les actions d'édition.
+
+**Création rapide au clic** (vue Semaine) : cliquez sur la zone vide
+d'une colonne-jour — le formulaire de création s'ouvre pré-rempli
+avec le jour cliqué et un créneau de 2 h aligné sur le quart d'heure
+(ex. clic à 10:17 → 10:15–12:15, borné à 20:00). En vue filtrée par
+master, le master est aussi pré-rempli. Le clic sur une séance ou une
+occupation existante conserve son comportement (détail).
 
 ## 7. Génération automatique
 
@@ -228,6 +243,31 @@ Chaque décision est tracée (qui, quand, quoi). L'absence passe de
 décision — corrigez puis réessayez.
 
 ## 10. Présences
+
+### Feuille de présence (PDF imprimable)
+
+Dans le **drawer de séance**, le bouton **« Feuille de présence »**
+génère un PDF A4 prêt à imprimer — disponible sur **toutes** les
+séances, pas seulement les réalisées. Flux recommandé : imprimez la
+feuille avant le cours, faites cocher Présent/Absent/Observation à la
+main pendant la séance, puis reportez la saisie dans le volet
+Présences (voir ci-dessous) une fois la séance marquée réalisée.
+
+La feuille reprend l'en-tête de la Faculté, le bloc séance (master,
+module, enseignant, salle, date, horaire, groupe(s)) et le tableau
+réglementaire `N° | Nom et prénom | Présent | Absent | Observation` :
+
+- si la séance vise des groupes, les étudiants sont pré-imprimés
+  (union du groupe du module et des groupes de la séance, triés) ;
+- sinon (séance « master entier » sans groupe), **25 lignes vides
+  numérotées** sont imprimées pour saisie manuelle.
+
+Le pied de page contient la mention « Séance assurée par
+l'enseignant : ☐ Oui ☐ Non », la case signature du Responsable du
+Master et « Fait à Tanger, le …/…/…… ». Le fichier est proposé sous
+le nom `feuille-presence-<date>-<master>.pdf`.
+
+### Saisie (séance réalisée)
 
 Sur une séance **réalisée** (drawer de séance → volet présences) :
 

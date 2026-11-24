@@ -12,9 +12,8 @@
  *    écrit le buffer puis ferme la fenêtre — aucune dépendance.
  * Pas de `requireRole` (BR-24) : ouvert aux profils ADMIN et GESTIONNAIRE.
  */
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { dialog, ipcMain } from 'electron';
 import fs from 'node:fs';
-import path from 'node:path';
 import type {
   ApiResult,
   Report,
@@ -27,6 +26,7 @@ import { apiErr, apiOk, REPORT_IDS } from '../../../shared/types';
 import { reportCsv, runReport, MAX_REPORT_ROWS } from '../db/report.service';
 import { todayIso } from '../db/date';
 import { guard, isObject, type DbGetter } from './helpers';
+import { htmlToPdfFile } from './pdf';
 
 /** Bornes anti-payload forgé : rapport « raisonnable » pour l'export. */
 const MAX_COLS = 50;
@@ -117,61 +117,15 @@ export function registerReportHandlers(getDb: DbGetter): void {
         return apiErr('Paramètres invalides.');
       }
       const input = payload as unknown as ReportPdfInput;
-      // Fenêtre hors écran dédiée au rendu print — jamais montrée ni
-      // interactive ; sandboxée (pas de preload, pas d'accès Node).
-      const win = new BrowserWindow({
-        show: false,
-        width: 1200,
-        height: 800,
-        webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
+      // Rendu PDF partagé (`ipc/pdf.ts`) : fenêtre hors écran sandboxée,
+      // navigation bloquée (le HTML vient du renderer — non fiable),
+      // fichier temporaire + save dialog. Paysage : tableaux larges.
+      return htmlToPdfFile({
+        html: input.html,
+        dialogTitle: 'Exporter le rapport en PDF',
+        defaultPath: `rapport-${input.report_id}-${todayIso()}.pdf`,
+        landscape: true,
       });
-      // Le HTML vient du renderer (non fiable) : aucune navigation hors
-      // du document ni ouverture de fenêtre ne doit être possible.
-      win.webContents.on('will-navigate', (e) => e.preventDefault());
-      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      // Le HTML transite par un fichier temporaire : plus robuste qu'une
-      // data URL (les gros rapports dépassent les limites pratiques des
-      // URLs `data:`) et supprimé dans le finally.
-      const tmp = path.join(
-        app.getPath('temp'),
-        `mastertime-rapport-${process.pid}-${Date.now()}.html`,
-      );
-      try {
-        fs.writeFileSync(tmp, input.html, 'utf8');
-        await win.loadFile(tmp);
-        const pdf = await win.webContents.printToPDF({
-          printBackground: true,
-          landscape: true, // les tableaux de rapports sont larges
-          pageSize: 'A4',
-        });
-        const res = await dialog.showSaveDialog({
-          title: 'Exporter le rapport en PDF',
-          defaultPath: `rapport-${input.report_id}-${todayIso()}.pdf`,
-          filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        });
-        if (res.canceled || !res.filePath) {
-          return apiOk({ path: null, cancelled: true });
-        }
-        fs.writeFileSync(res.filePath, pdf);
-        return apiOk({ path: res.filePath, cancelled: false });
-      } catch (err) {
-        return exportErr(err, 'exportPdf');
-      } finally {
-        try {
-          win.destroy();
-        } catch {
-          // fenêtre déjà détruite
-        }
-        try {
-          fs.unlinkSync(tmp);
-        } catch {
-          // fichier temporaire déjà absent — non bloquant
-        }
-      }
     },
   );
 }

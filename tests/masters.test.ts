@@ -35,6 +35,11 @@ import {
 } from '../electron/main/db/master.service';
 import { collectContextSemesters } from '../electron/main/db/status';
 import { currentUserId, guard } from '../electron/main/ipc/helpers';
+import {
+  applyImport,
+  exportEntity,
+  previewImport,
+} from '../electron/main/db/import.service';
 import type {
   ApiResult,
   AppUser,
@@ -1312,5 +1317,171 @@ describe('masters — garde IPC (composition des handlers)', () => {
     expect(
       all(db, "SELECT id FROM student_group WHERE master_id = ? AND name != 'G1'", f.masterId),
     ).toHaveLength(0);
+  });
+});
+
+describe('masters — temps_amenage (P14)', () => {
+  it('create/update : flag 0/1 persisté, listé ; valeur forgée → FieldError', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const f = seedFixture(db);
+
+    // Création sans flag → 0 par défaut.
+    const created = createMaster(db, uid, {
+      code: 'M-TA',
+      name: 'Master TA',
+      academic_year_id: f.yearId,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.data.temps_amenage).toBe(0);
+
+    // Création explicite à 1.
+    const paid = createMaster(db, uid, {
+      code: 'M-TP',
+      name: 'Master TP',
+      academic_year_id: f.yearId,
+      temps_amenage: true,
+    });
+    expect(paid.ok).toBe(true);
+    if (!paid.ok) return;
+    expect(paid.data.temps_amenage).toBe(1);
+
+    // Update : bascule 1 → 0 puis 0 → 1.
+    const off = updateMaster(db, uid, paid.data.id, {
+      code: 'M-TP',
+      name: 'Master TP',
+      academic_year_id: f.yearId,
+      temps_amenage: false,
+    });
+    expect(off.ok).toBe(true);
+    if (off.ok) expect(off.data.temps_amenage).toBe(0);
+    const on = updateMaster(db, uid, paid.data.id, {
+      code: 'M-TP',
+      name: 'Master TP',
+      academic_year_id: f.yearId,
+      temps_amenage: true,
+    });
+    expect(on.ok).toBe(true);
+    if (on.ok) expect(on.data.temps_amenage).toBe(1);
+    // flag visible dans la liste
+    const listed = listMasters(db).find((m) => m.id === paid.data.id);
+    expect(listed?.temps_amenage).toBe(1);
+    // et dans le détail
+    const detail = getMasterDetail(db, paid.data.id, TODAY);
+    expect(detail.ok).toBe(true);
+    if (detail.ok) expect(detail.data.master.temps_amenage).toBe(1);
+
+    // Valeurs forgées rejetées en FieldError (champ temps_amenage).
+    for (const forged of ['oui', 2, 1.5, {}]) {
+      const bad = createMaster(db, uid, {
+        code: 'M-F',
+        name: 'Forged',
+        academic_year_id: f.yearId,
+        temps_amenage: forged,
+      } as never);
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.fields?.[0].field).toBe('temps_amenage');
+    }
+  });
+
+  it('import : colonne optionnelle — absente/valeur 0-1 OK, valeur invalide rejetée', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    seedFixture(db);
+
+    // Sans la colonne → 0.
+    let applied = applyImport(
+      db,
+      uid,
+      'masters',
+      'code;nom\nM-NC;Sans colonne',
+      'IGNORER',
+    );
+    expect(applied.ok).toBe(true);
+    expect(
+      get(db, "SELECT temps_amenage FROM master WHERE code = 'M-NC'")
+        ?.temps_amenage,
+    ).toBe(0);
+
+    // Avec la colonne à 1.
+    applied = applyImport(
+      db,
+      uid,
+      'masters',
+      'code;nom;temps_amenage(0/1)\nM-PC;Payant;1',
+      'IGNORER',
+    );
+    expect(applied.ok).toBe(true);
+    expect(
+      get(db, "SELECT temps_amenage FROM master WHERE code = 'M-PC'")
+        ?.temps_amenage,
+    ).toBe(1);
+
+    // Colonne à 0.
+    applied = applyImport(
+      db,
+      uid,
+      'masters',
+      'code;nom;temps_amenage(0/1)\nM-PU;Payant 0;0',
+      'IGNORER',
+    );
+    expect(applied.ok).toBe(true);
+    expect(
+      get(db, "SELECT temps_amenage FROM master WHERE code = 'M-PU'")
+        ?.temps_amenage,
+    ).toBe(0);
+
+    // Valeur invalide : ligne en erreur au preview ET ignorée à l'apply.
+    const bad = previewImport(
+      db,
+      'masters',
+      'code;nom;temps_amenage(0/1)\nM-BAD;Bad;oui',
+    );
+    expect(bad.ok).toBe(true);
+    if (bad.ok) {
+      expect(bad.data.rows[0].status).toBe('ERREUR');
+      expect(bad.data.rows[0].errors.length).toBeGreaterThan(0);
+    }
+    const res = applyImport(
+      db,
+      uid,
+      'masters',
+      'code;nom;temps_amenage(0/1)\nM-BAD;Bad;oui',
+      'IGNORER',
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.data.inserted).toBe(0);
+      expect(res.data.errors.length).toBe(1);
+    }
+    expect(
+      get(db, "SELECT id FROM master WHERE code = 'M-BAD'"),
+    ).toBeUndefined();
+  });
+
+  it('export : temps_amenage en dernière colonne (0/1)', () => {
+    const db = freshDb();
+    const uid = admin(db).id;
+    const f = seedFixture(db);
+    const created = createMaster(db, uid, {
+      code: 'M-XP',
+      name: 'Export payant',
+      academic_year_id: f.yearId,
+      temps_amenage: true,
+    });
+    expect(created.ok).toBe(true);
+    const res = exportEntity(db, 'masters');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.columns[res.data.columns.length - 1].label).toBe(
+      'temps_amenage(0/1)',
+    );
+    const row = res.data.rows.find((r) => r['code'] === 'M-XP');
+    expect(row).toBeDefined();
+    expect(Number(row!['temps_amenage'])).toBe(1);
+    const freeRow = res.data.rows.find((r) => r['code'] === 'M-T');
+    expect(freeRow).toBeDefined();
+    expect(Number(freeRow!['temps_amenage'])).toBe(0);
   });
 });

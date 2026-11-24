@@ -804,7 +804,8 @@ describe('templateCsv', () => {
       salles: 'nom;capacite;actif(0/1)',
       professeurs: 'nom_complet;email;actif(0/1)',
       modules: 'code;nom',
-      masters: 'code;nom;filiere;departement;responsable;semestre',
+      masters:
+        'code;nom;filiere;departement;responsable;semestre;temps_amenage(0/1)',
       etudiants: 'groupe;master_code;nom_complet;external_id',
     };
     for (const [type, header] of Object.entries(expected)) {

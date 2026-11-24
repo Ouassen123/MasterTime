@@ -180,6 +180,8 @@
     "statusActif": "Actif",
     "statusArchive": "Archivé",
     "statusTous": "Tous",
+    "tempsAmenage": "Temps aménagé (payant)",
+    "tempsAmenageTag": "Temps aménagé",
     "nbModules": "Modules",
     "nbGroupes": "Groupes",
     "nbSeances": "Séances",
@@ -293,6 +295,7 @@
     "block": {
       "reported": "→ reportée"
     },
+    "clickToCreate": "Cliquer pour créer une séance",
     "detail": {
       "title": "Détail de la séance",
       "date": "Date",
@@ -362,7 +365,10 @@
       "title": "Écriture refusée — conflits détectés",
       "body": "L'opération est bloquée par les conflits suivants (BR-10) :",
       "overlap": "Chevauchement"
-    }
+    },
+    "attendanceSheet": "Feuille de présence",
+    "sheetDone": "Feuille de présence enregistrée.",
+    "sheetCancelled": "Export annulé."
   },
   "generation": {
     "title": "Génération automatique",

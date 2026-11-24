@@ -15,6 +15,7 @@ import type {
   SessionStatusInput,
 } from '../../../shared/types';
 import { apiErr } from '../../../shared/types';
+import { buildAttendanceSheetHtml } from '../db/attendance-sheet.service';
 import { checkSessionPlacement } from '../db/conflict.service';
 import {
   changeSessionStatus,
@@ -24,6 +25,7 @@ import {
   setSessionGroups,
 } from '../db/session-edit.service';
 import { currentUserId, guard, isId, isObject, type DbGetter } from './helpers';
+import { htmlToPdfFile } from './pdf';
 
 /** group_ids : tableau d'ids (ou absent). */
 function isIdArray(v: unknown): v is number[] {
@@ -91,4 +93,37 @@ export function registerSessionHandlers(getDb: DbGetter): void {
       ? apiErr('Paramètre invalide.')
       : guard(getDb, (db) => deleteSession(db, currentUserId(db), id)),
   );
+
+  /**
+   * P14 — Feuille de présence imprimable : le main génère le HTML
+   * (`attendance-sheet.service`) puis le rend en PDF via le chemin
+   * partagé `htmlToPdfFile` (hidden BrowserWindow sandboxée + save
+   * dialog — même mécanisme de sécurité que `reports:exportPdf`).
+   * Pas de `requireRole` (BR-24) : le gestionnaire imprime aussi —
+   * la feuille sert pendant la séance, sur tout statut.
+   */
+  ipcMain.handle('sessions:attendanceSheet', async (_e, id: unknown) => {
+    if (!isId(id)) {
+      return apiErr('Paramètre invalide.');
+    }
+    const db = getDb();
+    if (!db) {
+      return apiErr('Base de données non initialisée.');
+    }
+    try {
+      const doc = buildAttendanceSheetHtml(db, id);
+      if (!doc.ok) {
+        return doc;
+      }
+      return await htmlToPdfFile({
+        html: doc.data.html,
+        dialogTitle: 'Enregistrer la feuille de présence',
+        defaultPath: doc.data.suggestedName,
+        landscape: false, // A4 portrait
+      });
+    } catch (err) {
+      console.error('[ipc] attendanceSheet :', err);
+      return apiErr('Échec de la génération de la feuille de présence.');
+    }
+  });
 }

@@ -236,6 +236,8 @@ const api: WindowApi = {
       ipcRenderer.invoke('sessions:setGroups', id, groupIds),
     remove: (id: number): Promise<SessionEditResult> =>
       ipcRenderer.invoke('sessions:remove', id),
+    attendanceSheet: (id: number): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('sessions:attendanceSheet', id),
   },
   registry: {
     list: (

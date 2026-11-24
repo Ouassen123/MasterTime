@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
+  Checkbox,
   DatePicker,
   Descriptions,
   Drawer,
@@ -815,6 +816,7 @@ interface MasterFormValues {
   academic_year_id: number;
   semester_id?: number | null;
   status?: MasterStatus;
+  temps_amenage?: boolean;
 }
 
 const MASTER_FIELD_NAMES = [
@@ -826,6 +828,7 @@ const MASTER_FIELD_NAMES = [
   'academic_year_id',
   'semester_id',
   'status',
+  'temps_amenage',
 ];
 
 export function MastersPage(): React.JSX.Element {
@@ -923,6 +926,7 @@ export function MastersPage(): React.JSX.Element {
       academic_year_id: values.academic_year_id,
       semester_id: values.semester_id ?? null,
       status: values.status ?? 'ACTIF',
+      temps_amenage: values.temps_amenage === true,
     };
     const res = editing
       ? await api().masters.update(editing.id, input)
@@ -1050,13 +1054,20 @@ export function MastersPage(): React.JSX.Element {
         { text: t('masters.statusArchive'), value: 'ARCHIVE' },
       ],
       onFilter: (value, row) => row.status === value,
-      width: 110,
-      render: (_v, row) =>
-        row.status === 'ACTIF' ? (
-          <Tag color="green">{t('masters.statusActif')}</Tag>
-        ) : (
-          <Tag>{t('masters.statusArchive')}</Tag>
-        ),
+      width: 160,
+      render: (_v, row) => (
+        <Space size={4} wrap>
+          {row.status === 'ACTIF' ? (
+            <Tag color="green">{t('masters.statusActif')}</Tag>
+          ) : (
+            <Tag>{t('masters.statusArchive')}</Tag>
+          )}
+          {/* P14 : master payant (service économique différé). */}
+          {row.temps_amenage === 1 && (
+            <Tag color="blue">{t('masters.tempsAmenageTag')}</Tag>
+          )}
+        </Space>
+      ),
     },
   ];
 
@@ -1116,8 +1127,13 @@ export function MastersPage(): React.JSX.Element {
                 academic_year_id: editing.academic_year_id,
                 semester_id: editing.semester_id,
                 status: editing.status,
+                temps_amenage: editing.temps_amenage === 1,
               }
-            : { academic_year_id: currentYear?.id, status: 'ACTIF' }
+            : {
+                academic_year_id: currentYear?.id,
+                status: 'ACTIF',
+                temps_amenage: false,
+              }
         }
         onSubmit={submit}
         onClose={() => setDrawerOpen(false)}
@@ -1192,6 +1208,11 @@ export function MastersPage(): React.JSX.Element {
             ]}
           />
         </Form.Item>
+        {/* P14 : master payant — badge « Temps aménagé », filtrage du
+            futur rapport service économique (aucun traitement en v1). */}
+        <Form.Item name="temps_amenage" valuePropName="checked">
+          <Checkbox>{t('masters.tempsAmenage')}</Checkbox>
+        </Form.Item>
       </EntityDrawer>
       <Drawer
         key={detailId ?? 'closed'}
@@ -1238,11 +1259,18 @@ export function MastersPage(): React.JSX.Element {
                         {m.semester_label ?? '—'}
                       </Descriptions.Item>
                       <Descriptions.Item label={t('masters.status')}>
-                        {m.status === 'ACTIF' ? (
-                          <Tag color="green">{t('masters.statusActif')}</Tag>
-                        ) : (
-                          <Tag>{t('masters.statusArchive')}</Tag>
-                        )}
+                        <Space size={4} wrap>
+                          {m.status === 'ACTIF' ? (
+                            <Tag color="green">{t('masters.statusActif')}</Tag>
+                          ) : (
+                            <Tag>{t('masters.statusArchive')}</Tag>
+                          )}
+                          {m.temps_amenage === 1 && (
+                            <Tag color="blue">
+                              {t('masters.tempsAmenageTag')}
+                            </Tag>
+                          )}
+                        </Space>
                       </Descriptions.Item>
                     </Descriptions>
                     <Space wrap size="large">

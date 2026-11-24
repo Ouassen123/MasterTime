@@ -39,6 +39,7 @@ import {
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
+  PrinterOutlined,
   TeamOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -522,6 +523,7 @@ export function SessionDrawer(props: {
   const [refusal, setRefusal] = useState<PlacementConflict[] | null>(null);
   const [masterGroups, setMasterGroups] = useState<StudentGroupRow[]>([]);
   const [mmGroupId, setMmGroupId] = useState<number | null>(null);
+  const [printing, setPrinting] = useState(false);
   const [editForm] = Form.useForm();
   const [statusForm] = Form.useForm();
   const [groupsForm] = Form.useForm();
@@ -815,6 +817,31 @@ export function SessionDrawer(props: {
     }
   };
 
+  // -- Feuille de présence (P14) — PDF via sessions:attendanceSheet, sur
+  //    TOUTES les séances (la feuille sert pendant le cours ; la saisie
+  //    nominative reste réservée aux séances réalisées) --
+
+  const printSheet = async (): Promise<void> => {
+    if (!detail) return;
+    setPrinting(true);
+    try {
+      const res = await api().sessions.attendanceSheet(detail.session.id);
+      if (res.ok) {
+        if (res.data.cancelled) {
+          void message.info(t('sessions.sheetCancelled'));
+        } else {
+          void message.success(t('sessions.sheetDone'));
+        }
+      } else {
+        void message.error(errorMessage(res));
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   // -- Suppression --
 
   const doDelete = async (): Promise<void> => {
@@ -873,6 +900,14 @@ export function SessionDrawer(props: {
               </Dropdown>
               <Button icon={<TeamOutlined />} onClick={() => void openGroups()}>
                 {t('sessions.groups.action')}
+              </Button>
+              {/* P14 : feuille de présence PDF — toutes les séances. */}
+              <Button
+                icon={<PrinterOutlined />}
+                loading={printing}
+                onClick={() => void printSheet()}
+              >
+                {t('sessions.attendanceSheet')}
               </Button>
               <Tooltip
                 title={

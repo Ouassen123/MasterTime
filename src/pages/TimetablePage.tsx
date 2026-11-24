@@ -224,6 +224,8 @@ function OccupancyBlock(props: { occ: OccupancyRow }): React.JSX.Element | null 
           fontSize: 11,
           lineHeight: 1.25,
           color: '#4B5563',
+          // Zone bloquée : ni création ni détail — pas le curseur « cell ».
+          cursor: 'default',
         }}
       >
         <div style={{ fontWeight: 600 }}>
@@ -516,6 +518,61 @@ export function TimetablePage(): React.JSX.Element {
     setCreateOpen(true);
   };
 
+  /**
+   * P14 — Clic-création : ouvre le modal de création pré-rempli avec le
+   * jour cliqué et le créneau calculé (snap 15 min, +120 borné à 20:00).
+   * Vue « Par Master » + master sélectionné → master_id pré-rempli
+   * (le master-module reste à choisir) ; sinon master libre.
+   */
+  const openCreateAt = (
+    day: Dayjs,
+    startMin: number,
+    endMin: number,
+  ): void => {
+    createForm.resetFields();
+    setCreateDetail(null);
+    const day0 = day.startOf('day');
+    createForm.setFieldsValue({
+      master_id: undefined,
+      master_module_id: undefined,
+      professor_id: undefined,
+      room_id: undefined,
+      group_ids: [],
+      comment: undefined,
+      date: day,
+      range: [
+        day0.add(startMin, 'minute'),
+        day0.add(endMin, 'minute'),
+      ],
+    });
+    if (scope === 'master' && entityId != null) {
+      createForm.setFieldsValue({ master_id: entityId });
+      void onCreateMaster(entityId);
+    }
+    setCreateOpen(true);
+  };
+
+  /**
+   * Clic sur la zone vide d'une colonne-jour : `offsetY` = minutes
+   * depuis DAY_START (1 px = 1 min), snap 15 min. Les blocs
+   * séance/occupation ont leur propre onClick — seul un clic dont la
+   * cible est le fond de la colonne (`e.target === e.currentTarget`)
+   * déclenche la création.
+   */
+  const onDayColumnClick = (
+    d: Dayjs,
+    e: React.MouseEvent<HTMLDivElement>,
+  ): void => {
+    if (e.target !== e.currentTarget) return;
+    const span = DAY_END - DAY_START;
+    const offsetY = Math.max(0, Math.min(e.nativeEvent.offsetY, span));
+    const snapped = Math.round(offsetY / 15) * 15;
+    // ≥15 min garanti : le dernier créneau possible s'arrête à DAY_END.
+    const startMin = Math.min(DAY_START + snapped, DAY_END - 15);
+    const endMin = Math.min(startMin + 120, DAY_END);
+    openCreateAt(d, startMin, endMin);
+  };
+
   const onCreateMaster = async (masterId: number): Promise<void> => {
     createForm.setFieldsValue({
       master_module_id: undefined,
@@ -663,12 +720,15 @@ export function TimetablePage(): React.JSX.Element {
           return (
             <div
               key={key}
+              title={t('timetable.clickToCreate')}
+              onClick={(e) => onDayColumnClick(d, e)}
               style={{
                 flex: 1,
                 position: 'relative',
                 height: DAY_END - DAY_START,
                 borderLeft: '1px solid #E5E7EB',
                 overflow: 'hidden',
+                cursor: 'cell',
                 background:
                   'repeating-linear-gradient(to bottom, #fff 0, #fff 59px, #F4F5F7 59px, #F4F5F7 60px)',
               }}

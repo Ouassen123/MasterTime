@@ -258,6 +258,12 @@ export interface MasterRow {
   semester_label: string | null;
   status: MasterStatus;
   is_demo: number;
+  /**
+   * 1 = master « temps aménagé » (payant) — migration 0008. Prépare le
+   * filtrage du traitement service économique / paiement (rapport dédié
+   * en phase ultérieure ; aucun traitement en v1).
+   */
+  temps_amenage: number;
   /** master_module distincts rattachés. */
   nb_modules: number;
   nb_groupes: number;
@@ -278,6 +284,8 @@ export interface MasterInput {
   academic_year_id: number;
   semester_id?: number | null;
   status?: MasterStatus;
+  /** Master « temps aménagé » (payant) — omis = conservé (update) / 0. */
+  temps_amenage?: boolean;
 }
 
 /** Compteurs de suivi par master — mêmes règles AD-7 que les professeurs. */
@@ -1383,6 +1391,12 @@ export interface WindowApi {
     ): Promise<SessionEditResult>;
     setGroups(id: number, groupIds: number[]): Promise<SessionEditResult>;
     remove(id: number): Promise<SessionEditResult>;
+    /**
+     * Feuille de présence imprimable (P14) — le main génère le HTML,
+     * le rend en PDF (`printToPDF`) et ouvre la boîte d'enregistrement.
+     * Disponible sur TOUTES les séances (la feuille sert pendant le cours).
+     */
+    attendanceSheet(id: number): Promise<ApiResult<ReportExportFile>>;
   };
   generation: {
     run(params: GenerateParams): Promise<ApiResult<GenerationResult>>;

@@ -70,13 +70,13 @@ afterEach(() => {
 });
 
 describe('migrations', () => {
-  it('applique 0001→0007 sur une base vierge : 26 tables + index', () => {
+  it('applique 0001→0008 sur une base vierge : 26 tables + index', () => {
     const db = openTempFileDb();
     const result = runMigrations(db, {
       migrations: loadMigrationsFromDir(MIGRATIONS_DIR),
     });
-    expect(result.applied).toEqual(['0001_init.sql', '0002_perf_indexes.sql', '0003_external_occupancy.sql', '0004_professor_active.sql', '0005_session_group.sql', '0006_absence_decision.sql', '0007_licence_fixe_module_fixed.sql']);
-    // 0007 = UPDATE + ALTER (pas de table) → toujours 26 tables
+    expect(result.applied).toEqual(['0001_init.sql', '0002_perf_indexes.sql', '0003_external_occupancy.sql', '0004_professor_active.sql', '0005_session_group.sql', '0006_absence_decision.sql', '0007_licence_fixe_module_fixed.sql', '0008_master_temps_amenage.sql']);
+    // 0007/0008 = UPDATE + ALTER (pas de table) → toujours 26 tables
     expect(userTableCount(db)).toBe(26);
 
     const indexCount = get<{ c: number }>(
@@ -89,7 +89,7 @@ describe('migrations', () => {
     const versions = db
       .prepare('SELECT version FROM schema_migrations')
       .all() as { version: number }[];
-    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 
     // 0007 : master_module.is_fixed INTEGER NOT NULL DEFAULT 0
     const cols = db
@@ -98,6 +98,50 @@ describe('migrations', () => {
     const fixed = cols.find((c) => c.name === 'is_fixed');
     expect(fixed).toBeDefined();
     expect(fixed!.dflt_value).toBe('0');
+
+    // 0008 : master.temps_amenage INTEGER NOT NULL DEFAULT 0
+    const masterCols = db
+      .prepare('PRAGMA table_info(master)')
+      .all() as { name: string; dflt_value: string | null }[];
+    const ta = masterCols.find((c) => c.name === 'temps_amenage');
+    expect(ta).toBeDefined();
+    expect(ta!.dflt_value).toBe('0');
+  });
+
+  it('0008 : temps_amenage ajouté avec défaut 0 sur les masters existants', () => {
+    const db = openTempFileDb();
+    const all = loadMigrationsFromDir(MIGRATIONS_DIR);
+    // Schéma jusqu'à 0007 + un master existant, puis application de 0008.
+    runMigrations(db, { migrations: all.slice(0, 7) });
+    const yearId = Number(
+      db
+        .prepare(
+          `INSERT INTO academic_year (label, start_date, end_date)
+           VALUES ('2025-2026', '2025-09-01', '2026-08-31')`,
+        )
+        .run().lastInsertRowid,
+    );
+    db.prepare(
+      `INSERT INTO master (code, name, academic_year_id)
+       VALUES ('M-A', 'Master A', ?)`,
+    ).run(yearId);
+    runMigrations(db, { migrations: all.slice(7) });
+    const row = get<{ temps_amenage: number }>(
+      db,
+      "SELECT temps_amenage FROM master WHERE code = 'M-A'",
+    );
+    expect(row?.temps_amenage).toBe(0);
+    // Nouveau master : le défaut s'applique aussi.
+    db.prepare(
+      `INSERT INTO master (code, name, academic_year_id)
+       VALUES ('M-B', 'Master B', ?)`,
+    ).run(yearId);
+    expect(
+      get<{ temps_amenage: number }>(
+        db,
+        "SELECT temps_amenage FROM master WHERE code = 'M-B'",
+      )?.temps_amenage,
+    ).toBe(0);
   });
 
   it('0007 : external_occupancy.academic_year_id remis à NULL', () => {
@@ -146,7 +190,7 @@ describe('migrations', () => {
     runMigrations(db, { migrations });
     const second = runMigrations(db, { migrations });
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(second.alreadyApplied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(second.backupPath).toBeUndefined();
     expect(userTableCount(db)).toBe(26);
   });
@@ -184,14 +228,14 @@ describe('migrations', () => {
 
     const bad: MigrationSource[] = [
       {
-        version: 8,
-        name: '0008_partial.sql',
-        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (8, 'x'); THIS IS NOT SQL;",
+        version: 9,
+        name: '0009_partial.sql',
+        sql: "CREATE TABLE should_not_survive (id INTEGER); INSERT INTO schema_migrations VALUES (9, 'x'); THIS IS NOT SQL;",
       },
     ];
     expect(() =>
       runMigrations(db, { migrations: bad, backupDir, dbPath }),
-    ).toThrow(/0008_partial/);
+    ).toThrow(/0009_partial/);
 
     // Rien n'a été appliqué : ni table fantôme, ni version enregistrée
     expect(userTableCount(db)).toBe(tablesBefore);
@@ -201,7 +245,7 @@ describe('migrations', () => {
         "SELECT count(*) AS c FROM sqlite_master WHERE name='should_not_survive'",
       )!.c,
     ).toBe(0);
-    expect(countRows(db, 'schema_migrations')).toBe(7);
+    expect(countRows(db, 'schema_migrations')).toBe(8);
     expect(countRows(db, 'master')).toBe(mastersBefore);
 
     // Sauvegarde PRE_MIGRATION créée + enregistrée (base existante non vide)
@@ -280,7 +324,7 @@ describe('seed DÉMO', () => {
 });
 
 describe('collectDbStatus', () => {
-  it('ok path : 26 tables, migrations [0001..0007], compteurs du seed', () => {
+  it('ok path : 26 tables, migrations [0001..0008], compteurs du seed', () => {
     const db = openTempFileDb();
     runMigrations(db, { migrations: loadMigrationsFromDir(MIGRATIONS_DIR) });
     seedDemo(db);
@@ -289,7 +333,7 @@ describe('collectDbStatus', () => {
     expect(status.error).toBeNull();
     expect(status.dbPath).toBe(dbPath);
     expect(status.tableCount).toBe(26);
-    expect(status.appliedMigrations).toEqual(['0001', '0002', '0003', '0004', '0005', '0006', '0007']);
+    expect(status.appliedMigrations).toEqual(['0001', '0002', '0003', '0004', '0005', '0006', '0007', '0008']);
     expect(status.counts.master).toBe(3);
     expect(status.counts.professor).toBe(8);
     expect(status.counts.room).toBe(3);

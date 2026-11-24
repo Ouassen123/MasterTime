@@ -43,7 +43,7 @@ const MASTER_LIST_SELECT = `
   SELECT m.id, m.code, m.name, m.filiere, m.department, m.responsible_name,
          m.academic_year_id, y.label AS academic_year_label,
          m.semester_id, sem.label AS semester_label,
-         m.status, m.is_demo,
+         m.status, m.is_demo, m.temps_amenage,
          (SELECT count(*) FROM master_module mm
             WHERE mm.master_id = m.id) AS nb_modules,
          (SELECT count(*) FROM student_group g
@@ -383,6 +383,17 @@ function validateMaster(
       message: "Le statut doit être 'ACTIF' ou 'ARCHIVE'.",
     });
   }
+  // temps_amenage (P14, migration 0008) : booléen 0/1 — toute autre
+  // valeur forgée est refusée proprement, jamais stockée.
+  if (
+    input.temps_amenage != null &&
+    typeof input.temps_amenage !== 'boolean'
+  ) {
+    errors.push({
+      field: 'temps_amenage',
+      message: 'Le drapeau « temps aménagé » doit être un booléen.',
+    });
+  }
   return errors;
 }
 
@@ -400,8 +411,8 @@ export function createMaster(
       run(
         db,
         `INSERT INTO master (code, name, filiere, department, responsible_name,
-           academic_year_id, semester_id, status, is_demo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+           academic_year_id, semester_id, status, temps_amenage, is_demo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         input.code.trim(),
         input.name.trim(),
         input.filiere?.trim() || null,
@@ -410,6 +421,7 @@ export function createMaster(
         input.academic_year_id,
         input.semester_id ?? null,
         input.status ?? 'ACTIF',
+        input.temps_amenage === true ? 1 : 0,
       ).lastInsertRowid,
     ),
   );
@@ -434,7 +446,8 @@ export function updateMaster(
       db,
       `UPDATE master SET code = ?, name = ?, filiere = ?, department = ?,
          responsible_name = ?, academic_year_id = ?, semester_id = ?,
-         status = COALESCE(?, status)
+         status = COALESCE(?, status),
+         temps_amenage = COALESCE(?, temps_amenage)
        WHERE id = ?`,
       input.code.trim(),
       input.name.trim(),
@@ -444,6 +457,11 @@ export function updateMaster(
       input.academic_year_id,
       input.semester_id ?? null,
       input.status ?? null,
+      input.temps_amenage == null
+        ? null
+        : input.temps_amenage === true
+          ? 1
+          : 0,
       id,
     );
   });
