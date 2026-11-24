@@ -7,3 +7,4 @@ out/
 backups/
 *.log
 .DS_Store
+release/

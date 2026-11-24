@@ -15,6 +15,8 @@ Application de gestion des emplois du temps des Masters (Electron + React + SQLi
 | `npm test` | Tests Vitest (migrations, seed, FK, rollback) sur bases temporaires |
 | `npm run build` | Build production electron-vite → `out/` |
 | `npm run typecheck` | Vérification TypeScript stricte (renderer + main/tests) |
+| `npm run pack` | Build + packaging non compressé → `release/win-unpacked/` |
+| `npm run dist` | Build + installateur NSIS (per-user, sans admin) → `release/` |
 
 ## Structure
 

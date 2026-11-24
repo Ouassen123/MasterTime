@@ -1,0 +1,37 @@
+# electron-builder — packaging Windows (P13)
+# Installateur NSIS par utilisateur, SANS droits administrateur (PC faculté).
+appId: ma.fst.mastertime
+productName: MasterTime Tanger
+
+directories:
+  output: release
+
+# Migrations déjà embarquées dans le bundle via import.meta.glob —
+# seuls le build electron-vite et le manifeste sont nécessaires.
+files:
+  - out/**
+  - package.json
+
+asar: true
+electronLanguages:
+  - fr
+  - en-US
+
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MasterTime Tanger
+  # LCID décimal des infos de version (VIAddVersionKey /LANG) — fr-FR.
+  # NB : « fr » n'est PAS une valeur valide pour `language` (erreur NSIS).
+  language: '1036'
+  # Langue de l'interface de l'installateur (format xx_XX → MUI_LANGUAGE).
+  installerLanguages:
+    - fr_FR
