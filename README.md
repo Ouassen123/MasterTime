@@ -1,105 +1,147 @@
 # MasterTime Tanger
 
-Gestion des emplois du temps des Masters — FSJP Tanger
-(Université Abdelmalek Essaâdi).
+**Gestion administrative des emplois du temps des Masters** —
+Faculté des Sciences Juridiques et Politiques de Tanger
+(Université Abdelmalek Essaâdi, campus Boukhalef).
 
-Application de bureau **Electron + React + SQLite** (`node:sqlite`) :
-génération automatique des emplois du temps, suivi des séances,
-absences des professeurs, présences étudiantes, rapports, import/export
-CSV, paramètres et sauvegardes. Guide utilisateur :
-[`docs/GUIDE-UTILISATEUR.md`](docs/GUIDE-UTILISATEUR.md).
+Application de bureau **Windows, 100 % hors ligne** : aucune donnée ne
+quitte le poste, aucun compte, aucun abonnement.
 
-## Prérequis (développement)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Plateforme](https://img.shields.io/badge/plateforme-Windows%2010%2F11-blue)
+![Stack](https://img.shields.io/badge/stack-Electron%20%2B%20React%2019%20%2B%20SQLite-1f3864)
+![Tests](https://img.shields.io/badge/tests-358%20verts-success)
 
-- **Node.js ≥ 22.13.0** — requis pour `node:sqlite` (`DatabaseSync`
-  actif sans flag, utilisé par le main et les tests Vitest).
-- Windows 10/11 pour produire/tester l'installateur NSIS.
+---
 
-## Commandes
+## Captures d'écran
+
+| Emploi du temps — vraies données + panneau de conflits | Génération automatique |
+|:---:|:---:|
+| ![Emplois du temps](docs/screenshots/02-emploi-du-temps.png) | ![Génération](docs/screenshots/03-generation.png) |
+
+| Registre des séances (retard « J+n ») | Rapports & statistiques |
+|:---:|:---:|
+| ![Registre](docs/screenshots/04-seances.png) | ![Rapports](docs/screenshots/05-rapports.png) |
+
+<details>
+<summary>Autres pages : tableau de bord, Masters, Professeurs,
+Import/Export, Paramètres, Sauvegardes</summary>
+
+| Tableau de bord | Masters |
+|:---:|:---:|
+| ![Dashboard](docs/screenshots/01-tableau-de-bord.png) | ![Masters](docs/screenshots/06-masters.png) |
+
+| Professeurs | Import / Export |
+|:---:|:---:|
+| ![Professeurs](docs/screenshots/07-professeurs.png) | ![Import/Export](docs/screenshots/08-import-export.png) |
+
+| Paramètres | Sauvegardes |
+|:---:|:---:|
+| ![Paramètres](docs/screenshots/09-parametres.png) | ![Sauvegardes](docs/screenshots/10-sauvegardes.png) |
+
+</details>
+
+---
+
+## Fonctionnalités
+
+**Emplois du temps**
+- Vues Semaine / Mois / Année, filtrables par Master, Professeur, Salle
+- **Clic sur une cellule vide → création de séance pré-remplie**
+  (jour, heure, Master)
+- Occupations Licence = contraintes permanentes tous semestres
+- Panneau de conflits temps réel (salle, professeur, Master, groupe,
+  occupation externe) — **les conflits bloquent l'écriture**, aucun
+  contournement possible
+- Édition manuelle complète : création, déplacement, statuts
+  (prévue → réalisée / reportée / annulée), motif obligatoire tracé,
+  historique conservé
+
+**Génération automatique**
+- Modes **Compléter** (séances manquantes uniquement) et
+  **Régénérer** (remplace les prévues futures, jamais les passées)
+- Contraintes dures : chevauchements, disponibilités et absences des
+  professeurs, exceptions calendrier, capacité des salles, grille
+  horaire — répartition régulière et charge max/jour en objectifs
+- Aperçu obligatoire avant application : diff nouveau/remplacé +
+  échecs expliqués avec suggestions
+- **Modules « fixés »** : un module gelé n'est jamais déplacé par le
+  moteur
+
+**Suivi**
+- Registre central : 10+ filtres combinés, retard « J+n » sur les
+  séances non réalisées, « reste à effectuer » par module
+- Absences des professeurs → séances impactées → **décision explicite**
+  (remplaçant / report / annulation), résolution suivie
+- Présences étudiants : compteurs ou registre nominatif
+- **Feuille de présence imprimable** par séance (PDF) : tableau des
+  étudiants, case « séance assurée par l'enseignant », signature du
+  responsable — pour le circuit papier de la faculté
+
+**Exploitation**
+- 10 rapports (EDT hebdo, occupation salles, bilan heures
+  prévues/effectuées, non réalisées, absences, avancement, conflits…)
+  — exports **PDF** et **CSV compatible Excel**
+- Import CSV (salles, professeurs, modules, Masters, étudiants) avec
+  aperçu ligne à ligne et stratégie de conflit explicite — aucune
+  écriture silencieuse
+- **Masters « temps aménagé »** (payants) marqués — prépare le
+  traitement avec le service économique
+- Paramètres : créneaux horaires, exceptions calendrier (fériés,
+  examens, fermetures, vacances)
+- Sauvegardes horodatées avec rotation + **restauration atomique**
+  (sauvegarde de sécurité automatique, redémarrage)
+- Profils **Administrateur** / **Gestionnaire**, journal d'audit
+  complet de toutes les écritures
+
+## Installation (utilisateur)
+
+1. Télécharger `Master Time Tanger Setup X.Y.Z.exe` depuis les
+   [Releases](../../releases) (ou le produire via `npm run dist`).
+2. Lancer le setup — **aucun droit administrateur requis**
+   (installation par utilisateur), interface en français.
+3. Premier lancement : la base locale se crée et les **données
+   réelles FSJP** se chargent automatiquement (14 Masters, 133
+   professeurs, 17 salles, ~1 160 séances, 168 occupations Licence).
+
+Données stockées dans `%APPDATA%\MasterTime Tanger\` (base SQLite +
+dossier `backups/`).
+
+Documentation complète :
+[`docs/GUIDE-UTILISATEUR.md`](docs/GUIDE-UTILISATEUR.md)
+
+---
+
+## Développement
+
+Prérequis : **Node.js ≥ 22.13.0** (`node:sqlite` actif sans flag),
+Windows pour l'installateur.
 
 | Commande | Effet |
 |---|---|
 | `npm install` | Installe les dépendances (Electron ~150 Mo, attendu) |
-| `npm run dev` | Lance l'app Electron en mode dev (electron-vite, HMR renderer) |
-| `npm test` | Tests Vitest (migrations, services, règles métier — bases temporaires) |
-| `npm run typecheck` | Vérification TypeScript stricte (renderer + main/tests) |
-| `npm run build` | Build production electron-vite → `out/` |
-| `npm run pack` | Build + packaging non compressé → `release/win-unpacked/` |
-| `npm run dist` | Build + installateur NSIS → `release/MasterTime Tanger Setup *.exe` |
+| `npm run dev` | App en mode dev (electron-vite, HMR) |
+| `npm test` | 358 tests Vitest (bases temporaires, règles métier) |
+| `npm run typecheck` | TypeScript strict (renderer + main) |
+| `npm run build` | Build production → `out/` |
+| `npm run pack` | Packaging non compressé → `release/win-unpacked/` |
+| `npm run dist` | Installateur NSIS → `release/` |
 
-## Packaging Windows (electron-builder)
-
-Configuration dans [`electron-builder.yml`](electron-builder.yml) :
-installateur **NSIS par utilisateur** (`perMachine: false`) — aucune
-installation administrateur requise (postes de la faculté), choix du
-dossier d'installation possible, raccourcis Bureau + menu Démarrer,
-interface de l'installateur en français.
-
-- `npm run pack` → `release/win-unpacked/MasterTime Tanger.exe` : rapide,
-  permet de vérifier le contenu embarqué sans produire d'installateur.
-- `npm run dist` → `release/MasterTime Tanger Setup <version>.exe` :
-  nécessite un téléchargement réseau au premier build (outils NSIS /
-  winCodeSign, mis en cache ensuite dans `%LOCALAPPDATA%\electron-builder\Cache`).
-- Icône : `build/icon.png` (256×256) est générée par
-  `node scripts/make-icon.js` (Node pur : zlib + CRC32, aucune
-  dépendance image) ; electron-builder la convertit en `.ico` tout seul.
-
-### Données de l'application installée
-
-La base SQLite vit dans `app.getPath('userData')` →
-`%APPDATA%\MasterTime Tanger\mastertime.db` (le `productName` diffère du
-nom dev — dossier différent). **Premier lancement installé = base
-neuve** : les migrations s'appliquent puis le **jeu de données réel
-FSJP** est chargé automatiquement (17 salles, 14 Masters S3, 133
-professeurs, 93 modules, ~97 séances hebdomadaires × 12 semaines,
-168 occupations Licence). Pour récupérer les données d'une installation
-de dev : *Sauvegardes* → sauvegarde manuelle → copier le fichier `.db` →
-*Restaurer* dans l'autre environnement.
-
-## Arborescence
+Stack : Electron 44 · React 19 · Ant Design 5 · TypeScript strict ·
+SQLite natif `node:sqlite` (WAL, clés étrangères, migrations) ·
+electron-vite · electron-builder.
 
 ```
-electron/main/          processus principal (propriétaire de la DB)
-  db/                   connexion unique DatabaseSync (WAL + FK), services
-  db/migrations/        fichiers NNNN_*.sql appliqués au démarrage
-  ipc/                  handlers IPC
-  preload.ts            contextBridge → window.api
-src/                    renderer React/TS (client mince, aucun accès DB)
-shared/                 types/contrats IPC partagés main ↔ renderer
-tests/                  Vitest (bases :memory: / fichiers temporaires)
-scripts/make-icon.js    génère build/icon.png (icône de l'app)
-electron-builder.yml    packaging NSIS
-docs/                   documentation utilisateur
+electron/main/          processus principal — propriétaire unique de la DB
+  db/                   connexion DatabaseSync + services métier + migrations/
+  ipc/                  handlers IPC (contextBridge → window.api)
+src/                    renderer React — client mince, aucun accès DB
+shared/                 contrats de types main ↔ renderer
+tests/                  Vitest — migrations, services, règles métier
+docs/                   guide utilisateur + captures d'écran
+scripts/make-icon.js    génère build/icon.png (Node pur)
+electron-builder.yml    packaging NSIS (install par utilisateur, FR)
 ```
 
-## État du projet
-
-Fonctionnalités livrées :
-
-- Référentiels : Masters (groupes, master-modules), Professeurs
-  (disponibilités, absences), Modules, Salles ;
-- Emplois du temps en lecture : vues Semaine / Mois / Année, par
-  Master / Professeur / Salle, occupations externes (Licence), panneau
-  de conflits persistant ;
-- Édition manuelle des séances (création, déplacement, statuts,
-  groupes) avec blocage des conflits et motif tracé ;
-- Génération automatique **COMPLETE** / **REGENERATE** : preview avant
-  application, diff des remplacements, échecs partiels expliqués
-  (raisons + suggestions), modules « fixés » gelés ;
-- Registre central des séances : filtres combinés, pagination serveur,
-  colonne retard « J+n », « reste à effectuer » par master-module ;
-- Absences des professeurs → séances impactées → décisions
-  (remplacement / report / annulation) ;
-- Présences : compteurs ou nominatif par groupe, sur les séances
-  réalisées ;
-- 10 rapports (emploi du temps hebdo, bilan d'heures, absences,
-  avancement, occupation des salles, conflits…) + exports CSV et PDF ;
-- Import CSV avec aperçu ligne à ligne (OK / doublon / erreur) et
-  stratégie de conflit par lot ; export CSV des entités ;
-- Paramètres : créneaux horaires, exceptions calendrier (ferié, examen,
-  fermeture, vacances), rétention des sauvegardes ;
-- Sauvegardes (manuelles, automatiques, pré-migration) avec rotation
-  bornée + restauration contrôlée (sauvegarde de sécurité +
-  redémarrage) ;
-- Profils **ADMIN** / **GESTIONNAIRE** (droits vérifiés côté main),
-  journal d'audit des actions.
+Architecture détaillée : `_bmad-output/planning-artifacts/`.

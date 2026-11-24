@@ -6,6 +6,7 @@
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { closeDb, getDb } from './db/connection';
 import { bundledMigrations, runMigrations } from './db/migrate';
@@ -56,6 +57,57 @@ function createWindow(): void {
       console.error('[window] Échec loadFile :', err);
     });
   }
+
+  // Mode capture d'écran (dev/docs) : `MT_CAPTURE_DIR=<dossier>` capture
+  // chaque page listée puis quitte. Jamais actif en usage normal.
+  const captureDir = process.env.MT_CAPTURE_DIR;
+  if (captureDir) void runCapture(win, captureDir);
+}
+
+const CAPTURE_ROUTES: [string, string][] =
+  process.env.MT_CAPTURE_ONLY === 'seances-rapports'
+    ? [
+        ['04-seances', '/seances'],
+        ['05-rapports', '/rapports'],
+      ]
+    : [
+        ['01-tableau-de-bord', '/'],
+        ['02-emploi-du-temps', '/emplois-du-temps'],
+        ['03-generation', '/generation'],
+        ['04-seances', '/seances'],
+        ['05-rapports', '/rapports'],
+        ['06-masters', '/masters'],
+        ['07-professeurs', '/professeurs'],
+        ['08-import-export', '/import-export'],
+        ['09-parametres', '/parametres'],
+        ['10-sauvegardes', '/sauvegardes'],
+      ];
+
+async function runCapture(win: BrowserWindow, dir: string): Promise<void> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  await new Promise<void>((r) =>
+    win.webContents.once('did-finish-load', () => r()),
+  );
+  await sleep(3500); // rendu initial + chargement des données
+  for (const [name, route] of CAPTURE_ROUTES) {
+    await win.webContents.executeJavaScript(
+      `location.hash = '#${route}';`,
+    );
+    // Attendre que le router ait réellement appliqué la route.
+    for (let i = 0; i < 20; i++) {
+      await sleep(300);
+      const hash = await win.webContents.executeJavaScript(
+        'location.hash',
+      );
+      if (hash === `#${route}` || (route === '/' && hash === '#/'))
+        break;
+    }
+    await sleep(2000);
+    const img = await win.webContents.capturePage();
+    fs.writeFileSync(path.join(dir, `${name}.png`), img.toPNG());
+    console.log(`[capture] ${name}.png`);
+  }
+  app.exit(0);
 }
 
 app.whenReady().then(() => {
