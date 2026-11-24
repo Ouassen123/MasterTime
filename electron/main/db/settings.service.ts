@@ -34,6 +34,9 @@ import { isValidIsoDate } from './date';
 
 const MAX_SLOT_LABEL = 60;
 const MAX_EXCEPTION_LABEL = 120;
+/** Borne anti-erreur de saisie : une exception ≤ ~10 ans (3660 jours). */
+const MAX_EXCEPTION_SPAN_DAYS = 3660;
+const DAY_MS = 86_400_000;
 
 const RETENTION_KEY = 'backup_retention';
 const RETENTION_DEFAULT = 10;
@@ -158,12 +161,16 @@ export function updateTimeSlot(
   id: number,
   input: TimeSlotInput,
 ): ApiResult<TimeSlotRow> {
-  if (!getTimeSlot(db, id)) {
+  const existing = getTimeSlot(db, id);
+  if (!existing) {
     return apiErr('Créneau introuvable.');
   }
   const errors = validateTimeSlotInput(input);
   if (errors.length > 0) return apiErr(VALIDATION_ERR, errors);
-  const label = input.label?.trim() || null;
+  // `label` OMIS (undefined) → valeur existante conservée ;
+  // null/'' explicite → effacé (comportement de correction volontaire).
+  const label =
+    input.label === undefined ? existing.label : input.label?.trim() || null;
   withAudit(db, userId, 'UPDATE', 'time_slot', id, () => {
     run(
       db,
@@ -238,6 +245,16 @@ function validateExceptionInput(
     errors.push({
       field: 'end_date',
       message: 'La date de fin doit être postérieure ou égale au début.',
+    });
+  } else if (
+    startOk &&
+    endOk &&
+    (Date.parse(end_date.trim()) - Date.parse(start_date.trim())) / DAY_MS >
+      MAX_EXCEPTION_SPAN_DAYS
+  ) {
+    errors.push({
+      field: 'end_date',
+      message: `La période ne doit pas dépasser ${MAX_EXCEPTION_SPAN_DAYS} jours.`,
     });
   }
   if (
@@ -327,7 +344,9 @@ export function deleteException(
 /**
  * `backup_retention` : valeur stockée, défaut 10 si absente ou illisible,
  * bornée [1,100] (une valeur stockée hors bornes est rabattue, pas
- * d'erreur en lecture).
+ * d'erreur en lecture). Seul un entier décimal canonique (`^\d+$`)
+ * est accepté — `'0x14'`, `'1e2'`, `' 15 '`… → défaut, pas de parse
+ * exotique.
  */
 export function getRetention(db: DatabaseSync): number {
   const row = get<{ value: string }>(
@@ -335,8 +354,10 @@ export function getRetention(db: DatabaseSync): number {
     'SELECT value FROM setting WHERE key = ?',
     RETENTION_KEY,
   );
-  const n = row ? Number(row.value) : NaN;
-  if (!Number.isInteger(n)) return RETENTION_DEFAULT;
+  if (row === undefined || !/^\d+$/.test(row.value)) {
+    return RETENTION_DEFAULT;
+  }
+  const n = Number(row.value); // chiffres uniquement → conversion sûre
   return Math.min(RETENTION_MAX, Math.max(RETENTION_MIN, n));
 }
 
@@ -358,6 +379,14 @@ export function setRetention(
         message: `La rétention doit être un entier entre ${RETENTION_MIN} et ${RETENTION_MAX}.`,
       },
     ]);
+  }
+  if (db.isTransaction) {
+    // Comme `withAudit` : BEGIN IMMEDIATE imbriqué échouerait et un
+    // rollback externe laisserait la trace sans la mutation.
+    throw new Error(
+      'setRetention refusé : transaction déjà ouverte — ' +
+        "l'audit doit piloter sa propre transaction.",
+    );
   }
   db.exec('BEGIN IMMEDIATE;');
   try {

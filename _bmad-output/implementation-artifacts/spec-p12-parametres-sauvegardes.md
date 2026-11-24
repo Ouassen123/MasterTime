@@ -116,3 +116,60 @@ prévues, activer `enabled`) :
 Import/export de paramètres, gestion `app_user`/profils (existant),
 années/semestres CRUD (structurel, hors périmètre), backup chiffré,
 restauration sans redémarrage.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. **Restauration atomique** (`restoreBackup`) :
+   - Refuser `path.resolve(row.path) === path.resolve(deps.dbPath)`
+     (FieldError `id`).
+   - Copier vers `dbPath + '.restore-tmp'` puis `fs.renameSync` →
+     `dbPath` (atomique, jamais de fichier tronqué). Supprimer le tmp
+     en cas d'échec.
+   - Tout le bloc après `db.close()` dans un `try/finally` :
+     `restart()` TOUJOURS appelé une fois la copie lancée (connexion
+     morte de toute façon) ; si la copie échoue AVANT le rename, la
+     base d'origine est intacte → réouvrir la connexion via
+     `openDatabase(deps.dbPath)` et la réinjecter (`connection.current`)
+     OU appeler restart quand même — choisir le plus simple et le
+     documenter ; dans tous les cas aucune session zombie.
+2. **Sécurité AUTO récupérable** : après copie+réouverture de la base
+   restaurée, insérer la ligne `backup_history` de la sécurité
+   `avant-restauration` (path/size/kind AUTO) dans la base restaurée —
+   elle reste listable/restaurable. `restored=1` idem (déjà fait,
+   garder ; WHERE id si possible).
+3. **Orpheline VACUUM** : try/catch autour de `vacuumInto` →
+   DELETE ligne `backup_history` + unlink best-effort du fichier
+   partiel avant de propager (createBackup ET sécurité restore).
+4. **Rotation** : exclure la plus récente ligne AUTO dont le path
+   commence par `avant-restauration-` ; ne compter dans la rétention
+   que les lignes dont le fichier existe réellement.
+5. **Exception non bornée** : `end_date - start_date ≤ 3660` jours
+   (FieldError `end_date`, message FR).
+6. **RangePicker partiel** : validator custom sur les deux `range`
+   (`range?.[0] && range?.[1]` requis, message FR) dans ParamsPage.
+7. Petits :
+   - `unlinkIgnore`/`unlink` confinés aux chemins sous `backupDir`
+     (startsWith `dir + sep` normalisé) dans rotation et deleteBackup.
+   - `setRetention` : pré-check `db.isTransaction` (message clair) ;
+     après un `setRetention` réussi, l'IPC `settings:retention:set`
+     déclenche `rotateBackups` avec le `backupDir` des deps.
+   - `AuditEntry.entity_id` : `number | string | null`.
+   - Tooltips sur boutons désactivés : envelopper dans `<span>`.
+   - `updateTimeSlot` : `label` omis → conserver l'existant.
+   - ParamsPage : `end` affiché 23:59 quand stocké 1440 ; à la
+     soumission `23:59` → `end_min = 1440`.
+   - `backups:openFolder` : check de rôle DANS le try (ApiResult).
+   - `BackupsPage` : afficher `at` en heure locale
+     (`new Date(at+'Z').toLocaleString('fr-FR')`) ; en cas d'erreur
+     avec `fields`, afficher `fields[0].message` ; `busyId` libéré
+     dans un `finally`.
+   - `getRetention` : valeur non-`^\d+$` → défaut 10 (pas de parse exotique).
+8. Tests : copie échouée → base intacte + restart appelé ;
+   `path===dbPath` refusé ; sécurité réinsérée dans base restaurée ;
+   orpheline après VACUUM KO (simuler en supprimant le droit écriture
+   ou en mockant — sinon tester via path invalide) ; rotation
+   exempte avant-restauration + skip lignes mortes ; exception
+   > 3660 j refusée ; label omis préservé ; getRetention '0x14' → 10 ;
+   entity_id string accepté.

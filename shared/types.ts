@@ -1283,7 +1283,8 @@ export interface AuditEntry {
   user_name: string | null;
   action: string;
   entity: string;
-  entity_id: number | null;
+  /** rowid numérique, ou clé textuelle (ex. `setting.key` — P12). */
+  entity_id: number | string | null;
   old_values: string | null;
   new_values: string | null;
 }

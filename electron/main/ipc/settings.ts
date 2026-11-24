@@ -24,6 +24,7 @@ import {
   updateException,
   updateTimeSlot,
 } from '../db/settings.service';
+import { rotateBackups } from '../db/backup.service';
 import {
   currentUserId,
   guard,
@@ -36,7 +37,20 @@ const ADMIN = { requireRole: 'ADMIN' as const };
 
 const INVALID = (): ApiResult<never> => apiErr('Paramètres invalides.');
 
-export function registerSettingsHandlers(getDb: DbGetter): void {
+/** Contexte injecté par `ipc/index.ts` (partagé avec `BackupsIpcContext`). */
+export interface SettingsIpcContext {
+  /**
+   * `userData/backups` — la rotation BR-23 est relancée après chaque
+   * `settings:retention:set` réussi (un abaissement supprime
+   * immédiatement les sauvegardes excédentaires).
+   */
+  backupDir: string;
+}
+
+export function registerSettingsHandlers(
+  getDb: DbGetter,
+  ctx: SettingsIpcContext,
+): void {
   // -- Créneaux horaires (time_slot) --
 
   ipcMain.handle('settings:slots:list', () =>
@@ -132,6 +146,23 @@ export function registerSettingsHandlers(getDb: DbGetter): void {
   );
 
   ipcMain.handle('settings:retention:set', (_e, n: unknown) =>
-    guard(getDb, (db) => setRetention(db, currentUserId(db), n), ADMIN),
+    guard(
+      getDb,
+      (db) => {
+        const res = setRetention(db, currentUserId(db), n);
+        if (res.ok) {
+          // BR-23 : la nouvelle borne s'applique immédiatement.
+          // Best-effort : un échec de rotation n'invalide pas
+          // l'écriture déjà commitée.
+          try {
+            rotateBackups(db, ctx.backupDir);
+          } catch (e) {
+            console.error('[ipc] rotation après retention:set :', e);
+          }
+        }
+        return res;
+      },
+      ADMIN,
+    ),
   );
 }

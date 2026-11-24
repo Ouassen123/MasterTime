@@ -42,6 +42,20 @@ import type { BackupRow } from '../../shared/types';
 
 const { Title, Text } = Typography;
 
+/** 'YYYY-MM-DD HH:MM:SS' (UTC, `datetime('now')`) → heure locale FR. */
+function formatAt(at: string): string {
+  const d = new Date(at + 'Z');
+  return Number.isNaN(d.getTime()) ? at : d.toLocaleString('fr-FR');
+}
+
+/** Message le plus précis : FieldError métier s'il existe, sinon error. */
+function showError(res: {
+  error: string;
+  fields?: { message: string }[];
+}): void {
+  void message.error(res.fields?.[0]?.message ?? res.error);
+}
+
 const KIND_COLOR: Record<BackupRow['kind'], string> = {
   MANUEL: 'blue',
   AUTO: 'cyan',
@@ -87,7 +101,7 @@ export function BackupsPage(): React.JSX.Element {
     try {
       const res = await api().backups.list();
       if (res.ok) setRows(res.data);
-      else void message.error(errorMessage(res));
+      else showError(res);
     } catch (err) {
       void message.error(errorMessage(err));
     } finally {
@@ -107,7 +121,7 @@ export function BackupsPage(): React.JSX.Element {
         void message.success(t('backups.created'));
         void reload();
       } else {
-        void message.error(errorMessage(res));
+        showError(res);
       }
     } catch (err) {
       void message.error(errorMessage(err));
@@ -119,14 +133,16 @@ export function BackupsPage(): React.JSX.Element {
   const openFolder = async (): Promise<void> => {
     try {
       const res = await api().backups.openFolder();
-      if (!res.ok) void message.error(errorMessage(res));
+      if (!res.ok) showError(res);
     } catch (err) {
       void message.error(errorMessage(err));
     }
   };
 
   /** FR-52 : le processus redémarre au succès — la promesse IPC peut ne
-   *  jamais se résoudre ; un `ok` reçu (dev/test) affiche le toast. */
+   *  jamais se résoudre ; un `ok` reçu (dev/test) affiche le toast.
+   *  `busyId` est libéré dans un finally : en dev/test l'app ne meurt
+   *  pas et les boutons doivent se réactiver. */
   const restore = async (row: BackupRow): Promise<void> => {
     setBusyId(row.id);
     try {
@@ -134,11 +150,11 @@ export function BackupsPage(): React.JSX.Element {
       if (res.ok) {
         void message.success(t('backups.restored'));
       } else {
-        void message.error(errorMessage(res));
-        setBusyId(null);
+        showError(res);
       }
     } catch (err) {
       void message.error(errorMessage(err));
+    } finally {
       setBusyId(null);
     }
   };
@@ -151,7 +167,7 @@ export function BackupsPage(): React.JSX.Element {
         void message.success(t('backups.deleted'));
         void reload();
       } else {
-        void message.error(errorMessage(res));
+        showError(res);
       }
     } catch (err) {
       void message.error(errorMessage(err));
@@ -167,6 +183,7 @@ export function BackupsPage(): React.JSX.Element {
       dataIndex: 'at',
       sorter: (a, b) => a.at.localeCompare(b.at),
       defaultSortOrder: 'descend',
+      render: (v: string) => formatAt(v),
     },
     {
       key: 'kind',
@@ -221,24 +238,30 @@ export function BackupsPage(): React.JSX.Element {
             disabled={!row.exists}
           >
             <Tooltip title={!row.exists ? t('backups.missing') : undefined}>
-              <Button
-                size="small"
-                icon={<HistoryOutlined />}
-                disabled={!row.exists || busyId === row.id}
-              >
-                {t('backups.restore')}
-              </Button>
+              {/* <span> requis : un Tooltip ne fonctionne pas sur un
+                  Button désactivé (plus d'événements souris). */}
+              <span>
+                <Button
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  disabled={!row.exists || busyId === row.id}
+                >
+                  {t('backups.restore')}
+                </Button>
+              </span>
             </Tooltip>
           </Popconfirm>
           {row.kind === 'PRE_MIGRATION' ? (
             <Tooltip title={t('backups.deleteRefused')}>
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                disabled
-                aria-label={t('common.delete')}
-              />
+              <span>
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled
+                  aria-label={t('common.delete')}
+                />
+              </span>
             </Tooltip>
           ) : (
             <Popconfirm

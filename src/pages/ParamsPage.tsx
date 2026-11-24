@@ -56,16 +56,22 @@ import { CALENDAR_EXCEPTION_TYPES } from '../../shared/types';
 
 const { Title, Text } = Typography;
 
-/** Minutes → 'HH:MM' (conventions AD-7 : INTEGER minutes). */
+/**
+ * Minutes → 'HH:MM' (conventions AD-7 : INTEGER minutes).
+ * `1440` (minuit exclusif, borne haute valide d'un `end_min`) s'affiche
+ * `23:59` — l'UI ne peut pas saisir « 24:00 » et 23:59 est remappé
+ * en 1440 à la soumission (voir `SlotsTab.submit`).
+ */
 function minToHHMM(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(
-    min % 60,
+  const capped = Math.min(min, 1439);
+  return `${String(Math.floor(capped / 60)).padStart(2, '0')}:${String(
+    capped % 60,
   ).padStart(2, '0')}`;
 }
 
-/** Minutes → Dayjs à heure fixe (valeur des TimePicker). */
+/** Minutes → Dayjs à heure fixe (valeur des TimePicker — 1440 → 23:59). */
 function minToDayjs(min: number): Dayjs {
-  return dayjs().startOf('day').add(min, 'minute');
+  return dayjs().startOf('day').add(Math.min(min, 1439), 'minute');
 }
 
 /** Remappe les FieldError serveur sur les Form.Item (pattern P7b). */
@@ -140,10 +146,14 @@ function SlotsTab(): React.JSX.Element {
 
   const submit = async (): Promise<void> => {
     const values = await form.validateFields();
+    const endMin =
+      values.range[1].hour() * 60 + values.range[1].minute();
     const input: TimeSlotInput = {
       weekday: values.weekday,
       start_min: values.range[0].hour() * 60 + values.range[0].minute(),
-      end_min: values.range[1].hour() * 60 + values.range[1].minute(),
+      // « 23:59 » saisi ↔ borne de fin de journée : stocké 1440 (minuit
+      // exclusif) — convention inverse de l'affichage (minToHHMM).
+      end_min: endMin === 1439 ? 1440 : endMin,
       label: values.label?.trim() || null,
     };
     setSubmitting(true);
@@ -294,7 +304,16 @@ function SlotsTab(): React.JSX.Element {
           <Form.Item
             name="range"
             label={t('params.slots.timeRange')}
-            rules={[{ required: true, message: t('common.required') }]}
+            // RangePicker partiel : une seule borne saisie n'est pas un
+            // couple valide — validator custom (required ne suffit pas).
+            rules={[
+              {
+                validator: (_rule, v: (Dayjs | null)[] | null | undefined) =>
+                  v?.[0] && v?.[1]
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(t('common.required'))),
+              },
+            ]}
           >
             <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
           </Form.Item>
@@ -515,7 +534,16 @@ function ExceptionsTab(): React.JSX.Element {
           <Form.Item
             name="range"
             label={t('params.exceptions.range')}
-            rules={[{ required: true, message: t('common.required') }]}
+            // Même garde que le RangePicker horaire : les deux bornes
+            // sont exigées (validator custom — required ne suffit pas).
+            rules={[
+              {
+                validator: (_rule, v: (Dayjs | null)[] | null | undefined) =>
+                  v?.[0] && v?.[1]
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(t('common.required'))),
+              },
+            ]}
           >
             <DatePicker.RangePicker style={{ width: '100%' }} />
           </Form.Item>

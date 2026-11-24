@@ -38,6 +38,7 @@ import {
   updateException,
   updateTimeSlot,
 } from '../electron/main/db/settings.service';
+import { listAuditLog } from '../electron/main/db/audit.service';
 import { currentUserId, guard } from '../electron/main/ipc/helpers';
 import type { ApiResult, TimeSlotInput } from '../shared/types';
 
@@ -240,6 +241,34 @@ describe('time_slot — overlaps + CRUD', () => {
     expect(auditD).toBeDefined();
   });
 
+  it('update avec label omis conserve le libellé existant ; null explicite l’efface', () => {
+    const db = freshDb();
+    const uid = adminId(db);
+    const created = createTimeSlot(db, uid, SLOT); // label 'Matin'
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const id = created.data.id;
+
+    // `label` absent du payload → conservé.
+    const kept = updateTimeSlot(db, uid, id, {
+      weekday: 0,
+      start_min: 540,
+      end_min: 780,
+    });
+    expect(kept.ok).toBe(true);
+    if (kept.ok) expect(kept.data.label).toBe('Matin');
+
+    // `label: null` explicite → effacé.
+    const cleared = updateTimeSlot(db, uid, id, {
+      weekday: 0,
+      start_min: 540,
+      end_min: 780,
+      label: null,
+    });
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) expect(cleared.data.label).toBeNull();
+  });
+
   it('update/delete sur id inconnu → erreur propre ; payload forgé → FieldError', () => {
     const db = freshDb();
     const uid = adminId(db);
@@ -326,6 +355,30 @@ describe('calendar_exception — validation + CRUD', () => {
     ).toBe(true);
   });
 
+  it('refuse une période de plus de 3660 jours (FieldError end_date)', () => {
+    const db = freshDb();
+    const uid = adminId(db);
+    const res = createException(db, uid, {
+      start_date: '2026-01-01',
+      end_date: '2040-01-01', // ~14 ans
+      type: 'VACANCES',
+      label: 'Période irréaliste',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.fields?.map((f) => f.field)).toContain('end_date');
+    }
+    // ~9,9 ans : acceptée.
+    expect(
+      createException(db, uid, {
+        start_date: '2026-01-01',
+        end_date: '2035-11-01',
+        type: 'VACANCES',
+        label: 'Longue période valide',
+      }).ok,
+    ).toBe(true);
+  });
+
   it('update + delete audités ; id inconnu → erreur propre', () => {
     const db = freshDb();
     const uid = adminId(db);
@@ -380,6 +433,15 @@ describe('setting backup_retention', () => {
       "UPDATE setting SET value = '0' WHERE key = 'backup_retention'",
     ).run();
     expect(getRetention(db)).toBe(1);
+    // Parse exotique refusé : '0x14' n'est pas `^\d+$` → défaut 10.
+    db.prepare(
+      "UPDATE setting SET value = '0x14' WHERE key = 'backup_retention'",
+    ).run();
+    expect(getRetention(db)).toBe(10);
+    db.prepare(
+      "UPDATE setting SET value = '1e2' WHERE key = 'backup_retention'",
+    ).run();
+    expect(getRetention(db)).toBe(10);
   });
 
   it('setRetention écrit + audit entity setting (entity_id = clé)', () => {
@@ -404,6 +466,22 @@ describe('setting backup_retention', () => {
     expect(JSON.parse(audits[1].old_values!)).toMatchObject({
       value: '25',
     });
+    // entity_id textuel accepté et relu tel quel par listAuditLog
+    // (AuditEntry.entity_id : number | string | null).
+    const entry = listAuditLog(db).find((e) => e.entity === 'setting');
+    expect(entry?.entity_id).toBe('backup_retention');
+  });
+
+  it('setRetention refuse une transaction déjà ouverte (message clair)', () => {
+    const db = freshDb();
+    const uid = adminId(db);
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+      expect(() => setRetention(db, uid, 20)).toThrow(/transaction/i);
+    } finally {
+      db.exec('ROLLBACK;');
+    }
+    expect(getRetention(db)).toBe(10); // rien n'a été écrit
   });
 
   it('refuse les valeurs hors bornes ou non entières (FieldError retention)', () => {

@@ -77,19 +77,25 @@ export function registerBackupHandlers(
 
   ipcMain.handle('backups:delete', (_e, id: unknown) =>
     isId(id)
-      ? guard(getDb, (db) => deleteBackup(db, currentUserId(db), id), ADMIN)
+      ? guard(
+          getDb,
+          (db) => deleteBackup(db, currentUserId(db), ctx.backupDir, id),
+          ADMIN,
+        )
       : INVALID(),
   );
 
   ipcMain.handle('backups:openFolder', async (): Promise<ApiResult<null>> => {
-    const db = getDb();
-    if (!db) {
-      return apiErr('Base de données non initialisée.');
-    }
-    if (getCurrentProfile(db)?.role !== 'ADMIN') {
-      return apiErr('Action réservée au profil Administrateur.');
-    }
+    // Tout dans le try : getDb/getCurrentProfile peuvent lever —
+    // le contrat est ApiResult quoi qu'il arrive.
     try {
+      const db = getDb();
+      if (!db) {
+        return apiErr('Base de données non initialisée.');
+      }
+      if (getCurrentProfile(db)?.role !== 'ADMIN') {
+        return apiErr('Action réservée au profil Administrateur.');
+      }
       fs.mkdirSync(ctx.backupDir, { recursive: true });
       const err = await shell.openPath(ctx.backupDir);
       return err

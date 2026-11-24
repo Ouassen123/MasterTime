@@ -31,6 +31,13 @@ const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
 /** Kinds soumis à la rotation BR-23 (PRE_MIGRATION en est exclu). */
 const ROTATED_KINDS = "('MANUEL','AUTO')";
 
+/**
+ * Préfixe du BASENAME des sauvegardes de sécurité écrites avant une
+ * restauration — la plus récente d'entre elles est exemptée de la
+ * rotation (dernier filet de secours).
+ */
+const SAFETY_PREFIX = 'avant-restauration-';
+
 function fileExists(p: string): boolean {
   return fs.existsSync(p);
 }
@@ -42,6 +49,38 @@ function unlinkIgnore(p: string): void {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
+}
+
+/**
+ * `unlinkIgnore` confiné aux chemins situés SOUS `dir` (résolution +
+ * comparaison `root + sep`) : une ligne `backup_history` ne doit jamais
+ * provoquer la suppression d'un fichier hors du dossier de sauvegardes.
+ */
+function unlinkInside(dir: string, p: string): void {
+  const root = path.resolve(dir);
+  const target = path.resolve(p);
+  if (target !== root && target.startsWith(root + path.sep)) {
+    unlinkIgnore(target);
+  }
+}
+
+/**
+ * Nettoie une sauvegarde orpheline après un `VACUUM INTO` en échec :
+ * la ligne d'historique insérée en amont est supprimée (nettoyage
+ * technique, non audité) et le fichier partiel éventuel est effacé —
+ * best-effort, l'erreur d'origine prime.
+ */
+function cleanupOrphanBackup(
+  db: DatabaseSync,
+  id: number,
+  target: string,
+): void {
+  try {
+    run(db, 'DELETE FROM backup_history WHERE id = ?', id);
+  } catch {
+    // best-effort : la propagation de l'erreur VACUUM prime
+  }
+  unlinkIgnore(target);
 }
 
 /** Horodatage ISO sûr pour un nom de fichier (`:` et `.` → `-`). */
@@ -138,19 +177,40 @@ export function listBackups(db: DatabaseSync, dir: string): BackupRow[] {
 /**
  * Rotation BR-23 : conserve les `backup_retention` lignes les plus
  * récentes parmi MANUEL/AUTO ; les excédentaires perdent leur fichier
- * (ENOENT toléré) et leur ligne d'historique. PRE_MIGRATION est hors
- * rotation — référence historique conservée.
+ * (suppression confinée à `dir`) et leur ligne d'historique.
+ *
+ * - PRE_MIGRATION est hors rotation — référence historique conservée.
+ * - La plus récente ligne AUTO dont le basename commence par
+ *   `avant-restauration-` est EXEMPTÉE : c'est le dernier filet de
+ *   secours pris avant une restauration, il ne doit pas être roté.
+ * - Une ligne dont le fichier n'existe plus est « morte » : elle ne
+ *   consomme pas de slot de rétention et n'est pas touchée (l'UI la
+ *   montre grisée via `exists=false`).
+ *
+ * Exportée pour l'IPC `settings:retention:set` : un abaissement de la
+ * rétention applique la rotation immédiatement.
  */
-function rotateBackups(db: DatabaseSync): void {
+export function rotateBackups(db: DatabaseSync, dir: string): void {
   const retention = getRetention(db);
-  const rows = all<{ id: number; path: string }>(
+  const rows = all<{ id: number; path: string; kind: BackupKind }>(
     db,
-    `SELECT id, path FROM backup_history
+    `SELECT id, path, kind FROM backup_history
       WHERE kind IN ${ROTATED_KINDS} ORDER BY id DESC`,
   );
-  for (const r of rows.slice(retention)) {
-    unlinkIgnore(r.path);
-    run(db, 'DELETE FROM backup_history WHERE id = ?', r.id);
+  const exempt = rows.find(
+    (r) =>
+      r.kind === 'AUTO' &&
+      path.basename(r.path).startsWith(SAFETY_PREFIX),
+  );
+  let kept = 0;
+  for (const r of rows) {
+    if (exempt !== undefined && r.id === exempt.id) continue;
+    if (!fileExists(r.path)) continue; // ligne morte : ni comptée ni effacée
+    kept += 1;
+    if (kept > retention) {
+      unlinkInside(dir, r.path);
+      run(db, 'DELETE FROM backup_history WHERE id = ?', r.id);
+    }
   }
 }
 
@@ -163,9 +223,16 @@ export function createBackup(
   fs.mkdirSync(dir, { recursive: true });
   const target = freeBackupPath(dir, 'sauvegarde');
   const id = insertHistoryRow(db, userId, target, 'MANUEL');
-  vacuumInto(db, target);
+  try {
+    vacuumInto(db, target);
+  } catch (err) {
+    // Orpheline : la ligne insérée en amont + le fichier partiel sont
+    // nettoyés avant de propager l'échec du VACUUM.
+    cleanupOrphanBackup(db, id, target);
+    throw err;
+  }
   finishHistoryRow(db, id, target);
-  rotateBackups(db);
+  rotateBackups(db, dir);
   return apiOk(getBackupRow(db, id)!);
 }
 
@@ -183,14 +250,26 @@ export interface RestoreDeps {
 
 /**
  * Restauration contrôlée (FR-52) :
- * 1. validation id + présence du fichier + en-tête `SQLite format 3` ;
+ * 1. validation id + présence du fichier + en-tête `SQLite format 3`
+ *    + refus d'une ligne pointant sur la base active (`dbPath`) ;
  * 2. sauvegarde de sécurité AUTO `avant-restauration-<ts>.db` de la base
- *    courante ;
+ *    courante (orpheline nettoyée si le VACUUM échoue) ;
  * 3. `restored=1` tracé + audit UPDATE sur la ligne restaurée (base
  *    sortante — la marque durable est réécrite après la copie) ;
- * 4. fermeture de la connexion AVANT la copie sur `dbPath`, suppression
- *    des `-wal`/`-shm` orphelins (un WAL de l'ancienne base rejoué sur
- *    la restaurée la corromprait), puis `restart()` injecté.
+ * 4. fermeture de la connexion AVANT la copie ATOMIQUE
+ *    (`dbPath + '.restore-tmp'` puis `renameSync` — jamais de fichier
+ *    tronqué), suppression des `-wal`/`-shm` orphelins (un WAL de
+ *    l'ancienne base rejoué sur la restaurée la corromprait),
+ *    réinjection dans la base restaurée de `restored=1` et de la ligne
+ *    de la sécurité (elle reste listable/restaurable).
+ *
+ * `restart()` est TOUJOURS invoqué une fois `db.close()` appelé —
+ * choix assumé et documenté : la connexion injectée est morte de toute
+ * façon (en prod `app.relaunch(); app.exit(0)` termine le processus,
+ * aucune session zombie n'est possible ; en test c'est un noop et
+ * l'appelant rouvre le fichier lui-même). Si la copie échoue AVANT le
+ * rename, `dbPath` n'a jamais été touché : la base d'origine est
+ * intacte et le redémarrage la recharge.
  */
 export function restoreBackup(
   db: DatabaseSync,
@@ -213,6 +292,17 @@ export function restoreBackup(
         'restauration impossible.',
     );
   }
+  // Une ligne pointant sur la base active s'écraserait elle-même.
+  if (path.resolve(row.path) === path.resolve(deps.dbPath)) {
+    return apiErr('Restauration refusée : corrigez les champs signalés.', [
+      {
+        field: 'id',
+        message:
+          'Cette sauvegarde pointe sur la base active : ' +
+          'restauration impossible.',
+      },
+    ]);
+  }
   // Refuse un fichier renommé ou corrompu : en-tête SQLite obligatoire.
   let headerOk = false;
   const fd = fs.openSync(row.path, 'r');
@@ -234,47 +324,90 @@ export function restoreBackup(
   fs.mkdirSync(dir, { recursive: true });
   const safetyPath = freeBackupPath(dir, 'avant-restauration');
   const safetyId = insertHistoryRow(db, userId, safetyPath, 'AUTO');
-  vacuumInto(db, safetyPath);
+  try {
+    vacuumInto(db, safetyPath);
+  } catch (err) {
+    cleanupOrphanBackup(db, safetyId, safetyPath);
+    throw err;
+  }
   finishHistoryRow(db, safetyId, safetyPath);
 
-  // 3. `restored=1` + audit UPDATE (base sortante — voir note ci-dessous).
+  // 3. `restored=1` + audit UPDATE (base sortante — la marque durable
+  //    est réécrite dans la base restaurée à l'étape 4).
   withAudit(db, userId, 'UPDATE', 'backup_history', row.id, () => {
     run(db, 'UPDATE backup_history SET restored = 1 WHERE id = ?', row.id);
   });
 
   // 4. Fermeture AVANT la copie — le fichier live est alors libre.
+  //    Copie via un fichier temporaire du MÊME volume + rename atomique :
+  //    `dbPath` ne contient jamais un fichier partiellement copié.
   db.close();
-  fs.copyFileSync(row.path, deps.dbPath);
-  unlinkIgnore(deps.dbPath + '-wal');
-  unlinkIgnore(deps.dbPath + '-shm');
-
-  // Marque durable : la ligne de la sauvegarde existe dans le snapshot
-  // restauré (insérée avant le VACUUM par ce service — les lignes
-  // PRE_MIGRATION, insérées après leur snapshot par migrate.ts, sont
-  // simplement ignorées par ce UPDATE best-effort).
-  const restoredDb = new DatabaseSync(deps.dbPath);
+  const tmp = deps.dbPath + '.restore-tmp';
   try {
-    run(
-      restoredDb,
-      'UPDATE backup_history SET restored = 1 WHERE path = ?',
-      row.path,
+    fs.copyFileSync(row.path, tmp);
+    fs.renameSync(tmp, deps.dbPath);
+    unlinkIgnore(deps.dbPath + '-wal');
+    unlinkIgnore(deps.dbPath + '-shm');
+
+    // Post-copie : réinjection dans la base RESTAURÉE.
+    // - `restored=1` durable : la ligne de la sauvegarde figure dans son
+    //   propre snapshot (insérée avant le VACUUM par ce service) —
+    //   `WHERE id AND path` : best-effort si la ligne y est absente
+    //   (fichier étranger, PRE_MIGRATION insérée post-snapshot).
+    // - ligne de la sécurité `avant-restauration-*` : absente du snapshot
+    //   (créée depuis la base sortante) — réinsérée pour rester
+    //   listable et restaurable dans la base restaurée.
+    const restoredDb = new DatabaseSync(deps.dbPath);
+    try {
+      const hasHistory =
+        get<{ name: string }>(
+          restoredDb,
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'backup_history'",
+        ) !== undefined;
+      if (hasHistory) {
+        run(
+          restoredDb,
+          'UPDATE backup_history SET restored = 1 WHERE id = ? AND path = ?',
+          row.id,
+          row.path,
+        );
+        run(
+          restoredDb,
+          `INSERT INTO backup_history (path, size_bytes, kind)
+           VALUES (?, ?, 'AUTO')`,
+          safetyPath,
+          fs.statSync(safetyPath).size,
+        );
+      }
+    } finally {
+      restoredDb.close();
+    }
+    return apiOk(null);
+  } catch (err) {
+    // Échec de copie AVANT le rename → `dbPath` intact (le tmp partiel
+    // est effacé) ; échec après → la base restaurée est déjà en place.
+    // Dans les deux cas `restart()` (finally) relance proprement.
+    unlinkIgnore(tmp);
+    console.error('[backups] Échec pendant la restauration :', err);
+    return apiErr(
+      "La restauration a échoué pendant le remplacement du fichier : " +
+        "l'application va redémarrer.",
     );
   } finally {
-    restoredDb.close();
+    deps.restart();
   }
-
-  deps.restart();
-  return apiOk(null);
 }
 
 /**
  * Suppression (FR-53 — confirmation côté UI) : refuse PRE_MIGRATION
  * (référence historique — suppression refusée, FieldError `kind`),
- * sinon supprime le fichier (ENOENT toléré) + la ligne, audit DELETE.
+ * sinon supprime le fichier (ENOENT toléré, confiné à `dir`) + la
+ * ligne, audit DELETE.
  */
 export function deleteBackup(
   db: DatabaseSync,
   userId: number | null,
+  dir: string,
   id: number,
 ): ApiResult<null> {
   const row = get<{ id: number; path: string; kind: BackupKind }>(
@@ -295,7 +428,7 @@ export function deleteBackup(
       },
     ]);
   }
-  unlinkIgnore(row.path);
+  unlinkInside(dir, row.path);
   withAudit(db, userId, 'DELETE', 'backup_history', row.id, () => {
     run(db, 'DELETE FROM backup_history WHERE id = ?', row.id);
   });

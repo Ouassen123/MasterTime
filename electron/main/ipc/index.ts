@@ -46,7 +46,7 @@ export function registerIpcHandlers(getDb: DbGetter, deps: IpcDeps): void {
   registerStudentHandlers(getDb);
   registerReportHandlers(getDb);
   registerImportExportHandlers(getDb);
-  registerSettingsHandlers(getDb);
+  registerSettingsHandlers(getDb, { backupDir: deps.backups.backupDir });
   registerBackupHandlers(getDb, deps.backups);
 
   ipcMain.handle('app:context', () =>
