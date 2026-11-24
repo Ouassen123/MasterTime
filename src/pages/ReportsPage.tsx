@@ -1,5 +1,5 @@
 /**
- * ReportsPage (P10 — FR-40→44) — 10 rapports calculés côté main
+ * ReportsPage (P10 — FR-40→44, P15) — 11 rapports calculés côté main
  * (`reports:run`), présentés en table générique `columns/rows`
  * (`dir="auto"` sur les cellules — noms arabes RTL conservés), cartes
  * récap quand le rapport expose un `summary`, exports CSV
@@ -68,6 +68,7 @@ const REPORT_DEFS: { group: string; items: ReportId[] }[] = [
     group: 'suivi',
     items: [
       'bilan_heures',
+      'heures_temps_amenage',
       'non_realisees',
       'annulees_reportees',
       'absences',
@@ -94,6 +95,7 @@ const FILTERS: Record<ReportId, FilterFlags> = {
   avancement: { period: true, master: true },
   occupation_salles: { period: true, room: true },
   conflits_restes: { period: true, master: true },
+  heures_temps_amenage: { period: true, master: true, professor: true },
 };
 
 interface TableRow extends ReportRow {
@@ -331,6 +333,19 @@ export function ReportsPage(): React.JSX.Element {
     }
   };
 
+  // Le Select Master est restreint aux masters « temps aménagé » quand
+  // le rapport service économique est choisi (les autres rapports
+  // gardent la liste complète).
+  const masterOptions = useMemo(
+    () =>
+      masters
+        .filter(
+          (m) => reportId !== 'heures_temps_amenage' || m.temps_amenage === 1,
+        )
+        .map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })),
+    [masters, reportId],
+  );
+
   const reportOptions = REPORT_DEFS.map((g) => ({
     label: t(`reports.groups.${g.group}`),
     options: g.items.map((id) => ({
@@ -389,10 +404,7 @@ export function ReportsPage(): React.JSX.Element {
             style={{ minWidth: 220 }}
             value={masterId}
             onChange={setMasterId}
-            options={masters.map((m) => ({
-              value: m.id,
-              label: `${m.code} — ${m.name}`,
-            }))}
+            options={masterOptions}
           />
         )}
         {flags.professor && (

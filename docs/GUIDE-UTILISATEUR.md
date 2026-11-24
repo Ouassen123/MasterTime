@@ -68,7 +68,7 @@ rapports).
 | Emplois du temps | Calendrier en lecture (semaine/mois/année) + conflits |
 | Génération | Génération automatique, historique, previews |
 | Séances | Registre central paginé de toutes les séances |
-| Rapports | 10 rapports + exports CSV/PDF |
+| Rapports | 11 rapports + exports CSV/PDF |
 | Import/Export | Import CSV avec aperçu, export CSV des entités |
 | Paramètres *(admin)* | Créneaux horaires, exceptions, rétention |
 | Sauvegardes *(admin)* | Sauvegarde, restauration, historique |
@@ -94,8 +94,8 @@ rattachées, le refus chiffré propose l'**archivage** à la place.
 **Temps aménagé (payant)** : cochez cette case dans le formulaire du
 master pour marquer les masters en temps aménagé — le badge bleu
 « Temps aménagé » apparaît alors dans la liste et la fiche. Ce
-marquage servira au futur rapport de service économique (paiement) ;
-aucun traitement n'y est encore associé en v1. La colonne
+marquage alimente le rapport **« Heures temps aménagé »** destiné au
+service économique (paiement — voir §11). La colonne
 `temps_amenage(0/1)` est aussi reconnue à l'import CSV et présente
 dans l'export Masters.
 
@@ -279,11 +279,21 @@ Sur une séance **réalisée** (drawer de séance → volet présences) :
 
 ## 11. Rapports
 
-Menu **Rapports** : 10 rapports calculés à la demande en SQL (aucune
+Menu **Rapports** : 11 rapports calculés à la demande en SQL (aucune
 donnée stockée) — emploi du temps hebdo d'un master, planning des
 salles, programme d'un professeur, bilan d'heures, séances non
 réalisées, annulées/reportées, absences, avancement, occupation des
-salles, conflits restants.
+salles, conflits restants, heures temps aménagé.
+
+**Heures temps aménagé (service économique)** : destiné au traitement
+de paiement des Masters marqués « Temps aménagé » (§5). Le rapport ne
+compte que les séances **réalisées** et attribue les heures à
+l'**intervenant réel** — quand un remplaçant a assuré la séance, c'est
+lui qui est compté, pas le titulaire déclaré du module (différence
+avec le *Bilan des heures*). Les durées reprennent les heures réelles
+saisies, sinon le créneau planifié ; le filtre Professeur porte aussi
+sur l'intervenant réel. Récap : total des heures réalisées et nombre
+d'intervenants distincts.
 
 - Filtres contextuels : période, master, professeur, salle, semestre,
   semaine (obligatoire pour l'emploi du temps hebdo) ;

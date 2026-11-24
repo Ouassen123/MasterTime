@@ -1,5 +1,5 @@
 /**
- * Tests P10 — rapports & statistiques (`report.service`) : les 10
+ * Tests P10 + P15 — rapports & statistiques (`report.service`) : les 11
  * rapports sur fixture minimale (chiffres exacts : heures, taux,
  * retards), filtres période/entité, `reportCsv` (BOM, `;`, quoting,
  * accents), FR-44 (aucune écriture — audit vide) et l'acceptation
@@ -406,6 +406,213 @@ describe('bilan_heures', () => {
   });
 });
 
+describe('heures_temps_amenage (P15)', () => {
+  /**
+   * Fixture dédiée : master payant M-TA (titulaire déclaré T sur le
+   * master-module) + master NON payant M-NP. Le remplaçant R assure une
+   * REALISEE à la place de T — c'est lui qui est payé.
+   */
+  function seedPaiement(db: DatabaseSync): {
+    masterTa: number;
+    masterNp: number;
+    profT: number;
+    profR: number;
+    roomId: number;
+    mmTa: number;
+  } {
+    const yearId = Number(
+      run(
+        db,
+        "INSERT INTO academic_year (label, start_date, end_date, is_current) VALUES ('2026-2027', '2026-09-01', '2027-08-31', 1)",
+      ).lastInsertRowid,
+    );
+    const semId = Number(
+      run(
+        db,
+        "INSERT INTO semester (academic_year_id, label, ordinal) VALUES (?, 'S3', 3)",
+        yearId,
+      ).lastInsertRowid,
+    );
+    const masterTa = Number(
+      run(
+        db,
+        "INSERT INTO master (code, name, academic_year_id, semester_id, temps_amenage) VALUES ('M-TA', 'Master Aménagé', ?, ?, 1)",
+        yearId,
+        semId,
+      ).lastInsertRowid,
+    );
+    const masterNp = Number(
+      run(
+        db,
+        "INSERT INTO master (code, name, academic_year_id, semester_id, temps_amenage) VALUES ('M-NP', 'Master Normal', ?, ?, 0)",
+        yearId,
+        semId,
+      ).lastInsertRowid,
+    );
+    const profT = Number(
+      run(db, "INSERT INTO professor (full_name) VALUES ('Prof Titulaire')")
+        .lastInsertRowid,
+    );
+    const profR = Number(
+      run(db, "INSERT INTO professor (full_name) VALUES ('Prof Remplaçant')")
+        .lastInsertRowid,
+    );
+    const roomId = Number(
+      run(db, "INSERT INTO room (name, capacity) VALUES ('Salle P', 40)")
+        .lastInsertRowid,
+    );
+    const modId = Number(
+      run(db, "INSERT INTO module (code, name) VALUES ('MOD-PA', 'Module Pay')")
+        .lastInsertRowid,
+    );
+    const mmSql = `INSERT INTO master_module
+        (master_id, module_id, semester_id, professor_id, student_group_id,
+         volume_min, session_duration_min, planned_sessions,
+         sched_start, sched_end)
+      VALUES (?, ?, ?, ?, NULL, 1200, 120, 10, '2026-09-01', '2027-01-31')`;
+    const mmTa = Number(
+      run(db, mmSql, masterTa, modId, semId, profT).lastInsertRowid,
+    );
+    const mmNp = Number(
+      run(db, mmSql, masterNp, modId, semId, profT).lastInsertRowid,
+    );
+
+    // Remplaçant R (≠ titulaire mm) : REALISEE, actual_* complet 90 min.
+    addSession(db, mmTa, profR, roomId, '2026-10-05', 480, 600, 'REALISEE', {
+      start: 480,
+      end: 570,
+    });
+    // Titulaire T : REALISEE avec actual_* PARTIEL (start seul) →
+    // fallback sur le créneau planifié (120 min).
+    run(
+      db,
+      `INSERT INTO session
+         (master_module_id, professor_id, room_id, date, start_min, end_min,
+          status, actual_date, actual_start_min, actual_end_min)
+       VALUES (?, ?, ?, '2026-10-06', 480, 600, 'REALISEE',
+               '2026-10-06', 540, NULL)`,
+      mmTa,
+      profT,
+      roomId,
+    );
+    // Ouverte / annulée : jamais comptées par le rapport.
+    addSession(db, mmTa, profT, roomId, '2026-10-07', 480, 600, 'PREVUE');
+    addSession(db, mmTa, profT, roomId, '2026-10-08', 480, 600, 'ANNULEE');
+    // REALISEE du master NON payant : exclue du rapport.
+    addSession(db, mmNp, profT, roomId, '2026-10-05', 480, 600, 'REALISEE', {
+      start: 480,
+      end: 600,
+    });
+    return { masterTa, masterNp, profT, profR, roomId, mmTa };
+  }
+
+  it('masters temps_amenage=0 exclus ; seules les REALISEE comptent', () => {
+    const db = freshDb();
+    seedPaiement(db);
+    const r = runOk(db, 'heures_temps_amenage', {});
+    expect(r.id).toBe('heures_temps_amenage');
+    expect(r.title).toBe('Heures temps aménagé (service économique)');
+    // 2 intervenants sur M-TA ; le master M-NP n'apparaît pas.
+    expect(r.rows).toHaveLength(2);
+    expect(
+      r.rows.every((x) => String(x.master).startsWith('M-TA')),
+    ).toBe(true);
+    // PREVUE + ANNULEE non comptées : 1 seule réalisée par intervenant.
+    expect(r.rows.every((x) => x.nb_realisees === 1)).toBe(true);
+  });
+
+  it('intervenant réel payé : heures au remplaçant, pas au titulaire mm', () => {
+    const db = freshDb();
+    seedPaiement(db);
+    const r = runOk(db, 'heures_temps_amenage', {});
+    const remp = r.rows.find((x) => x.professeur === 'Prof Remplaçant')!;
+    expect(remp).toBeDefined();
+    expect(remp.nb_realisees).toBe(1);
+    // La séance du remplaçant appartient à un mm dont le titulaire
+    // déclaré est T — pourtant les heures vont à R (s.professor_id).
+    const tit = r.rows.find((x) => x.professeur === 'Prof Titulaire')!;
+    expect(tit.nb_realisees).toBe(1); // seulement sa propre REALISEE
+    // Tri : Remplaçant < Titulaire (NOCASE).
+    expect(r.rows.map((x) => x.professeur)).toEqual([
+      'Prof Remplaçant',
+      'Prof Titulaire',
+    ]);
+  });
+
+  it('actual_* complet utilisé ; paire partielle → fallback planifié', () => {
+    const db = freshDb();
+    seedPaiement(db);
+    const r = runOk(db, 'heures_temps_amenage', {});
+    const remp = r.rows.find((x) => x.professeur === 'Prof Remplaçant')!;
+    // actual 08:00–09:30 = 90 min (planifié 120).
+    expect(remp.realise_min).toBe(90);
+    expect(remp.prevu_min).toBe(120);
+    expect(remp.realise_hhmm).toBe('1 h 30');
+    const tit = r.rows.find((x) => x.professeur === 'Prof Titulaire')!;
+    // actual_start seul → paire incomplète → créneau planifié 120.
+    expect(tit.realise_min).toBe(120);
+    expect(tit.realise_hhmm).toBe('2 h 00');
+  });
+
+  it('filtres période / master / professeur (sur intervenant réel)', () => {
+    const db = freshDb();
+    const f = seedPaiement(db);
+    // date_from exclut la séance du 10-05 (remplaçant).
+    const from = runOk(db, 'heures_temps_amenage', {
+      date_from: '2026-10-06',
+    });
+    expect(from.rows.map((x) => x.professeur)).toEqual(['Prof Titulaire']);
+    // date_to incluse : borne du 10-05 garde le remplaçant seul.
+    const to = runOk(db, 'heures_temps_amenage', { date_to: '2026-10-05' });
+    expect(to.rows.map((x) => x.professeur)).toEqual(['Prof Remplaçant']);
+    // Master payant → 2 lignes ; master non payant → vide.
+    expect(
+      runOk(db, 'heures_temps_amenage', { master_id: f.masterTa }).rows,
+    ).toHaveLength(2);
+    expect(
+      runOk(db, 'heures_temps_amenage', { master_id: f.masterNp }).rows,
+    ).toHaveLength(0);
+    // professor_id filtre l'intervenant RÉEL (s.professor_id).
+    const byR = runOk(db, 'heures_temps_amenage', {
+      professor_id: f.profR,
+    });
+    expect(byR.rows).toHaveLength(1);
+    expect(byR.rows[0].professeur).toBe('Prof Remplaçant');
+    const byT = runOk(db, 'heures_temps_amenage', {
+      professor_id: f.profT,
+    });
+    expect(byT.rows).toHaveLength(1);
+    expect(byT.rows[0].professeur).toBe('Prof Titulaire');
+  });
+
+  it('récap : total réalisé (min + format H h MM) et nb intervenants', () => {
+    const db = freshDb();
+    seedPaiement(db);
+    const r = runOk(db, 'heures_temps_amenage', {});
+    // 90 (remplaçant) + 120 (titulaire) = 210.
+    expect(r.summary?.find((s) => s.key === 'total_realise_min')?.value).toBe(
+      210,
+    );
+    expect(
+      r.summary?.find((s) => s.key === 'total_realise_hhmm')?.value,
+    ).toBe('3 h 30');
+    expect(r.summary?.find((s) => s.key === 'nb_intervenants')?.value).toBe(2);
+  });
+
+  it('CSV : le rapport passe par reportCsv (chemin export générique)', () => {
+    const db = freshDb();
+    seedPaiement(db);
+    const r = runOk(db, 'heures_temps_amenage', {});
+    const csv = reportCsv(r);
+    expect(csv.charCodeAt(0)).toBe(0xfeff);
+    const lines = csv.slice(1).split('\r\n');
+    expect(lines[0]).toContain('Heures réalisées');
+    expect(lines[0]).toContain('Séances réalisées');
+    expect(csv).toContain('Prof Remplaçant');
+    expect(csv).toContain('M-TA — Master Aménagé');
+  });
+});
+
 describe('non_realisees', () => {
   it('PREVUE/REPORTEE passées dérivées via today injecté : retard exact', () => {
     const db = freshDb();
@@ -795,6 +1002,7 @@ describe('FR-44 — aucune écriture', () => {
       'avancement',
       'occupation_salles',
       'conflits_restes',
+      'heures_temps_amenage',
     ] as const;
     const before = {
       session: countRows(db, 'session'),

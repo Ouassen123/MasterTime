@@ -1,7 +1,7 @@
 /**
  * Service Rapports & statistiques (P10 — Module H : FR-40→44).
  *
- * 10 rapports calculés ENTIÈREMENT en SQL (jointures master/module/
+ * 11 rapports calculés ENTIÈREMENT en SQL (jointures master/module/
  * professeur/salle, agrégats, dérivation NON_ENCORE_REALISEE via `today`
  * injectable — AD-7) — aucune écriture, aucune valeur stockée (FR-44).
  * Chaque rapport retourne la shape générique `Report` ({id,title,
@@ -84,6 +84,7 @@ const REPORT_TITLES: Record<ReportId, string> = {
   avancement: 'Avancement par master',
   occupation_salles: "Taux d'occupation des salles",
   conflits_restes: 'Conflits restants et reste à placer',
+  heures_temps_amenage: 'Heures temps aménagé (service économique)',
 };
 
 // --- Helpers -----------------------------------------------------------------
@@ -102,6 +103,13 @@ function minToHHMM(min: number): string {
 
 function horaire(startMin: number, endMin: number): string {
   return `${minToHHMM(startMin)}–${minToHHMM(endMin)}`;
+}
+
+/** Durée lisible 'H h MM' — ex. 750 → '12 h 30' (rapport service éco.). */
+function minToHhMm(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h} h ${String(m).padStart(2, '0')}`;
 }
 
 /** Statut affiché : 'Non réalisée' dérivée (PREVUE passée — AD-7). */
@@ -1303,6 +1311,96 @@ function reportConflitsRestes(
   });
 }
 
+// --- 11. heures_temps_amenage ---------------------------------------------------------------
+
+/**
+ * Heures temps aménagé (P15 — service économique / paiement) : seules
+ * les séances REALISEE des masters `temps_amenage = 1` comptent, et les
+ * heures sont attribuées à l'intervenant RÉEL (`s.professor_id`) — un
+ * remplaçant d'absence est payé à sa place, contrairement à
+ * `bilan_heures` qui affiche le titulaire déclaré (`mm.professor_id`).
+ * `realise_min` reprend la règle `bilan_heures` : paire `actual_*`
+ * complète sinon fallback sur le créneau planifié ; `prevu_min` est la
+ * somme planifiée des mêmes séances réalisées. Groupement
+ * (professeur, master, module) ; le récap expose le total réalisé
+ * (min + format `H h MM`) et le nombre d'intervenants distincts.
+ */
+function reportHeuresTempsAmenage(
+  db: DatabaseSync,
+  f: NormFilter,
+): ApiResult<Report> {
+  const { where, params } = sessionWhere(f);
+  const rows = all<{
+    professor_id: number;
+    professor_name: string;
+    master_code: string;
+    master_name: string;
+    module_name: string;
+    nb_realisees: number;
+    realise_min: number;
+    prevu_min: number;
+  }>(
+    db,
+    `SELECT p.id AS professor_id, p.full_name AS professor_name,
+            m.code AS master_code, m.name AS master_name,
+            mo.name AS module_name,
+            count(*) AS nb_realisees,
+            sum(CASE WHEN s.actual_start_min IS NOT NULL
+                      AND s.actual_end_min IS NOT NULL
+                     THEN s.actual_end_min - s.actual_start_min
+                     ELSE s.end_min - s.start_min END) AS realise_min,
+            sum(s.end_min - s.start_min) AS prevu_min
+       FROM session s
+       JOIN master_module mm ON mm.id = s.master_module_id
+       JOIN master m ON m.id = mm.master_id
+       JOIN module mo ON mo.id = mm.module_id
+       JOIN professor p ON p.id = s.professor_id
+      WHERE m.temps_amenage = 1 AND s.status = 'REALISEE'${where}
+      GROUP BY p.id, m.id, mo.id
+      ORDER BY p.full_name COLLATE NOCASE, m.code COLLATE NOCASE,
+               mo.code COLLATE NOCASE`,
+    ...params,
+  );
+  const columns: ReportColumn[] = [
+    { key: 'professeur', label: 'Professeur' },
+    { key: 'master', label: 'Master' },
+    { key: 'module', label: 'Module' },
+    { key: 'nb_realisees', label: 'Séances réalisées' },
+    { key: 'realise_min', label: 'Heures réalisées (min)' },
+    { key: 'realise_hhmm', label: 'Heures réalisées' },
+    { key: 'prevu_min', label: 'Heures planifiées (min)' },
+  ];
+  const totRealise = rows.reduce((a, r) => a + r.realise_min, 0);
+  const nbIntervenants = new Set(rows.map((r) => r.professor_id)).size;
+  return apiOk({
+    id: 'heures_temps_amenage',
+    title: REPORT_TITLES.heures_temps_amenage,
+    columns,
+    rows: rows.map((r) => ({
+      professeur: r.professor_name,
+      master: `${r.master_code} — ${r.master_name}`,
+      module: r.module_name,
+      nb_realisees: r.nb_realisees,
+      realise_min: r.realise_min,
+      realise_hhmm: minToHhMm(r.realise_min),
+      prevu_min: r.prevu_min,
+    })),
+    summary: [
+      {
+        key: 'total_realise_min',
+        label: 'Heures réalisées (min)',
+        value: totRealise,
+      },
+      {
+        key: 'total_realise_hhmm',
+        label: 'Heures réalisées',
+        value: minToHhMm(totRealise),
+      },
+      { key: 'nb_intervenants', label: 'Intervenants', value: nbIntervenants },
+    ],
+  });
+}
+
 // --- Dispatch -----------------------------------------------------------------------------
 
 /** Cap de lignes d'un rapport — au-delà, tronqué + `truncated: true`. */
@@ -1358,6 +1456,9 @@ export function runReport(
       break;
     case 'conflits_restes':
       res = reportConflitsRestes(db, f);
+      break;
+    case 'heures_temps_amenage':
+      res = reportHeuresTempsAmenage(db, f);
       break;
   }
   if (res.ok && res.data.rows.length > MAX_REPORT_ROWS) {

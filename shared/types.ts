@@ -1051,7 +1051,7 @@ export interface StudentInput {
 // P10 — Rapports & statistiques (Module H : FR-40→44)
 // ---------------------------------------------------------------------------
 
-/** Les 10 rapports obligatoires (FR-40). */
+/** Les 10 rapports obligatoires (FR-40) + « heures_temps_amenage » (P15). */
 export const REPORT_IDS = [
   'edt_hebdo',
   'salles_planning',
@@ -1063,6 +1063,7 @@ export const REPORT_IDS = [
   'avancement',
   'occupation_salles',
   'conflits_restes',
+  'heures_temps_amenage',
 ] as const;
 export type ReportId = (typeof REPORT_IDS)[number];
 
