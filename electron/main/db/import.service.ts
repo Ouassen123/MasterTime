@@ -8,15 +8,19 @@
  *   vides ignorées, en-tête FR obligatoire et validée (ordre libre,
  *   colonnes inconnues → warning non bloquant), cap 10 000 lignes ;
  * - `previewImport` : aperçu ligne par ligne — OK / DOUBLON (unicité
- *   NOCASE par type, `match_id` de l'existant, doublons intra-fichier
- *   inclus) / ERREUR (champ requis ou type invalide, référence
- *   inexistante) ;
+ *   Unicode-complete par type — `toLowerCase()` JS identique pour
+ *   l'intra-fichier et la base existante — `match_id` de l'existant,
+ *   doublons intra-fichier inclus) / ERREUR (champ requis ou type
+ *   invalide, référence inexistante) ;
  * - `applyImport` : stratégie de conflit par lot IGNORER / FUSIONNER
  *   (champs fournis non vides) / REMPLACER (champs fournis, vides →
- *   NULL là où permis) — une SEULE transaction (BEGIN IMMEDIATE …
- *   COMMIT/ROLLBACK : un plantage milieu annule tout), une ligne
- *   `audit_log` CREATE/UPDATE par entité modifiée (même format que
- *   `withAudit`) + une ligne récap `IMPORT` par lot ; `is_demo = 0`.
+ *   NULL là où permis, `MAN-<id>` régénéré pour `student.external_id`)
+ *   — une SEULE transaction (BEGIN IMMEDIATE … COMMIT/ROLLBACK : un
+ *   plantage milieu annule tout), SAVEPOINT par ligne étudiant (pas
+ *   d'orphelin `external_id NULL` après une erreur isolée), une ligne
+ *   `audit_log` CREATE/UPDATE par entité réellement modifiée (même
+ *   format que `withAudit`) + une ligne récap `IMPORT` par lot (sautée
+ *   si aucune ligne importable) ; `is_demo = 0` inserts ET updates.
  *
  * **Export CSV** (FR-48) : dump lisible par entité — les 5 types
  * importables réutilisent les en-têtes d'import (ré-import direct
@@ -57,6 +61,31 @@ const MAX_IMPORT_ROWS = 10_000;
 const MAX_CSV_LENGTH = 16_000_000;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Borne de longueur sur les champs texte importés (anti-payload). */
+const MAX_TEXT_LEN = 200;
+
+/**
+ * Fold Unicode-complete partagé par TOUTES les comparaisons de doublons
+ * (intra-fichier `dupKey`, base existante `findMatch`, contraintes
+ * `uniquenessViolation`) — `String.toLowerCase()` JS, volontairement
+ * différent du `COLLATE NOCASE` SQLite (ASCII-only : « ÉMILE »/« émile »
+ * y passait en doublon réel).
+ */
+const fold = (s: string): string => s.toLowerCase();
+
+/** Première ligne dont `col` (valeur chaîne) égale `value` au fold. */
+function findFolded<T>(
+  rows: T[],
+  col: keyof T,
+  value: string,
+): T | undefined {
+  const target = fold(value);
+  return rows.find((r) => {
+    const cell = r[col];
+    return typeof cell === 'string' && fold(cell) === target;
+  });
+}
 
 /** Table SQL visée par chaque type d'import (audit + écritures). */
 const ENTITY_TABLE: Record<ImportEntityType, string> = {
@@ -161,6 +190,8 @@ interface ParsedCsv {
   headers: string[];
   /** Lignes de données non vides (cellules brutes, désquotées). */
   records: string[][];
+  /** Index dans `records` de la ligne au guillemet non fermé, sinon null. */
+  unclosedIndex: number | null;
 }
 
 /**
@@ -191,13 +222,23 @@ function detectDelimiter(text: string): ';' | ',' {
   return commas > semis ? ',' : ';';
 }
 
+interface SplitResult {
+  records: string[][];
+  /**
+   * Index (dans `records`) de l'enregistrement terminé par un guillemet
+   * non fermé — le reste du fichier a été absorbé par son dernier
+   * champ. La ligne est rapportée ERREUR au lieu d'être avalée.
+   */
+  unclosedIndex: number | null;
+}
+
 /**
  * Découpe le texte en enregistrements (state machine RFC-4180-light :
  * quoting `"` en début de champ, `""` littéral, sauts de ligne quotés,
  * CR/LF/CRLF acceptés). Les enregistrements entièrement vides sont
  * ignorés (lignes vides, `;;;`).
  */
-function splitRecords(text: string, delimiter: string): string[][] {
+function splitRecords(text: string, delimiter: string): SplitResult {
   const records: string[][] = [];
   let fields: string[] = [];
   let field = '';
@@ -238,32 +279,49 @@ function splitRecords(text: string, delimiter: string): string[][] {
       field += c;
     }
   }
-  // Dernier enregistrement si le fichier ne finit pas par un saut de ligne
-  // (ou s'il reste un champ en cours — quoting non fermé = ligne tronquée,
-  // acceptée telle quelle : la validation d'en-tête décidera).
+  // Dernier enregistrement si le fichier ne finit pas par un saut de ligne.
+  // Guillemet non fermé : tout le reste du fichier a été absorbé par ce
+  // champ — l'enregistrement est marqué (rapporté ERREUR par la ligne).
+  let unclosedIndex: number | null = null;
+  if (inQuotes) unclosedIndex = records.length;
   if (field !== '' || fields.length > 0 || inQuotes) pushRecord();
-  return records;
+  return { records, unclosedIndex };
 }
 
 function parseCsv(csvText: string): ApiResult<ParsedCsv> {
   const text =
     csvText.charCodeAt(0) === 0xfeff ? csvText.slice(1) : csvText;
+  // Caractère de remplacement : le décodage UTF-8 a échoué — le fichier
+  // est probablement en Latin-1/CP1252 (refus global, message explicite).
+  if (text.includes('�')) { // U+FFFD
+    return apiErr(
+      "Encodage invalide : le fichier n'est probablement pas en UTF-8 " +
+        '(Latin-1 ?) — réenregistrez-le en UTF-8 avant de l’importer.',
+    );
+  }
   const delimiter = detectDelimiter(text);
-  const records = splitRecords(text, delimiter);
-  if (records.length === 0) {
+  const split = splitRecords(text, delimiter);
+  if (split.records.length === 0) {
     return apiErr('Le fichier est vide ou illisible.');
   }
-  const headers = records[0].map((h) =>
+  const headers = split.records[0].map((h) =>
     h.trim().replace(/^\uFEFF/, ''),
   );
-  const data = records.slice(1);
+  const data = split.records.slice(1);
+  // L'en-tête occupe l'index 0 : l'index du record non fermé est
+  // rapporté aux lignes de données (un en-tête non fermé ne peut pas
+  // avoir de données derrière — la validation d'en-tête tranchera).
+  const unclosedIndex =
+    split.unclosedIndex != null && split.unclosedIndex > 0
+      ? split.unclosedIndex - 1
+      : null;
   if (data.length > MAX_IMPORT_ROWS) {
     return apiErr(
       `Fichier trop volumineux : ${data.length} lignes ` +
         `(maximum ${MAX_IMPORT_ROWS}).`,
     );
   }
-  return apiOk({ headers, records: data });
+  return apiOk({ headers, records: data, unclosedIndex });
 }
 
 // ---------------------------------------------------------------------------
@@ -326,15 +384,30 @@ function parseFlag(
 
 function parseCapacity(v: string, errors: FieldError[]): number | null {
   if (v === '') return null;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) {
+  // Entier strict : « 1e2 » ou « 3.5 » ne passent pas pour des entiers.
+  if (!/^\d+$/.test(v) || Number(v) <= 0) {
     errors.push({
       field: 'capacity',
       message: 'La capacité doit être un entier strictement positif.',
     });
     return null;
   }
-  return n;
+  return Number(v);
+}
+
+/** Borne de longueur sur un champ texte (200 caractères). */
+function checkLength(
+  value: string,
+  field: string,
+  label: string,
+  errors: FieldError[],
+): void {
+  if (value.length > MAX_TEXT_LEN) {
+    errors.push({
+      field,
+      message: `${label} ne doit pas dépasser ${MAX_TEXT_LEN} caractères.`,
+    });
+  }
 }
 
 /** Année universitaire « courante » de l'import : is_current, sinon la plus récente. */
@@ -378,6 +451,7 @@ function normalizeRow(
   switch (type) {
     case 'salles': {
       const name = req('name', 'Le nom de la salle est obligatoire.');
+      checkLength(name, 'name', 'Le nom', errors);
       const capacity = parseCapacity(parsed.capacity ?? '', errors);
       const isActive = parseFlag(parsed.is_active ?? '', 'is_active', errors);
       if (errors.length === 0) {
@@ -395,6 +469,7 @@ function normalizeRow(
         'full_name',
         'Le nom du professeur est obligatoire.',
       );
+      checkLength(fullName, 'full_name', 'Le nom complet', errors);
       const email = parsed.email ?? '';
       if (email !== '' && !EMAIL_RE.test(email)) {
         errors.push({ field: 'email', message: "Format d'email invalide." });
@@ -413,24 +488,43 @@ function normalizeRow(
     case 'modules': {
       const code = req('code', 'Le code du module est obligatoire.');
       const name = req('name', 'Le nom du module est obligatoire.');
+      checkLength(code, 'code', 'Le code', errors);
+      checkLength(name, 'name', 'Le nom', errors);
       if (errors.length === 0) values = { kind: 'modules', code, name };
       break;
     }
     case 'masters': {
       const code = req('code', 'Le code du master est obligatoire.');
       const name = req('name', 'Le nom du master est obligatoire.');
+      checkLength(code, 'code', 'Le code', errors);
+      checkLength(name, 'name', 'Le nom', errors);
+      // Doublon éventuel : le semestre se résout dans l'année du master
+      // EXISTANT (fusion cross-année cohérente), sinon l'année courante.
+      const existing =
+        code !== ''
+          ? findFolded(
+              all<{ id: number; code: string; academic_year_id: number }>(
+                db,
+                'SELECT id, code, academic_year_id FROM master',
+              ),
+              'code',
+              code,
+            )
+          : undefined;
+      const yearForSemester =
+        existing?.academic_year_id ?? ctx.academicYearId;
       let semesterId: number | null = null;
       const semRaw = parsed.semester ?? '';
       if (semRaw !== '') {
         const m = /^s?(\d+)$/i.exec(semRaw);
         const ordinal = m ? Number(m[1]) : NaN;
         const sem =
-          ctx.academicYearId != null && Number.isInteger(ordinal)
+          yearForSemester != null && Number.isInteger(ordinal)
             ? get<{ id: number }>(
                 db,
                 `SELECT id FROM semester
                   WHERE academic_year_id = ? AND ordinal = ?`,
-                ctx.academicYearId,
+                yearForSemester,
                 ordinal,
               )
             : undefined;
@@ -442,7 +536,10 @@ function normalizeRow(
         } else if (!sem) {
           errors.push({
             field: 'semester',
-            message: "Semestre inexistant dans l'année universitaire courante.",
+            message:
+              existing != null
+                ? "Semestre inexistant dans l'année du master existant."
+                : "Semestre inexistant dans l'année universitaire courante.",
           });
         } else {
           semesterId = sem.id;
@@ -469,11 +566,23 @@ function normalizeRow(
         'full_name',
         'Le nom de l’étudiant est obligatoire.',
       );
+      checkLength(fullName, 'full_name', 'Le nom complet', errors);
+      checkLength(
+        parsed.external_id ?? '',
+        'external_id',
+        "L'identifiant externe",
+        errors,
+      );
       let groupId: number | null = null;
       if (masterCode !== '') {
-        const master = get<{ id: number; status: string }>(
-          db,
-          'SELECT id, status FROM master WHERE code = ? COLLATE NOCASE',
+        // Référence résolue au fold JS (cohérent avec les doublons —
+        // volumes faibles : ~centaines de masters).
+        const master = findFolded(
+          all<{ id: number; code: string; status: string }>(
+            db,
+            'SELECT id, code, status FROM master',
+          ),
+          'code',
           masterCode,
         );
         if (!master) {
@@ -488,11 +597,13 @@ function normalizeRow(
               'Ce master est archivé : réactivez-le avant toute modification.',
           });
         } else if (groupName !== '') {
-          const group = get<{ id: number }>(
-            db,
-            `SELECT id FROM student_group
-              WHERE master_id = ? AND name = ? COLLATE NOCASE`,
-            master.id,
+          const group = findFolded(
+            all<{ id: number; name: string }>(
+              db,
+              'SELECT id, name FROM student_group WHERE master_id = ?',
+              master.id,
+            ),
+            'name',
             groupName,
           );
           if (!group) {
@@ -520,70 +631,77 @@ function normalizeRow(
 }
 
 // ---------------------------------------------------------------------------
-// Doublons — unicité NOCASE par type (cohérent avec les services P6a/P9b).
+// Doublons — unicité Unicode-complete par type : MÊME fold JS (`fold`,
+// `String.toLowerCase()`) pour l'intra-fichier `dupKey`, la base
+// existante `findMatch` et les contraintes `uniquenessViolation`. Pas de
+// `COLLATE NOCASE` : ASCII-only, « ÉMILE »/« émile » passerait en
+// doublon réel. Les candidats sont chargés puis comparés en code
+// (volumes faibles : centaines de lignes par table).
 // ---------------------------------------------------------------------------
 
 /** Clé de dédup intra-fichier + recherche DB. null = ligne en erreur. */
 function dupKey(v: NormValues): string {
   switch (v.kind) {
     case 'salles':
-      return `room:${v.name.toLowerCase()}`;
+      return `room:${fold(v.name)}`;
     case 'professeurs':
-      return `prof:${v.fullName.toLowerCase()}`;
+      return `prof:${fold(v.fullName)}`;
     case 'modules':
-      return `module:${v.code.toLowerCase()}`;
+      return `module:${fold(v.code)}`;
     case 'masters':
-      return `master:${v.code.toLowerCase()}`;
+      return `master:${fold(v.code)}`;
     case 'etudiants':
       return v.externalId != null
-        ? `student:${v.groupId}:ext:${v.externalId.toLowerCase()}`
-        : `student:${v.groupId}:name:${v.fullName.toLowerCase()}`;
+        ? `student:${v.groupId}:ext:${fold(v.externalId)}`
+        : `student:${v.groupId}:name:${fold(v.fullName)}`;
   }
 }
 
-/** Id de l'existant (doublon NOCASE) ou undefined. */
+/** Id de l'existant (doublon au fold JS) ou undefined. */
 function findMatch(db: DatabaseSync, v: NormValues): number | undefined {
   switch (v.kind) {
     case 'salles':
-      return get<{ id: number }>(
-        db,
-        'SELECT id FROM room WHERE name = ? COLLATE NOCASE',
+      return findFolded(
+        all<{ id: number; name: string }>(db, 'SELECT id, name FROM room'),
+        'name',
         v.name,
       )?.id;
     case 'professeurs':
-      return get<{ id: number }>(
-        db,
-        'SELECT id FROM professor WHERE full_name = ? COLLATE NOCASE',
+      return findFolded(
+        all<{ id: number; full_name: string }>(
+          db,
+          'SELECT id, full_name FROM professor',
+        ),
+        'full_name',
         v.fullName,
       )?.id;
     case 'modules':
-      return get<{ id: number }>(
-        db,
-        'SELECT id FROM module WHERE code = ? COLLATE NOCASE',
+      return findFolded(
+        all<{ id: number; code: string }>(db, 'SELECT id, code FROM module'),
+        'code',
         v.code,
       )?.id;
     case 'masters':
-      return get<{ id: number }>(
-        db,
-        'SELECT id FROM master WHERE code = ? COLLATE NOCASE',
+      return findFolded(
+        all<{ id: number; code: string }>(db, 'SELECT id, code FROM master'),
+        'code',
         v.code,
       )?.id;
-    case 'etudiants':
+    case 'etudiants': {
+      const students = all<{
+        id: number;
+        external_id: string | null;
+        full_name: string;
+      }>(
+        db,
+        `SELECT id, external_id, full_name FROM student
+          WHERE student_group_id = ?`,
+        v.groupId,
+      );
       return v.externalId != null
-        ? get<{ id: number }>(
-            db,
-            `SELECT id FROM student
-              WHERE student_group_id = ? AND external_id = ? COLLATE NOCASE`,
-            v.groupId,
-            v.externalId,
-          )?.id
-        : get<{ id: number }>(
-            db,
-            `SELECT id FROM student
-              WHERE student_group_id = ? AND full_name = ? COLLATE NOCASE`,
-            v.groupId,
-            v.fullName,
-          )?.id;
+        ? findFolded(students, 'external_id', v.externalId)?.id
+        : findFolded(students, 'full_name', v.fullName)?.id;
+    }
   }
 }
 
@@ -591,6 +709,7 @@ function findMatch(db: DatabaseSync, v: NormValues): number | undefined {
  * Contraintes d'unicité métier hors clé de doublon (le schéma ne les
  * impose pas toutes : `module.name` n'est UNIQUE qu'au niveau service ;
  * l'index `ux_student_group_ext` couvre external_id par groupe).
+ * Comparaison au même fold JS que `findMatch`/`dupKey` (Unicode-complet).
  * Appelée avant INSERT et avant UPDATE de fusion — l'id de l'entité
  * fusionnée est exclu.
  */
@@ -601,24 +720,29 @@ function uniquenessViolation(
 ): string | null {
   switch (v.kind) {
     case 'modules': {
-      const dup = get<{ id: number }>(
-        db,
-        'SELECT id FROM module WHERE name = ? COLLATE NOCASE AND id != ?',
+      const dup = findFolded(
+        all<{ id: number; name: string }>(
+          db,
+          'SELECT id, name FROM module WHERE id != ?',
+          excludeId ?? -1,
+        ),
+        'name',
         v.name,
-        excludeId ?? -1,
       );
       return dup ? 'Un module porte déjà ce nom.' : null;
     }
     case 'etudiants': {
       if (v.externalId == null) return null;
-      const dup = get<{ id: number }>(
-        db,
-        `SELECT id FROM student
-          WHERE student_group_id = ? AND external_id = ? COLLATE NOCASE
-            AND id != ?`,
-        v.groupId,
+      const dup = findFolded(
+        all<{ id: number; external_id: string | null }>(
+          db,
+          `SELECT id, external_id FROM student
+            WHERE student_group_id = ? AND id != ?`,
+          v.groupId,
+          excludeId ?? -1,
+        ),
+        'external_id',
         v.externalId,
-        excludeId ?? -1,
       );
       return dup
         ? 'Un étudiant porte déjà cet identifiant dans ce groupe.'
@@ -664,9 +788,17 @@ function prepare(
   headers.forEach((h, i) => {
     if (specHeaders.has(h) && !colIndex.has(h)) colIndex.set(h, i);
   });
-  const unknownColumns = headers.filter(
-    (h) => h !== '' && !specHeaders.has(h),
-  );
+  const unknownColumns = [
+    ...new Set(headers.filter((h) => h !== '' && !specHeaders.has(h))),
+  ];
+  // En-tête dupliquée → warning non bloquant (la 1re occurrence est
+  // utilisée ; la 2e est ignorée par `colIndex`).
+  const seenHeaders = new Set<string>();
+  for (const h of headers) {
+    if (h === '') continue;
+    if (seenHeaders.has(h)) unknownColumns.push(`${h} (dupliquée)`);
+    seenHeaders.add(h);
+  }
   const missing = spec.filter((c) => c.required && !colIndex.has(c.header));
   if (missing.length > 0) {
     return apiErr(
@@ -708,7 +840,19 @@ function prepare(
     // stratégie s'appliquera à l'entité insérée par la 1re occurrence).
     matchIds.push(dbMatch ?? (fileMatch ? -1 : undefined));
   });
-  const columns = headers.filter((h) => colIndex.has(h));
+  // Guillemet non fermé : le dernier record a absorbé la fin du fichier
+  // dans un champ géant — il est rapporté ERREUR au lieu d'être avalé.
+  const unclosed = parsed.data.unclosedIndex;
+  if (unclosed != null && unclosed < rows.length) {
+    const bad = rows[unclosed];
+    bad.errors.push({
+      field: '_csv',
+      message:
+        'Guillemet non fermé : cette ligne a absorbé la fin du fichier.',
+    });
+    bad.values = null;
+  }
+  const columns = [...new Set(headers.filter((h) => colIndex.has(h)))];
   return apiOk({ columns, unknownColumns, rows, matchIds });
 }
 
@@ -782,7 +926,7 @@ function auditedWrite(
   entity: string,
   entityId: number | null,
   fn: () => number | void,
-): number {
+): { id: number; changed: boolean } {
   let id = entityId;
   const before = id != null ? readEntityRow(db, entity, id) : undefined;
   const produced = fn();
@@ -793,7 +937,8 @@ function auditedWrite(
   const after = readEntityRow(db, entity, id);
   const oldJson = before === undefined ? null : JSON.stringify(before);
   const newJson = after === undefined ? null : JSON.stringify(after);
-  if (oldJson !== newJson) {
+  const changed = oldJson !== newJson;
+  if (changed) {
     run(
       db,
       `INSERT INTO audit_log (user_id, action, entity, entity_id, old_values, new_values)
@@ -806,7 +951,7 @@ function auditedWrite(
       newJson,
     );
   }
-  return id;
+  return { id, changed };
 }
 
 const KEEP = Symbol('keep');
@@ -846,7 +991,7 @@ function insertRow(
             v.isActive ?? 1,
           ).lastInsertRowid,
         ),
-      );
+      ).id;
     case 'professeurs':
       return auditedWrite(db, userId, 'CREATE', 'professor', null, () =>
         Number(
@@ -859,7 +1004,7 @@ function insertRow(
             v.isActive ?? 1,
           ).lastInsertRowid,
         ),
-      );
+      ).id;
     case 'modules':
       return auditedWrite(db, userId, 'CREATE', 'module', null, () =>
         Number(
@@ -870,7 +1015,7 @@ function insertRow(
             v.name,
           ).lastInsertRowid,
         ),
-      );
+      ).id;
     case 'masters':
       return auditedWrite(db, userId, 'CREATE', 'master', null, () =>
         Number(
@@ -888,31 +1033,47 @@ function insertRow(
             v.semesterId,
           ).lastInsertRowid,
         ),
-      );
+      ).id;
     case 'etudiants':
       return auditedWrite(db, userId, 'CREATE', 'student', null, () => {
-        const id = Number(
-          run(
-            db,
-            `INSERT INTO student (student_group_id, external_id, full_name, is_demo)
-             VALUES (?, ?, ?, 0)`,
-            v.groupId,
-            v.externalId,
-            v.fullName,
-          ).lastInsertRowid,
-        );
-        if (v.externalId == null) {
-          // Règle P9b : l'index ux_student_group_ext coalesce NULL→'' —
-          // identifiant synthétique MAN-<id> pour garantir l'unicité.
-          run(
-            db,
-            'UPDATE student SET external_id = ? WHERE id = ?',
-            `MAN-${id}`,
-            id,
+        // SAVEPOINT par ligne : INSERT (external_id NULL) + UPDATE
+        // MAN-<id> sont atomiques — un échec de l'UPDATE (ex. collision
+        // d'unicité) défait l'INSERT au lieu de laisser un orphelin
+        // `external_id NULL` derrière l'erreur isolée.
+        db.exec('SAVEPOINT import_student_row');
+        try {
+          const id = Number(
+            run(
+              db,
+              `INSERT INTO student (student_group_id, external_id, full_name, is_demo)
+               VALUES (?, ?, ?, 0)`,
+              v.groupId,
+              v.externalId,
+              v.fullName,
+            ).lastInsertRowid,
           );
+          if (v.externalId == null) {
+            // Règle P9b : l'index ux_student_group_ext coalesce NULL→'' —
+            // identifiant synthétique MAN-<id> pour garantir l'unicité.
+            run(
+              db,
+              'UPDATE student SET external_id = ? WHERE id = ?',
+              `MAN-${id}`,
+              id,
+            );
+          }
+          db.exec('RELEASE import_student_row');
+          return id;
+        } catch (err) {
+          try {
+            db.exec('ROLLBACK TO import_student_row');
+            db.exec('RELEASE import_student_row');
+          } catch {
+            // savepoint déjà défait — l'erreur d'origine prime
+          }
+          throw err;
         }
-        return id;
-      });
+      }).id;
   }
 }
 
@@ -920,7 +1081,12 @@ function insertRow(
  * UPDATE d'un doublon selon la stratégie. Les colonnes absentes du
  * fichier sont conservées (KEEP) ; FUSIONNER ne touche que les champs
  * fournis non vides ; REMPLACER applique tous les champs fournis
- * (vides → NULL là où permis, défaut pour les colonnes NOT NULL).
+ * (vides → NULL là où permis, défaut pour les colonnes NOT NULL,
+ * `MAN-<id>` régénéré pour `student.external_id`). Tout UPDATE écrivant
+ * au moins un champ force `is_demo = 0` (donnée réelle fusionnée dans
+ * une ligne démo — `room` n'a pas de colonne `is_demo`).
+ * Retourne `true` si la ligne a réellement changé (sinon aucun audit
+ * n'est écrit et l'appelant compte la ligne en `ignored`, pas `merged`).
  */
 function updateRow(
   db: DatabaseSync,
@@ -930,7 +1096,7 @@ function updateRow(
   provided: Set<string>,
   parsed: Record<string, string>,
   strategy: ImportStrategy,
-): void {
+): boolean {
   const merge = <T extends string | number | null>(
     key: string,
     value: T,
@@ -942,7 +1108,7 @@ function updateRow(
     case 'salles': {
       const capacity = merge('capacity', v.capacity, null);
       const isActive = merge('is_active', v.isActive ?? 1, 1);
-      auditedWrite(db, userId, 'UPDATE', 'room', id, () => {
+      return auditedWrite(db, userId, 'UPDATE', 'room', id, () => {
         run(
           db,
           `UPDATE room SET name = ?,
@@ -956,16 +1122,15 @@ function updateRow(
           isActive === KEEP ? null : isActive,
           id,
         );
-      });
-      return;
+      }).changed;
     }
     case 'professeurs': {
       const email = merge('email', v.email, null);
       const isActive = merge('is_active', v.isActive ?? 1, 1);
-      auditedWrite(db, userId, 'UPDATE', 'professor', id, () => {
+      return auditedWrite(db, userId, 'UPDATE', 'professor', id, () => {
         run(
           db,
-          `UPDATE professor SET full_name = ?,
+          `UPDATE professor SET full_name = ?, is_demo = 0,
              email = CASE WHEN ? THEN email ELSE ? END,
              is_active = CASE WHEN ? THEN is_active ELSE ? END
            WHERE id = ?`,
@@ -976,21 +1141,19 @@ function updateRow(
           isActive === KEEP ? null : isActive,
           id,
         );
-      });
-      return;
+      }).changed;
     }
     case 'modules': {
       // code + nom obligatoires : toujours fournis.
-      auditedWrite(db, userId, 'UPDATE', 'module', id, () => {
+      return auditedWrite(db, userId, 'UPDATE', 'module', id, () => {
         run(
           db,
-          'UPDATE module SET code = ?, name = ? WHERE id = ?',
+          'UPDATE module SET code = ?, name = ?, is_demo = 0 WHERE id = ?',
           v.code,
           v.name,
           id,
         );
-      });
-      return;
+      }).changed;
     }
     case 'masters': {
       const filiere = merge('filiere', v.filiere, null);
@@ -1001,10 +1164,10 @@ function updateRow(
         null,
       );
       const semester = merge('semester', v.semesterId, null);
-      auditedWrite(db, userId, 'UPDATE', 'master', id, () => {
+      return auditedWrite(db, userId, 'UPDATE', 'master', id, () => {
         run(
           db,
-          `UPDATE master SET code = ?, name = ?,
+          `UPDATE master SET code = ?, name = ?, is_demo = 0,
              filiere = CASE WHEN ? THEN filiere ELSE ? END,
              department = CASE WHEN ? THEN department ELSE ? END,
              responsible_name = CASE WHEN ? THEN responsible_name ELSE ? END,
@@ -1022,15 +1185,16 @@ function updateRow(
           semester === KEEP ? null : semester,
           id,
         );
-      });
-      return;
+      }).changed;
     }
     case 'etudiants': {
-      const externalId = merge('external_id', v.externalId, null);
-      auditedWrite(db, userId, 'UPDATE', 'student', id, () => {
+      // REMPLACER + external_id vide → `MAN-<id>` régénéré (jamais
+      // NULL : deux NULL coalescés '' violeraient ux_student_group_ext).
+      const externalId = merge('external_id', v.externalId, `MAN-${id}`);
+      return auditedWrite(db, userId, 'UPDATE', 'student', id, () => {
         run(
           db,
-          `UPDATE student SET full_name = ?,
+          `UPDATE student SET full_name = ?, is_demo = 0,
              external_id = CASE WHEN ? THEN external_id ELSE ? END
            WHERE id = ?`,
           v.fullName,
@@ -1038,8 +1202,7 @@ function updateRow(
           externalId === KEEP ? null : externalId,
           id,
         );
-      });
-      return;
+      }).changed;
     }
   }
 }
@@ -1116,7 +1279,7 @@ export function applyImport(
             result.errors.push({ n: row.n, message: violation });
             continue;
           }
-          updateRow(
+          const changed = updateRow(
             db,
             userId,
             matchId,
@@ -1125,7 +1288,11 @@ export function applyImport(
             row.parsed,
             strat,
           );
-          result.merged++;
+          // `merged` ne compte que les UPDATE réellement effectifs ;
+          // un doublon fusionné identique n'écrit rien (ni audit) et
+          // est compté `ignored`.
+          if (changed) result.merged++;
+          else result.ignored++;
         }
       } catch (err) {
         if (isUniqueViolation(err)) {
@@ -1141,22 +1308,26 @@ export function applyImport(
         }
       }
     }
-    // Récap BR-20 : une ligne audit_log IMPORT par lot.
-    run(
-      db,
-      `INSERT INTO audit_log (user_id, action, entity, entity_id, old_values, new_values)
-       VALUES (?, 'IMPORT', ?, NULL, NULL, ?)`,
-      userId,
-      entity,
-      JSON.stringify({
-        type,
-        strategy: strat,
-        inserted: result.inserted,
-        merged: result.merged,
-        ignored: result.ignored,
-        errors: result.errors.length,
-      }),
-    );
+    // Récap BR-20 : une ligne audit_log IMPORT par lot — sauté si
+    // aucune ligne n'était importable (toutes en erreur) : l'audit
+    // trace les modifications réelles, pas les lots sans effet.
+    if (result.inserted + result.merged + result.ignored > 0) {
+      run(
+        db,
+        `INSERT INTO audit_log (user_id, action, entity, entity_id, old_values, new_values)
+         VALUES (?, 'IMPORT', ?, NULL, NULL, ?)`,
+        userId,
+        entity,
+        JSON.stringify({
+          type,
+          strategy: strat,
+          inserted: result.inserted,
+          merged: result.merged,
+          ignored: result.ignored,
+          errors: result.errors.length,
+        }),
+      );
+    }
     db.exec('COMMIT;');
   } catch (err) {
     try {
@@ -1376,10 +1547,24 @@ const EXPORT_DEFS: Record<
       }
       return all<Row>(
         db,
+        // `groupe` = noms de TOUS les groupes de la séance : groupe du
+        // master_module ∪ session_group (multi-groupes, même définition
+        // que conflict.service) — GROUP_CONCAT DISTINCT « + »-séparés.
         `SELECT s.date, s.start_min, s.end_min, s.status,
                 m.code AS master_code, m.name AS master,
                 mo.code AS module_code, mo.name AS module,
-                g.name AS groupe, p.full_name AS professeur,
+                (SELECT GROUP_CONCAT(name, ' + ')
+                   FROM (SELECT g2.name AS name
+                           FROM student_group g2
+                          WHERE g2.id = mm.student_group_id
+                          UNION
+                         SELECT g3.name
+                           FROM session_group sg
+                           JOIN student_group g3
+                             ON g3.id = sg.student_group_id
+                          WHERE sg.session_id = s.id
+                          ORDER BY name)) AS groupe,
+                p.full_name AS professeur,
                 r.name AS salle, s.actual_date, s.actual_start_min,
                 s.actual_end_min, s.comment AS commentaire
            FROM session s
@@ -1388,7 +1573,6 @@ const EXPORT_DEFS: Record<
            JOIN module mo ON mo.id = mm.module_id
            JOIN professor p ON p.id = s.professor_id
            JOIN room r ON r.id = s.room_id
-           LEFT JOIN student_group g ON g.id = mm.student_group_id
           ORDER BY s.date, s.start_min, s.id`,
       ).map((r) => ({
         date: r.date,

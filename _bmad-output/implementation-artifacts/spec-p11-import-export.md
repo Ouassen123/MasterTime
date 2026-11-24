@@ -124,3 +124,36 @@ pour les deux profils — décision, documenter).
   mm×prof×salle) mérite son propre spec avec preview de conflits.
 - Stratégie par ligne (pas par lot) : BR-21 dit « par lot » —
   conforme, pas de mixte en v1.
+
+---
+
+## Revue (3 couches) — patches exigés
+
+1. **Doublons non-ASCII** : `dupKey`/`findMatch`/`uniquenessViolation`
+   doivent comparer en JS via `toLowerCase()` (fold Unicode) — charger
+   les candidats et comparer en code, plus de `COLLATE NOCASE` seul
+   (ASCII-only → `ÉMILE`/`émile` passait en doublon réel). Unifier
+   intra-fichier et base-existante.
+2. **Fusion masters** : `semester_id` résolu dans
+   `master.academic_year_id` de l'existant à l'UPDATE (pas l'année
+   courante) — préserver la cohérence (année, semestre).
+3. **Étudiants REMPLACER** : `external_id` vide → régénérer `MAN-<id>`
+   au lieu de NULL ; insert+update en SAVEPOINT par ligne (un échec
+   d'UPDATE ne laisse pas d'orphelin NULL).
+4. **Export séances** : `groupe` = noms du `mm.student_group_id` ∪
+   `session_group` (jointure groupée), séparés par « + ».
+5. **Quote non fermée** : `inQuotes` vrai en fin de fichier → la ligne
+   devient ERREUR « guillemet non fermé » (pas un champ géant avalé).
+6. **Encodage** : `\uFFFD` détecté dans `parseCsv` → erreur globale
+   « fichier probablement non UTF-8 (Latin-1) ».
+7. **is_demo** : tout UPDATE écrivant au moins un champ force
+   `is_demo=0` (donnée réelle fusionnée dans une ligne démo).
+8. Petits : `merged++` uniquement si l'UPDATE a réellement changé ;
+   colonne d'en-tête dupliquée → `unknownColumns` warning ; `capacite`
+   strict `/^\d+$/` ; `full_name`/`external_id`/`nom`/`code` ≤ 200 ;
+   récap IMPORT sauté si 0 ligne importable ; UI : `error`/`result`
+   vidés au changement de type ; champ `n` documenté = rang non-vide.
+9. Tests : `ÉMILE`/`émile` intra-fichier et base-vs-fichier ; fusion
+   master cross-année ; REMPLACER external_id ; SAVEPOINT orphelin ;
+   export seances groupe union ; quote non fermée ; `\uFFFD` ;
+   is_demo fusion ; capacite '1e2' refusée.

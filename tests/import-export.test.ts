@@ -827,3 +827,279 @@ describe('templateCsv', () => {
     expect(p.rows[0].status).toBe('OK');
   });
 });
+
+// --- Revue (3 couches) — correctifs ----------------------------------------------
+
+describe('revue — correctifs', () => {
+  it('doublon base-vs-fichier Unicode : « ÉMILE » en base vs « émile » au fichier', () => {
+    const db = freshDb();
+    const profId = Number(
+      run(
+        db,
+        "INSERT INTO professor (full_name) VALUES ('Émile Dupont')",
+      ).lastInsertRowid,
+    );
+    // COLLATE NOCASE (ASCII-only) aurait raté ce doublon — le fold JS le voit.
+    const p = previewOk(
+      db,
+      'professeurs',
+      'nom_complet;email\némile dupont;e@u.ma',
+    );
+    expect(p.rows[0].status).toBe('DOUBLON');
+    expect(p.rows[0].match_id).toBe(profId);
+  });
+
+  it('doublon intra-fichier Unicode : « ÉMILE » puis « émile » → DOUBLON', () => {
+    const db = freshDb();
+    const p = previewOk(
+      db,
+      'professeurs',
+      'nom_complet\nÉMILE TEST\némile test',
+    );
+    expect(p.rows[0].status).toBe('OK');
+    expect(p.rows[1].status).toBe('DOUBLON');
+    // Même fold à l'apply : la 2e occurrence est ignorée, 1 seul INSERT.
+    const res = applyImport(
+      db,
+      adminId(db),
+      'professeurs',
+      'nom_complet\nÉMILE TEST\némile test',
+      'IGNORER',
+    );
+    expect(res.ok && res.data).toMatchObject({ inserted: 1, ignored: 1 });
+    expect(
+      all<{ id: number }>(
+        db,
+        "SELECT id FROM professor WHERE full_name LIKE '%TEST%'",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('fusion master cross-année : semestre résolu dans l’année de l’existant', () => {
+    const db = freshDb();
+    // Master MID dans l'ANCIENNE année (non courante), avec son S3.
+    const oldYearId = Number(
+      run(
+        db,
+        `INSERT INTO academic_year (label, start_date, end_date, is_current)
+         VALUES ('2025-2026', '2025-09-01', '2026-08-31', 0)`,
+      ).lastInsertRowid,
+    );
+    const oldSemId = Number(
+      run(
+        db,
+        `INSERT INTO semester (academic_year_id, label, ordinal)
+         VALUES (?, 'S3', 3)`,
+        oldYearId,
+      ).lastInsertRowid,
+    );
+    const masterId = Number(
+      run(
+        db,
+        `INSERT INTO master (code, name, academic_year_id, semester_id)
+         VALUES ('MID', 'Master Info', ?, ?)`,
+        oldYearId,
+        oldSemId,
+      ).lastInsertRowid,
+    );
+    // Année COURANTE avec un S3 différent (même ordinal, autre id) :
+    // une résolution dans l'année courante prendrait ce semestre-ci.
+    const curYearId = Number(
+      run(
+        db,
+        `INSERT INTO academic_year (label, start_date, end_date, is_current)
+         VALUES ('2026-2027', '2026-09-01', '2027-08-31', 1)`,
+      ).lastInsertRowid,
+    );
+    run(
+      db,
+      `INSERT INTO semester (academic_year_id, label, ordinal)
+       VALUES (?, 'S3', 3)`,
+      curYearId,
+    );
+    const res = applyImport(
+      db,
+      adminId(db),
+      'masters',
+      'code;nom;semestre\nmid;Master Info Fusionné;3',
+      'FUSIONNER',
+    );
+    expect(res.ok && res.data.merged).toBe(1);
+    const m = get<{ academic_year_id: number; semester_id: number }>(
+      db,
+      'SELECT * FROM master WHERE id = ?',
+      masterId,
+    )!;
+    expect(m.academic_year_id).toBe(oldYearId);
+    expect(m.semester_id).toBe(oldSemId); // année de l'existant, pas courante
+  });
+
+  it('REMPLACER étudiant : external_id vide → MAN-<id> régénéré, jamais NULL', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const res = applyImport(
+      db,
+      adminId(db),
+      'etudiants',
+      'groupe;master_code;nom_complet;external_id\nG1;MID;etudiant un;',
+      'REMPLACER',
+    );
+    expect(res.ok && res.data.merged).toBe(1);
+    const st = get<{ external_id: string }>(
+      db,
+      'SELECT external_id FROM student WHERE id = ?',
+      f.studentId,
+    )!;
+    expect(st.external_id).toBe(`MAN-${f.studentId}`);
+  });
+
+  it('SAVEPOINT : échec de l’UPDATE MAN-* → pas d’orphelin external_id NULL', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // « Bloqueur » occupe MAN-3 — le prochain INSERT obtiendra id = 3
+    // (fixture : id 1, bloqueur : id 2), puis l'UPDATE MAN-3 violera
+    // ux_student_group_ext.
+    run(
+      db,
+      `INSERT INTO student (student_group_id, external_id, full_name)
+       VALUES (?, 'MAN-3', 'Bloqueur')`,
+      f.groupId,
+    );
+    const res = applyImport(
+      db,
+      adminId(db),
+      'etudiants',
+      'groupe;master_code;nom_complet;external_id\n' +
+        'G1;MID;Orpheline;\nG1;MID;Karim B;E7',
+      'IGNORER',
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Erreur isolée : le lot continue, la ligne en échec est rapportée.
+    expect(res.data.errors).toHaveLength(1);
+    expect(res.data.errors[0].n).toBe(1);
+    expect(res.data.inserted).toBe(1); // Karim
+    // SAVEPOINT : l'INSERT d'Orpheline a été défait — aucun orphelin.
+    expect(
+      get(db, 'SELECT id FROM student WHERE external_id IS NULL'),
+    ).toBeUndefined();
+    expect(
+      all<{ id: number }>(
+        db,
+        'SELECT id FROM student WHERE student_group_id = ?',
+        f.groupId,
+      ),
+    ).toHaveLength(3);
+  });
+
+  it('export séances : groupe = union mm.student_group_id ∪ session_group', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const g2 = Number(
+      run(
+        db,
+        "INSERT INTO student_group (master_id, name) VALUES (?, 'G2')",
+        f.masterId,
+      ).lastInsertRowid,
+    );
+    const mmId = Number(
+      run(
+        db,
+        `INSERT INTO master_module
+           (master_id, module_id, semester_id, professor_id,
+            student_group_id, volume_min, session_duration_min,
+            planned_sessions, sched_start, sched_end)
+         VALUES (?, ?, ?, ?, ?, 600, 120, 5, '2026-09-01', '2027-01-31')`,
+        f.masterId,
+        f.moduleId,
+        f.semId,
+        f.profId,
+        f.groupId,
+      ).lastInsertRowid,
+    );
+    const sId = Number(
+      run(
+        db,
+        `INSERT INTO session
+           (master_module_id, professor_id, room_id, date, start_min, end_min,
+            status)
+         VALUES (?, ?, ?, '2026-10-05', 480, 600, 'PREVUE')`,
+        mmId,
+        f.profId,
+        f.roomId,
+      ).lastInsertRowid,
+    );
+    // session_group ajoute G2 — et re-déclare G1 (union DISTINCT attendue).
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      sId,
+      f.groupId,
+    );
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      sId,
+      g2,
+    );
+    const res = exportEntity(db, 'seances', '2026-10-01');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.rows).toHaveLength(1);
+    expect(res.data.rows[0].groupe).toBe('G1 + G2');
+  });
+
+  it('guillemet non fermé : la ligne tronquée est ERREUR, pas avalée', () => {
+    const db = freshDb();
+    const p = previewOk(
+      db,
+      'salles',
+      'nom;capacite\nSalle A;10\n"Salle B;20\nSalle C;30',
+    );
+    expect(p.rows).toHaveLength(2);
+    expect(p.rows[0].status).toBe('OK');
+    expect(p.rows[1].status).toBe('ERREUR');
+    expect(p.rows[1].errors.map((e) => e.message).join(' ')).toMatch(
+      /guillemet non fermé/i,
+    );
+  });
+
+  it('encodage non UTF-8 : U+FFFD → erreur globale explicite', () => {
+    const db = freshDb();
+    const res = previewImport(
+      db,
+      'salles',
+      'nom;capacite\nSalle �;10',
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/UTF-8|Latin-1/i);
+  });
+
+  it('fusion sur ligne démo → is_demo forcé à 0', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    run(db, 'UPDATE module SET is_demo = 1 WHERE id = ?', f.moduleId);
+    const res = applyImport(
+      db,
+      adminId(db),
+      'modules',
+      'code;nom\nmod-t;Nouveau Génie',
+      'FUSIONNER',
+    );
+    expect(res.ok && res.data.merged).toBe(1);
+    expect(
+      get<{ is_demo: number; name: string }>(
+        db,
+        'SELECT is_demo, name FROM module WHERE id = ?',
+        f.moduleId,
+      ),
+    ).toMatchObject({ is_demo: 0, name: 'Nouveau Génie' });
+  });
+
+  it('capacite « 1e2 » refusée : entier strict uniquement', () => {
+    const db = freshDb();
+    const p = previewOk(db, 'salles', 'nom;capacite\nSalle Sci;1e2');
+    expect(p.rows[0].status).toBe('ERREUR');
+    expect(p.rows[0].errors.map((e) => e.field)).toContain('capacity');
+  });
+});

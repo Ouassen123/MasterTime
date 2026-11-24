@@ -88,6 +88,7 @@ export function ImportExportPage(): React.JSX.Element {
     setCsvText(null);
     setPreview(null);
     setResult(null);
+    setError(null); // résultat + erreur vidés au changement de type
   }, []);
 
   const entityOptions = IMPORT_TYPES.map((v) => ({

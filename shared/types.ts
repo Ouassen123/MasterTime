@@ -1155,9 +1155,11 @@ export type ImportStrategy = (typeof IMPORT_STRATEGIES)[number];
 export type ImportRowStatus = 'OK' | 'DOUBLON' | 'ERREUR';
 
 /**
- * Ligne d'aperçu : `n` = numéro de ligne de données (1-based, hors en-tête),
- * `raw` = cellules brutes, `parsed` = valeurs par colonne reconnue,
- * `match_id` = id de l'entité existante en cas de doublon NOCASE.
+ * Ligne d'aperçu : `n` = rang de la ligne parmi les lignes de données
+ * NON VIDES (1-based, hors en-tête — les lignes vides du fichier ne
+ * décalent pas la numérotation), `raw` = cellules brutes, `parsed` =
+ * valeurs par colonne reconnue, `match_id` = id de l'entité existante
+ * en cas de doublon (unicité Unicode-complete, fold `toLowerCase`).
  */
 export interface ImportRow {
   n: number;
