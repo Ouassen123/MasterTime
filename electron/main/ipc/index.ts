@@ -20,8 +20,18 @@ import { registerAttendanceHandlers } from './attendance';
 import { registerStudentHandlers } from './students';
 import { registerReportHandlers } from './reports';
 import { registerImportExportHandlers } from './import-export';
+import { registerSettingsHandlers } from './settings';
+import {
+  registerBackupHandlers,
+  type BackupsIpcContext,
+} from './backups';
 
-export function registerIpcHandlers(getDb: DbGetter): void {
+/** Dépendances résolues côté `main/index.ts` (chemins + redémarrage). */
+export interface IpcDeps {
+  backups: BackupsIpcContext;
+}
+
+export function registerIpcHandlers(getDb: DbGetter, deps: IpcDeps): void {
   registerRoomHandlers(getDb);
   registerModuleHandlers(getDb);
   registerProfessorHandlers(getDb);
@@ -36,6 +46,8 @@ export function registerIpcHandlers(getDb: DbGetter): void {
   registerStudentHandlers(getDb);
   registerReportHandlers(getDb);
   registerImportExportHandlers(getDb);
+  registerSettingsHandlers(getDb);
+  registerBackupHandlers(getDb, deps.backups);
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

@@ -717,5 +717,93 @@
     "empty": "Aucun étudiant au registre",
     "removeTitle": "Supprimer l'étudiant",
     "removeConfirm": "Supprimer « {{name}} » ?"
+  },
+  "params": {
+    "title": "Paramètres",
+    "adminOnly": "Cette section est réservée au profil Administrateur.",
+    "tabs": {
+      "slots": "Créneaux horaires",
+      "exceptions": "Exceptions calendrier",
+      "backup": "Sauvegarde"
+    },
+    "slots": {
+      "weekday": "Jour",
+      "from": "Début",
+      "to": "Fin",
+      "timeRange": "Horaire",
+      "label": "Libellé",
+      "overlap": "Chevauchement",
+      "add": "Nouveau créneau",
+      "createTitle": "Créer un créneau horaire",
+      "editTitle": "Modifier le créneau horaire",
+      "created": "Créneau créé.",
+      "updated": "Créneau mis à jour.",
+      "deleted": "Créneau supprimé.",
+      "deleteTitle": "Supprimer le créneau",
+      "deleteConfirm": "Supprimer ce créneau horaire ? Il ne sera plus proposé aux prochaines générations.",
+      "empty": "Aucun créneau horaire",
+      "hint": "Fenêtres horaires autorisées pour la génération (0 = lundi … 6 = dimanche). Les chevauchements sont autorisés mais signalés : la génération gère les fenêtres qui se recouvrent.",
+      "labelPlaceholder": "ex. Journée 08h–18h"
+    },
+    "exceptions": {
+      "range": "Période",
+      "start": "Début",
+      "end": "Fin",
+      "type": "Type",
+      "label": "Libellé",
+      "types": {
+        "FERIE": "Férié",
+        "EXAMEN": "Examen",
+        "FERMETURE": "Fermeture",
+        "VACANCES": "Vacances"
+      },
+      "add": "Nouvelle exception",
+      "createTitle": "Créer une exception calendrier",
+      "editTitle": "Modifier l'exception calendrier",
+      "created": "Exception créée.",
+      "updated": "Exception mise à jour.",
+      "deleted": "Exception supprimée.",
+      "deleteTitle": "Supprimer l'exception",
+      "deleteConfirm": "Supprimer cette exception calendrier ?",
+      "empty": "Aucune exception calendrier",
+      "hint": "Jours interdits à la planification (fériés, examens, fermetures, vacances). Les périodes peuvent se chevaucher.",
+      "labelPlaceholder": "ex. Fête du Trône"
+    },
+    "retention": {
+      "label": "Nombre de sauvegardes conservées",
+      "hint": "À chaque nouvelle sauvegarde, les sauvegardes manuelles et automatiques les plus anciennes au-delà de ce nombre sont supprimées (fichier + historique). Les sauvegardes PRE_MIGRATION ne sont jamais supprimées automatiquement.",
+      "saved": "Rétention enregistrée."
+    }
+  },
+  "backups": {
+    "title": "Sauvegardes",
+    "adminOnly": "Cette section est réservée au profil Administrateur.",
+    "create": "Nouvelle sauvegarde",
+    "created": "Sauvegarde créée.",
+    "openFolder": "Ouvrir le dossier",
+    "restore": "Restaurer",
+    "restoreTitle": "Restaurer cette sauvegarde ?",
+    "restoreConfirm": "L'application va redémarrer et les données actuelles seront remplacées par cette sauvegarde. Une sauvegarde de sécurité de l'état actuel est créée automatiquement avant la restauration.",
+    "restored": "Sauvegarde restaurée — l'application redémarre.",
+    "restoredTag": "Restaurée",
+    "missing": "Fichier absent",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer cette sauvegarde ?",
+    "deleteConfirm": "Le fichier et son entrée d'historique seront supprimés.",
+    "deleted": "Sauvegarde supprimée.",
+    "deleteRefused": "Les sauvegardes PRE_MIGRATION sont des références historiques : suppression impossible.",
+    "cols": {
+      "date": "Date",
+      "kind": "Type",
+      "size": "Taille",
+      "path": "Fichier",
+      "status": "Statut"
+    },
+    "kinds": {
+      "MANUEL": "Manuelle",
+      "AUTO": "Automatique",
+      "PRE_MIGRATION": "Pré-migration"
+    },
+    "empty": "Aucune sauvegarde"
   }
 }

@@ -17,16 +17,18 @@ import type { AppInfo } from '../../shared/types';
 
 let db: DatabaseSync | null = null;
 let dbPath = '';
+let backupDir = '';
 let startupError: string | null = null;
 
 function initDatabase(): void {
   const userData = app.getPath('userData');
   dbPath = path.join(userData, 'mastertime.db');
+  backupDir = path.join(userData, 'backups');
   const handle = getDb(dbPath);
   db = handle.db;
   runMigrations(db, {
     migrations: bundledMigrations(),
-    backupDir: path.join(userData, 'backups'),
+    backupDir,
     dbPath,
   });
   ensureProfiles(db); // profils par défaut + profil courant (avant tout usage)
@@ -80,7 +82,18 @@ app.whenReady().then(() => {
 
   // Handlers métier typés (rooms/modules/profile/audit/context) — retournent
   // toujours ApiResult<T> ; fonctionnent même si la DB a échoué (erreur propre).
-  registerIpcHandlers(() => db);
+  // Le contexte backups est résolu ici : le service ne connaît pas `app`.
+  registerIpcHandlers(() => db, {
+    backups: {
+      backupDir,
+      dbPath,
+      restart: () => {
+        // Restauration (FR-52) : relance sur le fichier DB remplacé.
+        app.relaunch();
+        app.exit(0);
+      },
+    },
+  });
 
   createWindow();
 

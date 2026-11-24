@@ -76,8 +76,8 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <SwapOutlined />,
   },
-  { key: 'settings', path: '/parametres', enabled: false, adminOnly: true },
-  { key: 'backups', path: '/sauvegardes', enabled: false, adminOnly: true },
+  { key: 'settings', path: '/parametres', enabled: true, adminOnly: true },
+  { key: 'backups', path: '/sauvegardes', enabled: true, adminOnly: true },
 ];
 
 export function AppShell(): React.JSX.Element {

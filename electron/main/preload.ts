@@ -20,6 +20,9 @@ import type {
   AuditEntry,
   AvailabilityInput,
   AvailabilityRow,
+  BackupRow,
+  CalendarExceptionInput,
+  CalendarExceptionRow,
   ConflictFilter,
   ConflictItem,
   ConflictSummary,
@@ -78,6 +81,8 @@ import type {
   StudentGroupRow,
   StudentInput,
   StudentRow,
+  TimeSlotInput,
+  TimeSlotRow,
   WeekFilter,
   WindowApi,
 } from '../../shared/types';
@@ -344,6 +349,54 @@ const api: WindowApi = {
       type: ExportEntityType,
     ): Promise<ApiResult<ReportExportFile>> =>
       ipcRenderer.invoke('export:entity', type),
+  },
+  settings: {
+    slots: {
+      list: (): Promise<ApiResult<TimeSlotRow[]>> =>
+        ipcRenderer.invoke('settings:slots:list'),
+      create: (input: TimeSlotInput): Promise<ApiResult<TimeSlotRow>> =>
+        ipcRenderer.invoke('settings:slots:create', input),
+      update: (
+        id: number,
+        input: TimeSlotInput,
+      ): Promise<ApiResult<TimeSlotRow>> =>
+        ipcRenderer.invoke('settings:slots:update', id, input),
+      remove: (id: number): Promise<ApiResult<null>> =>
+        ipcRenderer.invoke('settings:slots:delete', id),
+    },
+    exceptions: {
+      list: (): Promise<ApiResult<CalendarExceptionRow[]>> =>
+        ipcRenderer.invoke('settings:exceptions:list'),
+      create: (
+        input: CalendarExceptionInput,
+      ): Promise<ApiResult<CalendarExceptionRow>> =>
+        ipcRenderer.invoke('settings:exceptions:create', input),
+      update: (
+        id: number,
+        input: CalendarExceptionInput,
+      ): Promise<ApiResult<CalendarExceptionRow>> =>
+        ipcRenderer.invoke('settings:exceptions:update', id, input),
+      remove: (id: number): Promise<ApiResult<null>> =>
+        ipcRenderer.invoke('settings:exceptions:delete', id),
+    },
+    retention: {
+      get: (): Promise<ApiResult<number>> =>
+        ipcRenderer.invoke('settings:retention:get'),
+      set: (n: number): Promise<ApiResult<number>> =>
+        ipcRenderer.invoke('settings:retention:set', n),
+    },
+  },
+  backups: {
+    list: (): Promise<ApiResult<BackupRow[]>> =>
+      ipcRenderer.invoke('backups:list'),
+    create: (): Promise<ApiResult<BackupRow>> =>
+      ipcRenderer.invoke('backups:create'),
+    restore: (id: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('backups:restore', { id }),
+    remove: (id: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('backups:delete', id),
+    openFolder: (): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('backups:openFolder'),
   },
 };
 

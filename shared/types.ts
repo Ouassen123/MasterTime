@@ -1194,6 +1194,77 @@ export interface EntityExport {
   rows: ReportRow[];
 }
 
+// ---------------------------------------------------------------------------
+// P12 — Paramètres & Sauvegardes (FR-51/52/53, BR-23/24)
+// ---------------------------------------------------------------------------
+
+/** Types d'exception calendrier (CHECK `calendar_exception.type`). */
+export const CALENDAR_EXCEPTION_TYPES = [
+  'FERIE',
+  'EXAMEN',
+  'FERMETURE',
+  'VACANCES',
+] as const;
+export type CalendarExceptionType = (typeof CALENDAR_EXCEPTION_TYPES)[number];
+
+/**
+ * Créneau horaire autorisé (`time_slot`, weekday 0=lun..6=dim).
+ * `overlaps` : un autre créneau du même weekday le chevauche —
+ * informatif, jamais bloquant (la génération gère les fenêtres
+ * qui se recouvrent).
+ */
+export interface TimeSlotRow {
+  id: number;
+  weekday: number;
+  start_min: number;
+  end_min: number;
+  label: string | null;
+  overlaps: boolean;
+}
+
+export interface TimeSlotInput {
+  weekday: number;
+  start_min: number;
+  end_min: number;
+  label?: string | null;
+}
+
+/** Exception calendrier (`calendar_exception`) — chevauchements permis. */
+export interface CalendarExceptionRow {
+  id: number;
+  start_date: string;
+  end_date: string;
+  type: CalendarExceptionType;
+  label: string;
+}
+
+export interface CalendarExceptionInput {
+  start_date: string;
+  end_date: string;
+  type: CalendarExceptionType;
+  label: string;
+}
+
+/** Kinds de `backup_history` (CHECK en base). */
+export const BACKUP_KINDS = ['MANUEL', 'AUTO', 'PRE_MIGRATION'] as const;
+export type BackupKind = (typeof BACKUP_KINDS)[number];
+
+/**
+ * Ligne `backup_history` enrichie : `exists` = fichier présent sur disque
+ * (sauvegarde déplacée/supprimée manuellement → ligne grisée,
+ * restauration impossible). `restored` = 1 si cette sauvegarde a été
+ * utilisée pour une restauration.
+ */
+export interface BackupRow {
+  id: number;
+  at: string;
+  path: string;
+  size_bytes: number | null;
+  kind: BackupKind;
+  restored: number;
+  exists: boolean;
+}
+
 export type ProfileRole = 'ADMIN' | 'GESTIONNAIRE';
 
 /** Profil applicatif (`app_user`) — pas de mot de passe (décision Phase 1). */
@@ -1385,5 +1456,39 @@ export interface WindowApi {
     exportEntity(
       type: ExportEntityType,
     ): Promise<ApiResult<ReportExportFile>>;
+  };
+  /** P12 — tout est réservé ADMIN côté main (BR-24). */
+  settings: {
+    slots: {
+      list(): Promise<ApiResult<TimeSlotRow[]>>;
+      create(input: TimeSlotInput): Promise<ApiResult<TimeSlotRow>>;
+      update(id: number, input: TimeSlotInput): Promise<ApiResult<TimeSlotRow>>;
+      remove(id: number): Promise<ApiResult<null>>;
+    };
+    exceptions: {
+      list(): Promise<ApiResult<CalendarExceptionRow[]>>;
+      create(
+        input: CalendarExceptionInput,
+      ): Promise<ApiResult<CalendarExceptionRow>>;
+      update(
+        id: number,
+        input: CalendarExceptionInput,
+      ): Promise<ApiResult<CalendarExceptionRow>>;
+      remove(id: number): Promise<ApiResult<null>>;
+    };
+    retention: {
+      get(): Promise<ApiResult<number>>;
+      set(n: number): Promise<ApiResult<number>>;
+    };
+  };
+  /** P12 — sauvegardes + restauration (réservé ADMIN, BR-24). */
+  backups: {
+    list(): Promise<ApiResult<BackupRow[]>>;
+    create(): Promise<ApiResult<BackupRow>>;
+    /** Redémarre l'application en cas de succès — la promesse peut ne
+     *  jamais se résoudre côté renderer (processus terminé). */
+    restore(id: number): Promise<ApiResult<null>>;
+    remove(id: number): Promise<ApiResult<null>>;
+    openFolder(): Promise<ApiResult<null>>;
   };
 }
