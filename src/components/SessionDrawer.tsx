@@ -39,6 +39,7 @@ import {
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
+  FileDoneOutlined,
   PrinterOutlined,
   TeamOutlined,
   WarningOutlined,
@@ -491,6 +492,267 @@ function AttendanceSection({
   );
 }
 
+// --- Saisie groupée de la feuille (P17) --------------------------------------
+
+/**
+ * Modal « Saisir la feuille » (P17) — retour de la feuille papier
+ * cochée : visible sur PREVUE/REPORTEE, marque la séance REALISEE et
+ * enregistre les présences nominatives EN UNE transaction
+ * (`sessions:recordSheet`). Horaires réels optionnels (défaut :
+ * créneau planifié). Séance sans étudiants → la modale propose
+ * simplement le marquage réalisée (comptage impossible).
+ * Montée conditionnellement par le parent — état frais à chaque
+ * ouverture, roster rechargé via `attendance:get` (lisible sur tout
+ * statut).
+ */
+function SheetEntryModal(props: {
+  detail: SessionDetail;
+  onClose: () => void;
+  /** Succès : parent recharge la séance + ses données. */
+  onDone: () => void;
+}): React.JSX.Element {
+  const { detail, onClose, onDone } = props;
+  const { t } = useTranslation();
+  const s = detail.session;
+  const [form] = Form.useForm();
+  const [roster, setRoster] = useState<AttendanceDetail['roster'] | null>(null);
+  const [marks, setMarks] = useState<
+    Record<number, StudentAttendanceStatus>
+  >({});
+  const [saving, setSaving] = useState(false);
+  const minOfDay = (d: Dayjs): number => d.hour() * 60 + d.minute();
+
+  useEffect(() => {
+    let stale = false;
+    const load = async (): Promise<void> => {
+      try {
+        const res = await api().attendance.get(s.id);
+        if (stale) return;
+        if (!res.ok) {
+          void message.error(errorMessage(res));
+          setRoster([]);
+          return;
+        }
+        setRoster(res.data.roster);
+        const m: Record<number, StudentAttendanceStatus> = {};
+        // Défaut : tout présent — on ne coche que les écarts.
+        for (const r of res.data.roster) m[r.student_id] = 'PRESENT';
+        setMarks(m);
+      } catch (err) {
+        if (!stale) void message.error(errorMessage(err));
+      }
+    };
+    void load();
+    return () => {
+      stale = true;
+    };
+  }, [s.id]);
+
+  const live = useMemo(() => {
+    let p = 0;
+    let j = 0;
+    for (const r of roster ?? []) {
+      const st = marks[r.student_id] ?? 'PRESENT';
+      if (st === 'PRESENT') p += 1;
+      else if (st === 'JUSTIFIE') j += 1;
+    }
+    const total = (roster ?? []).length;
+    return { present: p, absent: total - p, justified: j };
+  }, [roster, marks]);
+
+  const submit = async (): Promise<void> => {
+    const v = (await form.validateFields()) as {
+      actual_date?: Dayjs;
+      actual_range?: [Dayjs, Dayjs];
+    };
+    setSaving(true);
+    try {
+      const res = await api().sessions.recordSheet(s.id, {
+        actual_date: v.actual_date?.format('YYYY-MM-DD'),
+        actual_start_min: v.actual_range
+          ? minOfDay(v.actual_range[0])
+          : undefined,
+        actual_end_min: v.actual_range
+          ? minOfDay(v.actual_range[1])
+          : undefined,
+        rows: (roster ?? []).map((r) => ({
+          student_id: r.student_id,
+          status: marks[r.student_id] ?? 'PRESENT',
+        })),
+      });
+      if (res.ok) {
+        void message.success(
+          res.data.marked > 0
+            ? t('sessions.sheetEntry.saved', { marked: res.data.marked })
+            : t('sessions.sheetEntry.savedEmpty'),
+        );
+        onDone();
+        onClose();
+        return;
+      }
+      // Erreurs champ à champ (actual_*) surlignées ; le reste en toast.
+      const byName = new Map<string, string[]>();
+      for (const f of res.fields ?? []) {
+        const name = FIELD_TO_FORM[f.field] ?? f.field;
+        byName.set(name, [...(byName.get(name) ?? []), f.message]);
+      }
+      const formErrors = [...byName].filter(([name]) =>
+        ['actual_date', 'actual_range'].includes(name),
+      );
+      if (formErrors.length > 0) {
+        form.setFields(
+          formErrors.map(([name, errors]) => ({ name, errors })),
+        );
+      }
+      const otherMsgs = [...byName]
+        .filter(([name]) => !['actual_date', 'actual_range'].includes(name))
+        .flatMap(([, msgs]) => msgs)
+        .join(' ');
+      void message.error(
+        otherMsgs ? `${res.error} ${otherMsgs}` : res.error,
+      );
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const day = dayjs(s.date).startOf('day');
+
+  return (
+    <Modal
+      title={t('sessions.sheetEntry.title')}
+      open
+      onOk={() => void submit()}
+      onCancel={onClose}
+      confirmLoading={saving}
+      okText={t('common.save')}
+      cancelText={t('common.cancel')}
+      width={640}
+      destroyOnHidden
+    >
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Text type="secondary">
+          {dayjs(s.date).format('dddd DD/MM/YYYY')} · {minToHHMM(s.start_min)}–
+          {minToHHMM(s.end_min)} ·{' '}
+          <span dir="auto">
+            {s.module.code} — {s.module.name}
+          </span>
+        </Text>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            actual_date: dayjs(s.date),
+            actual_range: [
+              day.add(s.start_min, 'minute'),
+              day.add(s.end_min, 'minute'),
+            ],
+          }}
+        >
+          <Space wrap size="middle">
+            <Form.Item
+              name="actual_date"
+              label={t('sessions.sheetEntry.actual')}
+            >
+              <DatePicker format="DD/MM/YYYY" />
+            </Form.Item>
+            <Form.Item
+              name="actual_range"
+              label={t('sessions.edit.time')}
+            >
+              <TimePicker.RangePicker format="HH:mm" minuteStep={5} />
+            </Form.Item>
+          </Space>
+        </Form>
+        {roster == null ? (
+          <Skeleton active paragraph={{ rows: 3 }} />
+        ) : roster.length === 0 ? (
+          <Alert
+            type="info"
+            showIcon
+            message={t('sessions.sheetEntry.noStudents')}
+          />
+        ) : (
+          <>
+            <Space wrap>
+              <Button
+                size="small"
+                onClick={() =>
+                  setMarks(
+                    Object.fromEntries(
+                      roster.map((r) => [r.student_id, 'PRESENT' as const]),
+                    ),
+                  )
+                }
+              >
+                {t('attendance.allPresent')}
+              </Button>
+              <Text type="secondary">
+                {t('attendance.counter', {
+                  present: live.present,
+                  absent: live.absent,
+                  justified: live.justified,
+                })}
+              </Text>
+            </Space>
+            <Table<AttendanceDetail['roster'][number]>
+              size="small"
+              rowKey="student_id"
+              dataSource={roster}
+              pagination={false}
+              scroll={{ y: 320 }}
+              columns={[
+                {
+                  key: 'student',
+                  title: t('attendance.student'),
+                  dataIndex: 'full_name',
+                  render: (v: string) => <span dir="auto">{v}</span>,
+                },
+                {
+                  key: 'group',
+                  title: t('attendance.group'),
+                  dataIndex: 'group_name',
+                  render: (v: string) => <span dir="auto">{v}</span>,
+                },
+                {
+                  key: 'status',
+                  title: t('timetable.detail.status'),
+                  width: 190,
+                  render: (_v, r) => (
+                    <Segmented<StudentAttendanceStatus>
+                      size="small"
+                      value={marks[r.student_id] ?? 'PRESENT'}
+                      onChange={(v) =>
+                        setMarks((m) => ({ ...m, [r.student_id]: v }))
+                      }
+                      options={[
+                        {
+                          value: 'PRESENT',
+                          label: t('attendance.statuses.PRESENT'),
+                        },
+                        {
+                          value: 'ABSENT',
+                          label: t('attendance.statuses.ABSENT'),
+                        },
+                        {
+                          value: 'JUSTIFIE',
+                          label: t('attendance.statuses.JUSTIFIE'),
+                        },
+                      ]}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </>
+        )}
+      </Space>
+    </Modal>
+  );
+}
+
 /** Champs service → champs Form (les bornes horaires vivent en RangePicker). */
 const FIELD_TO_FORM: Record<string, string> = {
   start_min: 'range',
@@ -524,6 +786,7 @@ export function SessionDrawer(props: {
   const [masterGroups, setMasterGroups] = useState<StudentGroupRow[]>([]);
   const [mmGroupId, setMmGroupId] = useState<number | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [editForm] = Form.useForm();
   const [statusForm] = Form.useForm();
   const [groupsForm] = Form.useForm();
@@ -909,6 +1172,16 @@ export function SessionDrawer(props: {
               >
                 {t('sessions.attendanceSheet')}
               </Button>
+              {/* P17 : saisie groupée — PREVUE/REPORTEE seulement. */}
+              {(detail.session.status === 'PREVUE' ||
+                detail.session.status === 'REPORTEE') && (
+                <Button
+                  icon={<FileDoneOutlined />}
+                  onClick={() => setSheetOpen(true)}
+                >
+                  {t('sessions.sheetEntry.action')}
+                </Button>
+              )}
               <Tooltip
                 title={
                   detail.session.status === 'REALISEE'
@@ -1289,6 +1562,19 @@ export function SessionDrawer(props: {
         conflicts={refusal}
         onClose={() => setRefusal(null)}
       />
+
+      {/* P17 — Modal « Saisir la feuille » (montée à l'ouverture :
+          roster et marques frais à chaque fois). */}
+      {sheetOpen && detail && (
+        <SheetEntryModal
+          detail={detail}
+          onClose={() => setSheetOpen(false)}
+          onDone={() => {
+            onChanged();
+            refreshDetail();
+          }}
+        />
+      )}
     </>
   );
 }

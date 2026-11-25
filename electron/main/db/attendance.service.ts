@@ -107,7 +107,11 @@ export function candidateGroupIds(
  * (`out_of_roster = 1` — « orpheline », affichée « hors groupe » dans
  * l'UI et conservée au submit : pas d'effacement silencieux).
  */
-function rosterRows(
+/**
+ * Roster complet (candidats + orphelines) — exporté : `sheet-entry`
+ * le réutilise pour borner la saisie groupée aux mêmes étudiants.
+ */
+export function rosterRows(
   db: DatabaseSync,
   sessionId: number,
   groupIds: number[],
@@ -161,7 +165,8 @@ function nominativeRows(
   );
 }
 
-function countsRow(
+/** Compteurs stockés — exporté : `sheet-entry` le lit pour l'audit. */
+export function countsRow(
   db: DatabaseSync,
   sessionId: number,
 ): AttendanceDetail['counts'] {
@@ -206,7 +211,7 @@ export function getAttendance(
  * la table `session` n'étant pas touchée, le diff automatique de la ligne
  * pilote serait vide (pattern `setSessionGroups` / `absence_decision`).
  */
-function auditLine(
+export function auditLine(
   db: DatabaseSync,
   userId: number | null,
   action: 'CREATE' | 'UPDATE' | 'DELETE',
@@ -354,7 +359,8 @@ interface NominativeStateItem {
   status: string;
 }
 
-function nominativeState(
+/** État nominatif stocké — exporté : `sheet-entry` le lit pour l'audit. */
+export function nominativeState(
   db: DatabaseSync,
   sessionId: number,
 ): NominativeStateItem[] {

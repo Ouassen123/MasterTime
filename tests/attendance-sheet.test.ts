@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { all, openDatabase, run } from '../electron/main/db/connection';
+import { all, get, openDatabase, run } from '../electron/main/db/connection';
 import {
   loadMigrationsFromDir,
   runMigrations,
@@ -19,7 +19,10 @@ import {
 import { ensureProfiles } from '../electron/main/db/profile.service';
 import {
   buildAttendanceSheetHtml,
+  buildWeekSheetHtml,
+  mondayOfWeek,
   resolveSheetRoster,
+  weekSheetSessions,
 } from '../electron/main/db/attendance-sheet.service';
 
 const MIGRATIONS_DIR = path.resolve(
@@ -151,6 +154,7 @@ function addSession(
   f: Fixture,
   mmId: number,
   date = '2026-10-20',
+  status = 'PREVUE',
 ): number {
   return Number(
     run(
@@ -158,11 +162,12 @@ function addSession(
       `INSERT INTO session
          (master_module_id, professor_id, room_id, date, start_min, end_min,
           status)
-       VALUES (?, ?, ?, ?, 480, 570, 'PREVUE')`,
+       VALUES (?, ?, ?, ?, 480, 570, ?)`,
       mmId,
       f.profId,
       f.roomId,
       date,
+      status,
     ).lastInsertRowid,
   );
 }
@@ -337,5 +342,166 @@ describe('P14 — buildAttendanceSheetHtml', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/introuvable/);
     expect(all(db, 'SELECT id FROM audit_log')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P17 — Feuille de présence hebdomadaire par Master (A4 paysage)
+// ---------------------------------------------------------------------------
+
+describe('P17 — weekSheetSessions', () => {
+  it('normalise au lundi ; borne la semaine ; exclut ANNULEE et les autres masters', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+
+    // Semaine du lun 19/10/2026 : 20/10 (mmG1), 21/10 (ANNULEE — exclue),
+    // 22/10 (mmId), 26/10 (semaine suivante — exclue).
+    const s1 = addSession(db, f, f.mmG1Id, '2026-10-20');
+    addSession(db, f, f.mmG1Id, '2026-10-21', 'ANNULEE');
+    const s3 = addSession(db, f, f.mmId, '2026-10-22');
+    addSession(db, f, f.mmG1Id, '2026-10-26');
+
+    // Un autre master avec une séance la même semaine — jamais listé.
+    const yearId = Number(
+      get<{ id: number }>(
+        db,
+        'SELECT id FROM academic_year LIMIT 1',
+      )!.id,
+    );
+    const master2 = Number(
+      run(
+        db,
+        "INSERT INTO master (code, name, academic_year_id) VALUES ('M-U', 'Master U', ?)",
+        yearId,
+      ).lastInsertRowid,
+    );
+    const modId = Number(
+      get<{ id: number }>(db, 'SELECT id FROM module LIMIT 1')!.id,
+    );
+    const semId = Number(
+      get<{ id: number }>(db, 'SELECT id FROM semester LIMIT 1')!.id,
+    );
+    const mm2 = Number(
+      run(
+        db,
+        `INSERT INTO master_module
+           (master_id, module_id, semester_id, professor_id, student_group_id,
+            volume_min, session_duration_min, planned_sessions,
+            sched_start, sched_end)
+         VALUES (?, ?, ?, ?, NULL, 1200, 90, 10, '2026-09-01', '2027-01-31')`,
+        master2,
+        modId,
+        semId,
+        f.profId,
+      ).lastInsertRowid,
+    );
+    run(
+      db,
+      `INSERT INTO session
+         (master_module_id, professor_id, room_id, date, start_min, end_min,
+          status)
+       VALUES (?, ?, ?, '2026-10-20', 480, 570, 'PREVUE')`,
+      mm2,
+      f.profId,
+      f.roomId,
+    );
+
+    // week_start = jeudi 22/10 → normalisé au lundi 19/10.
+    expect(mondayOfWeek('2026-10-22')).toBe('2026-10-19');
+    expect(mondayOfWeek('2026-10-19')).toBe('2026-10-19');
+    expect(mondayOfWeek('2026-10-25')).toBe('2026-10-19'); // dimanche
+
+    const { monday, sessions } = weekSheetSessions(db, f.masterId, '2026-10-22');
+    expect(monday).toBe('2026-10-19');
+    expect(sessions.map((s) => s.id)).toEqual([s1, s3]);
+  });
+});
+
+describe('P17 — buildWeekSheetHtml', () => {
+  it('document paysage : colonnes séances, roster union dédoublonné, pied « Séances assurées »', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    const s1 = addSession(db, f, f.mmG1Id, '2026-10-20');
+    run(
+      db,
+      'INSERT INTO session_group (session_id, student_group_id) VALUES (?, ?)',
+      s1,
+      f.g2Id,
+    );
+    addSession(db, f, f.mmId, '2026-10-22');
+
+    const res = buildWeekSheetHtml(db, f.masterId, '2026-10-20');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const { html, suggestedName } = res.data;
+
+    // A4 paysage + en-tête FSJP + titre master/semaine.
+    expect(html).toContain('size: A4 landscape');
+    expect(html).toContain(
+      'Faculté des Sciences Juridiques et Politiques — Tanger',
+    );
+    expect(html).toContain('Feuille de présence — Master M-T');
+    expect(html).toContain('semaine du 19/10/2026');
+    expect(html).toContain('M-T — Master T');
+
+    // Les deux séances figurent (en-têtes colonnes + pied attestation).
+    expect(html.match(/<th><div class="d">/g)).toHaveLength(2);
+    expect(html).toContain('Séances assurées par l\'enseignant');
+    expect(html).toContain('☐ Oui');
+    expect(html).toContain('☐ Non');
+    expect(html).toContain('Prof Test');
+    expect(html).toContain('Salle T');
+    expect(html).toContain('MOD-T — Module T');
+
+    // Roster union G1 ∪ session_group G2 : 5 lignes dédoublonnées triées.
+    const rows = bodyRows(html);
+    expect(rows).toHaveLength(5);
+    expect(html).toContain('Yassine Amrani');
+    expect(html).toContain('Amina Ziani');
+    expect(html).toContain('Observation');
+
+    // Pied réglementaire.
+    expect(html).toContain('Le Responsable du Master');
+    expect(html).toContain('Fait à Tanger, le');
+
+    // Nom de fichier : <master>-S<semaine ISO> (19/10/2026 = S43).
+    expect(suggestedName).toBe('feuille-presence-M-T-S43.pdf');
+  });
+
+  it('aucun étudiant impliqué → 25 lignes vides ; master inexistant → erreur', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // Semaine ne contenant qu'une séance « master entier » (sans groupe).
+    addSession(db, f, f.mmId, '2026-10-22');
+    const res = buildWeekSheetHtml(db, f.masterId, '2026-10-19');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(bodyRows(res.data.html)).toHaveLength(25);
+    expect(res.data.html).not.toContain('Yassine Amrani');
+
+    const missing = buildWeekSheetHtml(db, 9999, '2026-10-19');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error).toMatch(/introuvable/);
+  });
+
+  it('plus de 8 séances → 8 colonnes + note « suite sur une 2e feuille »', () => {
+    const db = freshDb();
+    const f = seedFixture(db);
+    // 9 séances dans la semaine (mmG1) → cap 8.
+    const days = [
+      '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22',
+      '2026-10-23', '2026-10-24', '2026-10-19', '2026-10-20',
+      '2026-10-21',
+    ];
+    for (const d of days) addSession(db, f, f.mmG1Id, d);
+
+    const res = buildWeekSheetHtml(db, f.masterId, '2026-10-19');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const html = res.data.html;
+    expect(html.match(/<th><div class="d">/g)).toHaveLength(8);
+    expect(html).toContain('suite sur une 2e feuille');
+    // Le bloc d'attestation liste les 9 séances.
+    expect(html.match(/☐ Oui/g)).toHaveLength(9);
   });
 });

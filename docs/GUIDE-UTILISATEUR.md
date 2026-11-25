@@ -267,6 +267,47 @@ l'enseignant : ☐ Oui ☐ Non », la case signature du Responsable du
 Master et « Fait à Tanger, le …/…/…… ». Le fichier est proposé sous
 le nom `feuille-presence-<date>-<master>.pdf`.
 
+### Feuille de présence hebdomadaire par Master
+
+Dans la **fiche Master** (onglet *Séances*), choisissez la semaine
+(sélecteur, semaine courante par défaut) puis cliquez **« Feuille de
+présence hebdo »** : un PDF **A4 paysage** est généré — une seule
+feuille pour tout le master au lieu d'une par séance.
+
+- **Colonnes** : chaque séance de la semaine (date, heure, code
+  module, salle) — au-delà de **8 séances**, la feuille affiche les 8
+  premières avec la note « suite sur une 2e feuille » ;
+- **Lignes** : les étudiants de l'union des groupes impliqués par ces
+  séances (dédoublonnés, triés), ou 25 lignes vides si aucun groupe ;
+- **Pied de page** : le tableau « Séances assurées par l'enseignant »
+  liste chaque séance de la semaine avec ☐ Oui ☐ Non, suivi du cadre
+  signature du Responsable du Master et de « Fait à Tanger, le
+  …/…/…… ».
+
+Le fichier est proposé sous le nom
+`feuille-presence-<master>-S<numéro-de-semaine>.pdf`. Flux recommandé
+: imprimez la feuille en début de semaine → le responsable coche
+chaque séance assurée et les présences → à la saisie, ouvrez chaque
+séance et utilisez **« Saisir la feuille »** (ci-dessous).
+
+### Saisie groupée de la feuille (séance prévue ou reportée)
+
+Dans le **drawer de séance**, le bouton **« Saisir la feuille »**
+apparaît sur les séances **prévues ou reportées**. La fenêtre permet
+de reporter la feuille papier en une passe :
+
+- **horaires réels** pré-remplis avec le créneau prévu (modifiables) ;
+- liste des étudiants avec un statut **P / A / J** chacun (présent,
+  absent, justifié — par défaut tous présents, bouton
+  « Tous présents ») ; un justifié reste compté comme absent ;
+- si la séance ne vise aucun étudiant enregistré, la fenêtre propose
+  simplement le marquage « réalisée ».
+
+En validant, l'application marque la séance **réalisée** et enregistre
+les présences **en une seule opération** (annulée en entier en cas
+d'erreur). La saisie reste ensuite modifiable via le volet Présences
+habituel.
+
 ### Saisie (séance réalisée)
 
 Sur une séance **réalisée** (drawer de séance → volet présences) :

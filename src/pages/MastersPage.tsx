@@ -30,7 +30,12 @@ import {
   Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  PrinterOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -842,6 +847,9 @@ export function MastersPage(): React.JSX.Element {
   const [detail, setDetail] = useState<MasterDetail | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  // P17 — feuille de présence hebdo : semaine choisie (défaut : courante).
+  const [weekSheetDay, setWeekSheetDay] = useState(dayjs());
+  const [weekSheetLoading, setWeekSheetLoading] = useState(false);
   const [refModules, setRefModules] = useState<Module[]>([]);
   const [refProfessors, setRefProfessors] = useState<ProfessorRow[]>([]);
   const [context, setContext] = useState<ContextSemesters>({
@@ -913,7 +921,33 @@ export function MastersPage(): React.JSX.Element {
     setDetail(null);
     setDetailId(row.id);
     setDetailOpen(true);
+    setWeekSheetDay(dayjs()); // semaine courante par défaut à l'ouverture
     void reloadDetail(row.id);
+  };
+
+  /** P17 — PDF A4 paysage : `sessions:weekSheet` (un jour → lundi côté main). */
+  const printWeekSheet = async (): Promise<void> => {
+    if (detailId == null) return;
+    setWeekSheetLoading(true);
+    try {
+      const res = await api().sessions.weekSheet({
+        master_id: detailId,
+        week_start: weekSheetDay.format('YYYY-MM-DD'),
+      });
+      if (res.ok) {
+        if (res.data.cancelled) {
+          void message.info(t('sessions.sheetCancelled'));
+        } else {
+          void message.success(t('sessions.sheetDone'));
+        }
+      } else {
+        void message.error(errorMessage(res));
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setWeekSheetLoading(false);
+    }
   };
 
   const submit = async (values: MasterFormValues): Promise<ApiResult<unknown>> => {
@@ -1335,7 +1369,36 @@ export function MastersPage(): React.JSX.Element {
               {
                 key: 'sessions',
                 label: t('masters.tabs.sessions'),
-                children: <SessionsTable sessions={detail.upcoming} />,
+                children: (
+                  <Space
+                    direction="vertical"
+                    size="middle"
+                    style={{ width: '100%' }}
+                  >
+                    {/* P17 : feuille de présence hebdo du master (PDF paysage). */}
+                    <Space wrap>
+                      <Text type="secondary">
+                        {t('masters.weekSheetWeek')}
+                      </Text>
+                      <DatePicker
+                        picker="week"
+                        allowClear={false}
+                        value={weekSheetDay}
+                        onChange={(v) => {
+                          if (v) setWeekSheetDay(v);
+                        }}
+                      />
+                      <Button
+                        icon={<PrinterOutlined />}
+                        loading={weekSheetLoading}
+                        onClick={() => void printWeekSheet()}
+                      >
+                        {t('masters.weekSheet')}
+                      </Button>
+                    </Space>
+                    <SessionsTable sessions={detail.upcoming} />
+                  </Space>
+                ),
               },
             ]}
           />

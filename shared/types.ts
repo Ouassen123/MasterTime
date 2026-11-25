@@ -1032,6 +1032,43 @@ export interface NominativeItem {
   status: StudentAttendanceStatus;
 }
 
+// ---------------------------------------------------------------------------
+// P17 — Feuille hebdomadaire + saisie groupée de la feuille de présence
+// ---------------------------------------------------------------------------
+
+/** Payload de `sessions:weekSheet` — feuille hebdo d'un master. */
+export interface WeekSheetInput {
+  master_id: number;
+  /**
+   * Un jour quelconque de la semaine visée ('YYYY-MM-DD') — le main
+   * normalise au lundi de la semaine.
+   */
+  week_start: string;
+}
+
+/**
+ * Entrée de la saisie groupée `sessions:recordSheet` (P17) : marque la
+ * séance REALISEE et écrit les présences nominatives en une seule
+ * transaction — retour de la feuille papier cochée.
+ */
+export interface SheetEntryInput {
+  /** Réalisation effective — défaut : créneau planifié. */
+  actual_date?: string;
+  actual_start_min?: number;
+  actual_end_min?: number;
+  /** Présences nominatives (P/A/J) — liste vide = marquage réalisée seul. */
+  rows: NominativeItem[];
+}
+
+/** Résultat de `sessions:recordSheet`. */
+export interface SheetEntryResult {
+  session_id: number;
+  /** La séance est passée REALISEE dans la transaction. */
+  realised: boolean;
+  /** Lignes nominatives écrites (0 = marquage réalisée seul). */
+  marked: number;
+}
+
 /** Étudiant du registre (`students:list`) + protection BR-22. */
 export interface StudentRow {
   id: number;
@@ -1451,6 +1488,22 @@ export interface WindowApi {
      * Disponible sur TOUTES les séances (la feuille sert pendant le cours).
      */
     attendanceSheet(id: number): Promise<ApiResult<ReportExportFile>>;
+    /**
+     * Feuille de présence hebdomadaire par master (P17) — PDF A4
+     * paysage : colonnes = séances de la semaine, lignes = étudiants
+     * du roster union. `week_start` = un jour quelconque, normalisé
+     * au lundi côté main.
+     */
+    weekSheet(input: WeekSheetInput): Promise<ApiResult<ReportExportFile>>;
+    /**
+     * Saisie groupée de la feuille (P17) — PREVUE/REPORTEE seulement :
+     * marque la séance REALISEE + écrit le nominatif en une
+     * transaction. Une REALISEE se corrige via `attendance:*`.
+     */
+    recordSheet(
+      id: number,
+      input: SheetEntryInput,
+    ): Promise<ApiResult<SheetEntryResult>>;
   };
   generation: {
     run(params: GenerateParams): Promise<ApiResult<GenerationResult>>;

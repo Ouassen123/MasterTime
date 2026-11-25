@@ -13,10 +13,15 @@ import type {
   SessionCreateInput,
   SessionMoveInput,
   SessionStatusInput,
+  SheetEntryInput,
 } from '../../../shared/types';
 import { apiErr } from '../../../shared/types';
-import { buildAttendanceSheetHtml } from '../db/attendance-sheet.service';
+import {
+  buildAttendanceSheetHtml,
+  buildWeekSheetHtml,
+} from '../db/attendance-sheet.service';
 import { checkSessionPlacement } from '../db/conflict.service';
+import { isValidIsoDate } from '../db/date';
 import {
   changeSessionStatus,
   createSession,
@@ -24,6 +29,7 @@ import {
   moveSession,
   setSessionGroups,
 } from '../db/session-edit.service';
+import { recordAttendanceSheet } from '../db/sheet-entry.service';
 import { currentUserId, guard, isId, isObject, type DbGetter } from './helpers';
 import { htmlToPdfFile } from './pdf';
 
@@ -126,4 +132,63 @@ export function registerSessionHandlers(getDb: DbGetter): void {
       return apiErr('Échec de la génération de la feuille de présence.');
     }
   });
+
+  /**
+   * P17 — Feuille de présence hebdomadaire par Master : le main
+   * normalise `week_start` au lundi de la semaine (un jour quelconque
+   * est accepté), génère le HTML paysage puis le rend en PDF via le
+   * même chemin partagé `htmlToPdfFile`. Pas de `requireRole` (BR-24).
+   */
+  ipcMain.handle('sessions:weekSheet', async (_e, input: unknown) => {
+    if (
+      !isObject(input) ||
+      !isId(input.master_id) ||
+      typeof input.week_start !== 'string' ||
+      !isValidIsoDate(input.week_start.trim())
+    ) {
+      return apiErr('Paramètres invalides.');
+    }
+    const db = getDb();
+    if (!db) {
+      return apiErr('Base de données non initialisée.');
+    }
+    try {
+      const doc = buildWeekSheetHtml(
+        db,
+        input.master_id,
+        input.week_start.trim(),
+      );
+      if (!doc.ok) {
+        return doc;
+      }
+      return await htmlToPdfFile({
+        html: doc.data.html,
+        dialogTitle: 'Enregistrer la feuille de présence hebdomadaire',
+        defaultPath: doc.data.suggestedName,
+        landscape: true, // A4 paysage
+      });
+    } catch (err) {
+      console.error('[ipc] weekSheet :', err);
+      return apiErr('Échec de la génération de la feuille hebdomadaire.');
+    }
+  });
+
+  /**
+   * P17 — Saisie groupée de la feuille : marque la séance REALISEE et
+   * écrit les présences nominatives en UNE transaction (service
+   * `sheet-entry` — PREVUE/REPORTEE seulement). Pas de `requireRole`
+   * (BR-24) : le gestionnaire saisit aussi.
+   */
+  ipcMain.handle('sessions:recordSheet', (_e, id: unknown, input: unknown) =>
+    !isId(id) || !isObject(input)
+      ? apiErr('Paramètres invalides.')
+      : guard(getDb, (db) =>
+          recordAttendanceSheet(
+            db,
+            currentUserId(db),
+            id,
+            input as unknown as SheetEntryInput,
+          ),
+        ),
+  );
 }

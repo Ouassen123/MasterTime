@@ -206,6 +206,8 @@
       "groups": "Groupes",
       "sessions": "Séances"
     },
+    "weekSheet": "Feuille de présence hebdo",
+    "weekSheetWeek": "Semaine",
     "counters": {
       "realisees": "Séances réalisées",
       "restantes": "Séances restantes",
@@ -369,7 +371,15 @@
     },
     "attendanceSheet": "Feuille de présence",
     "sheetDone": "Feuille de présence enregistrée.",
-    "sheetCancelled": "Export annulé."
+    "sheetCancelled": "Export annulé.",
+    "sheetEntry": {
+      "action": "Saisir la feuille",
+      "title": "Saisie de la feuille de présence",
+      "actual": "Date réelle (optionnel)",
+      "noStudents": "Aucun étudiant enregistré pour cette séance : elle sera simplement marquée réalisée (comptage impossible).",
+      "saved": "Feuille enregistrée : séance réalisée, {{marked}} présence(s) saisie(s).",
+      "savedEmpty": "Feuille enregistrée : séance marquée réalisée."
+    }
   },
   "generation": {
     "title": "Génération automatique",

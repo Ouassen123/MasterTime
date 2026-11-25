@@ -80,12 +80,15 @@ import type {
   SessionMoveInput,
   SessionRow,
   SessionStatusInput,
+  SheetEntryInput,
+  SheetEntryResult,
   StudentGroupRow,
   StudentInput,
   StudentRow,
   TimeSlotInput,
   TimeSlotRow,
   WeekFilter,
+  WeekSheetInput,
   WindowApi,
 } from '../../shared/types';
 
@@ -247,6 +250,17 @@ const api: WindowApi = {
       ipcRenderer.invoke('sessions:remove', id),
     attendanceSheet: (id: number): Promise<ApiResult<ReportExportFile>> =>
       ipcRenderer.invoke('sessions:attendanceSheet', id),
+    // P17 — feuille hebdomadaire par master (PDF A4 paysage).
+    weekSheet: (
+      input: WeekSheetInput,
+    ): Promise<ApiResult<ReportExportFile>> =>
+      ipcRenderer.invoke('sessions:weekSheet', input),
+    // P17 — saisie groupée : REALISEE + nominatif en une transaction.
+    recordSheet: (
+      id: number,
+      input: SheetEntryInput,
+    ): Promise<ApiResult<SheetEntryResult>> =>
+      ipcRenderer.invoke('sessions:recordSheet', id, input),
   },
   registry: {
     list: (
