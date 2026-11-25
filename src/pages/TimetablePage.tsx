@@ -239,22 +239,48 @@ function SessionBlock(props: {
         zIndex: highlight ? 3 : 1,
       }}
     >
-      <div style={{ fontWeight: 600, color: '#FFFFFF' }}>
-        {/* Pastille statut cerclée de blanc (visible sur fond plein). */}
-        <span
-          title={t(`sessionStatus.${s.effective_status}`)}
-          style={{
-            display: 'inline-block',
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: statusColor,
-            boxShadow: '0 0 0 1.5px #FFFFFF',
-            marginRight: 5,
-            verticalAlign: 1,
-          }}
-        />
-        {minToHHMM(s.start_min)}–{minToHHMM(s.end_min)}
+      <div
+        style={{
+          fontWeight: 600,
+          color: '#FFFFFF',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {/* Pastille statut cerclée de blanc (visible sur fond plein). */}
+          <span
+            title={t(`sessionStatus.${s.effective_status}`)}
+            style={{
+              display: 'inline-block',
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: statusColor,
+              boxShadow: '0 0 0 1.5px #FFFFFF',
+              marginRight: 5,
+              verticalAlign: 1,
+            }}
+          />
+          {minToHHMM(s.start_min)}–{minToHHMM(s.end_min)}
+        </span>
+        {/* Badge niveau du master : M1 (S1/S2) ou M2 (S3/S4). */}
+        {s.master.level && (
+          <span
+            style={{
+              fontSize: Math.max(9, fontSize - 2),
+              fontWeight: 700,
+              border: '1px solid rgba(255,255,255,0.75)',
+              borderRadius: 4,
+              padding: '0 3px',
+              flexShrink: 0,
+            }}
+          >
+            {s.master.level}
+          </span>
+        )}
       </div>
       <div
         dir="auto"

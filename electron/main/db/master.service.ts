@@ -43,6 +43,8 @@ const MASTER_LIST_SELECT = `
   SELECT m.id, m.code, m.name, m.filiere, m.department, m.responsible_name,
          m.academic_year_id, y.label AS academic_year_label,
          m.semester_id, sem.label AS semester_label,
+         CASE WHEN sem.ordinal BETWEEN 1 AND 2 THEN 'M1'
+              WHEN sem.ordinal BETWEEN 3 AND 4 THEN 'M2' END AS level,
          m.status, m.is_demo, m.temps_amenage,
          (SELECT count(*) FROM master_module mm
             WHERE mm.master_id = m.id) AS nb_modules,

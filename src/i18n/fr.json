@@ -176,6 +176,7 @@
     "code": "Code",
     "name": "Nom",
     "filiere": "Filière",
+    "level": "Niveau",
     "department": "Département",
     "responsible": "Responsable",
     "academicYear": "Année universitaire",

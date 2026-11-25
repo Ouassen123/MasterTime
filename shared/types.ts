@@ -258,6 +258,8 @@ export interface MasterRow {
   academic_year_label: string;
   semester_id: number | null;
   semester_label: string | null;
+  /** Niveau dérivé du semestre : M1 (S1/S2) ou M2 (S3/S4), null si absent. */
+  level: 'M1' | 'M2' | null;
   status: MasterStatus;
   is_demo: number;
   /**
@@ -484,6 +486,8 @@ export interface SessionRow {
     name: string;
     /** 1 = master « temps aménagé » (payant) — couleur dédiée dans l'EDT. */
     temps_amenage: number;
+    /** Niveau dérivé du semestre du master : M1 (S1/S2) ou M2 (S3/S4). */
+    level: 'M1' | 'M2' | null;
   };
   module: { id: number; code: string; name: string };
   professor: { id: number; full_name: string };

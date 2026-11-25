@@ -69,6 +69,8 @@ function sessionSelectSql(extraCols = ''): string {
          s.date, s.start_min, s.end_min, s.status, s.comment,
          m.id AS master_id, m.code AS master_code, m.name AS master_name,
          m.temps_amenage AS master_temps_amenage,
+         CASE WHEN sem2.ordinal BETWEEN 1 AND 2 THEN 'M1'
+              WHEN sem2.ordinal BETWEEN 3 AND 4 THEN 'M2' END AS master_level,
          mo.id AS module_id, mo.code AS module_code, mo.name AS module_name,
          p.id AS professor_id, p.full_name AS professor_name,
          r.id AS room_id, r.name AS room_name, r.capacity AS room_capacity,
@@ -83,6 +85,7 @@ function sessionSelectSql(extraCols = ''): string {
     FROM session s
     JOIN master_module mm ON mm.id = s.master_module_id
     JOIN master m ON m.id = mm.master_id
+    LEFT JOIN semester sem2 ON sem2.id = m.semester_id
     JOIN module mo ON mo.id = mm.module_id
     JOIN professor p ON p.id = s.professor_id
     JOIN room r ON r.id = s.room_id`;
@@ -101,6 +104,7 @@ interface SessionSqlRow {
   master_code: string;
   master_name: string;
   master_temps_amenage: number;
+  master_level: 'M1' | 'M2' | null;
   module_id: number;
   module_code: string;
   module_name: string;
@@ -126,6 +130,7 @@ function toSessionRow(r: SessionSqlRow, today: string): SessionRow {
       code: r.master_code,
       name: r.master_name,
       temps_amenage: r.master_temps_amenage,
+      level: r.master_level,
     },
     module: { id: r.module_id, code: r.module_code, name: r.module_name },
     professor: { id: r.professor_id, full_name: r.professor_name },

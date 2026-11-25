@@ -1212,6 +1212,25 @@ export function MastersPage(): React.JSX.Element {
       render: (v: string | null) => (v ? <span dir="auto">{v}</span> : '—'),
     },
     {
+      key: 'level',
+      title: t('masters.level'),
+      dataIndex: 'level',
+      width: 110,
+      filters: [
+        { text: 'M1', value: 'M1' },
+        { text: 'M2', value: 'M2' },
+      ],
+      onFilter: (value, row) => row.level === value,
+      render: (v: 'M1' | 'M2' | null, row) =>
+        v ? (
+          <Tag color={v === 'M1' ? 'blue' : 'purple'} title={row.semester_label ?? undefined}>
+            {v}
+          </Tag>
+        ) : (
+          '—'
+        ),
+    },
+    {
       key: 'nb_modules',
       title: t('masters.nbModules'),
       dataIndex: 'nb_modules',

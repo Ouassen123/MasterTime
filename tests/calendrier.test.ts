@@ -304,6 +304,7 @@ describe('listSessionsWeek', () => {
       code: 'M-T',
       name: 'Master T',
       temps_amenage: 0,
+      level: 'M2',
     });
     expect(s.module.code).toBe('MOD-T');
     expect(s.professor.full_name).toBe('Prof Un');
