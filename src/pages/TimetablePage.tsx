@@ -110,11 +110,12 @@ interface TtColors {
   amenage: string;
 }
 const DEFAULT_TT_COLORS: TtColors = {
-  licence: '#2563EB',
-  normal: '#DC2626',
+  licence: '#64748B',
+  normal: '#2563EB',
   amenage: '#D97706',
 };
-const TT_COLORS_KEY = 'mt.tt.colors';
+// v2 : palette par défaut revue (bleu = master, ardoise = licence).
+const TT_COLORS_KEY = 'mt.tt.colors.v2';
 
 function loadTtColors(): TtColors {
   try {
@@ -122,8 +123,8 @@ function loadTtColors(): TtColors {
     if (raw) {
       const p = JSON.parse(raw) as Partial<TtColors>;
       return {
-        licence: typeof p.licence === 'string' ? p.licence : '#2563EB',
-        normal: typeof p.normal === 'string' ? p.normal : '#DC2626',
+        licence: typeof p.licence === 'string' ? p.licence : '#64748B',
+        normal: typeof p.normal === 'string' ? p.normal : '#2563EB',
         amenage: typeof p.amenage === 'string' ? p.amenage : '#D97706',
       };
     }
@@ -213,7 +214,7 @@ function SessionBlock(props: {
         height,
         left: `${s.lane * widthPct}%`,
         width: `calc(${widthPct}% - 2px)`,
-        background: `${cycle}1F`,
+        background: `${cycle}26`,
         borderLeft: `4px solid ${cycle}`,
         borderRadius: 5,
         padding: '3px 5px',
@@ -304,7 +305,7 @@ function OccupancyBlock(props: {
           height,
           left: 1,
           right: 1,
-          background: `${color}1F`,
+          background: `${color}26`,
           borderLeft: `4px solid ${color}`,
           borderRadius: 5,
           padding: '2px 4px',
