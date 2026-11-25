@@ -18,9 +18,37 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       locale={frFR}
       theme={{
         token: {
-          colorPrimary: '#1D4ED8',
-          borderRadius: 6,
-          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          colorPrimary: '#2563EB',
+          colorInfo: '#2563EB',
+          borderRadius: 8,
+          controlHeight: 34,
+          colorTextBase: '#0F172A',
+          colorBgLayout: '#F1F5F9',
+          fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
+        },
+        components: {
+          Layout: {
+            siderBg: '#0F172A',
+            headerBg: '#FFFFFF',
+            headerHeight: 60,
+            headerPadding: '0 24px',
+          },
+          Menu: {
+            darkItemBg: 'transparent',
+            darkSubMenuItemBg: 'transparent',
+            darkItemColor: 'rgba(255,255,255,0.62)',
+            darkItemHoverColor: '#FFFFFF',
+            darkItemHoverBg: 'rgba(255,255,255,0.08)',
+            darkItemSelectedBg: '#2563EB',
+            darkItemSelectedColor: '#FFFFFF',
+            itemBorderRadius: 8,
+            itemHeight: 42,
+            itemMarginBlock: 4,
+          },
+          Table: {
+            headerBg: '#F8FAFC',
+            headerColor: '#475569',
+          },
         },
       }}
     >

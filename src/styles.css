@@ -1,8 +1,42 @@
-/* Styles globaux — P6a. */
+/* Styles globaux — design system MasterTime. */
 
 body {
   margin: 0;
-  background: #f4f5f7;
+  background: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Titres de pages — hiérarchie nette. */
+h1.ant-typography,
+h2.ant-typography,
+h3.ant-typography {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+}
+
+/* Cartes — ombre douce, bordure discrète (aspect « panneau » pro). */
+.ant-card {
+  border: 1px solid #e8ecf1;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.ant-card .ant-card-head {
+  border-bottom-color: #eef1f5;
+  font-weight: 600;
+}
+
+/* Tableaux — en-têtes marqués, lignes aérées. */
+.ant-table-thead > tr > th {
+  font-weight: 600;
+}
+
+/* Menu latéral sombre — arrondis sur toute la ligne. */
+.ant-menu-dark .ant-menu-item {
+  margin-inline: 0;
+  width: 100%;
 }
 
 /* Ligne de référentiel désactivée (is_active = 0) — grisée, toujours lisible. */
@@ -11,7 +45,34 @@ body {
   background: #fafafa;
 }
 
-/* Bloc séance de la grille hebdo (P7a) — hover subtil, pas d'ombre (DESIGN). */
+/* Bloc séance de la grille hebdo — léger relief + hover (DESIGN). */
+.tt-block {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  transition:
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
+}
 .tt-block:hover {
-  filter: brightness(0.96);
+  filter: brightness(0.98);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
+}
+
+/* Barres de défilement discrètes. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }

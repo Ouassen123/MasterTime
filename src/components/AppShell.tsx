@@ -10,10 +10,17 @@ import { Alert, Layout, Menu, Select, Space, Tooltip, Typography, message } from
 import {
   BankOutlined,
   BarChartOutlined,
+  BookOutlined,
   CalendarOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  HomeOutlined,
+  ScheduleOutlined,
+  SettingOutlined,
   SwapOutlined,
   TeamOutlined,
   ThunderboltOutlined,
+  UserDeleteOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -40,7 +47,7 @@ interface NavEntry {
 /** Ordre exact du brief (DESIGN note) — actives : Dashboard, Masters,
  *  Modules, Professeurs, Salles. */
 const NAV: NavEntry[] = [
-  { key: 'dashboard', path: '/', enabled: true },
+  { key: 'dashboard', path: '/', enabled: true, icon: <DashboardOutlined /> },
   { key: 'masters', path: '/masters', enabled: true, icon: <BankOutlined /> },
   {
     key: 'professors',
@@ -48,8 +55,8 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <TeamOutlined />,
   },
-  { key: 'modules', path: '/modules', enabled: true },
-  { key: 'rooms', path: '/salles', enabled: true },
+  { key: 'modules', path: '/modules', enabled: true, icon: <BookOutlined /> },
+  { key: 'rooms', path: '/salles', enabled: true, icon: <HomeOutlined /> },
   {
     key: 'schedule',
     path: '/emplois-du-temps',
@@ -62,8 +69,13 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <ThunderboltOutlined />,
   },
-  { key: 'sessions', path: '/seances', enabled: true },
-  { key: 'absences', path: '/absences', enabled: false },
+  { key: 'sessions', path: '/seances', enabled: true, icon: <ScheduleOutlined /> },
+  {
+    key: 'absences',
+    path: '/absences',
+    enabled: false,
+    icon: <UserDeleteOutlined />,
+  },
   {
     key: 'reports',
     path: '/rapports',
@@ -76,8 +88,20 @@ const NAV: NavEntry[] = [
     enabled: true,
     icon: <SwapOutlined />,
   },
-  { key: 'settings', path: '/parametres', enabled: true, adminOnly: true },
-  { key: 'backups', path: '/sauvegardes', enabled: true, adminOnly: true },
+  {
+    key: 'settings',
+    path: '/parametres',
+    enabled: true,
+    adminOnly: true,
+    icon: <SettingOutlined />,
+  },
+  {
+    key: 'backups',
+    path: '/sauvegardes',
+    enabled: true,
+    adminOnly: true,
+    icon: <DatabaseOutlined />,
+  },
 ];
 
 export function AppShell(): React.JSX.Element {
@@ -168,45 +192,82 @@ export function AppShell(): React.JSX.Element {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={240} theme="light">
-        <div style={{ padding: '16px 16px 8px' }}>
-          <Title level={4} style={{ margin: 0 }}>
-            {t('app.title')}
-          </Title>
+      <Sider width={248} theme="dark" style={{ background: '#0F172A' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '20px 20px 16px',
+          }}
+        >
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: 15,
+              letterSpacing: '0.02em',
+              flexShrink: 0,
+            }}
+          >
+            MT
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <Title level={5} style={{ margin: 0, color: '#fff', lineHeight: 1.2 }}>
+              {t('app.title')}
+            </Title>
+            <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>
+              FSJP Tanger
+            </Text>
+          </div>
         </div>
         <Menu
           mode="inline"
+          theme="dark"
           items={menuItems}
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
-          style={{ borderInlineEnd: 'none' }}
+          style={{ borderInlineEnd: 'none', padding: '0 12px' }}
         />
       </Sider>
       <Layout>
         <Header
           style={{
             background: '#fff',
-            height: 56,
-            lineHeight: '56px',
+            height: 60,
+            lineHeight: '60px',
             padding: '0 24px',
-            borderBottom: '1px solid #E5E7EB',
+            boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
           }}
         >
-          <Text type="secondary">
-            {context?.academicYear
-              ? t('topbar.context', {
-                  year: context.academicYear,
-                  semester: context.semester ?? '—',
-                })
-              : t('topbar.contextEmpty')}
-          </Text>
-          <Space>
+          <Space size={8}>
+            <CalendarOutlined style={{ color: '#2563EB' }} />
+            <Text strong style={{ fontSize: 15 }}>
+              {context?.academicYear
+                ? t('topbar.context', {
+                    year: context.academicYear,
+                    semester: context.semester ?? '—',
+                  })
+                : t('topbar.contextEmpty')}
+            </Text>
+          </Space>
+          <Space size={8}>
             <Text type="secondary">{t('topbar.profile')}</Text>
             <Select
-              style={{ minWidth: 180 }}
+              style={{ minWidth: 200 }}
               value={currentProfile?.id}
               options={profiles.map((p) => ({
                 value: p.id,
@@ -230,7 +291,7 @@ export function AppShell(): React.JSX.Element {
         {hasDemo && (
           <Alert type="warning" showIcon message={t('demo.banner')} />
         )}
-        <Content style={{ padding: 24, background: '#F4F5F7' }}>
+        <Content style={{ padding: 24, background: '#F1F5F9' }}>
           <Outlet />
         </Content>
       </Layout>
