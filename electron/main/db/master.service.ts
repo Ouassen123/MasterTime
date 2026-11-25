@@ -201,6 +201,14 @@ function getMasterModuleRow(
                WHERE s.master_module_id = mm.id
                  AND s.status != 'ANNULEE') AS nb_seances,
             (SELECT count(*) FROM session s
+               WHERE s.master_module_id = mm.id
+                 AND s.status = 'REALISEE') AS done_sessions,
+            (SELECT COALESCE(sum(COALESCE(s.actual_end_min - s.actual_start_min,
+                                          s.end_min - s.start_min)), 0)
+               FROM session s
+               WHERE s.master_module_id = mm.id
+                 AND s.status = 'REALISEE') AS done_min,
+            (SELECT count(*) FROM session s
                WHERE s.master_module_id = mm.id) AS session_count
        FROM master_module mm
        JOIN module mo ON mo.id = mm.module_id
@@ -228,6 +236,14 @@ function listMasterModules(
             (SELECT count(*) FROM session s
                WHERE s.master_module_id = mm.id
                  AND s.status != 'ANNULEE') AS nb_seances,
+            (SELECT count(*) FROM session s
+               WHERE s.master_module_id = mm.id
+                 AND s.status = 'REALISEE') AS done_sessions,
+            (SELECT COALESCE(sum(COALESCE(s.actual_end_min - s.actual_start_min,
+                                          s.end_min - s.start_min)), 0)
+               FROM session s
+               WHERE s.master_module_id = mm.id
+                 AND s.status = 'REALISEE') AS done_min,
             (SELECT count(*) FROM session s
                WHERE s.master_module_id = mm.id) AS session_count
        FROM master_module mm
@@ -267,6 +283,31 @@ function listUpcomingSessions(
   );
 }
 
+/** Historique complet des séances du master, récentes d'abord. */
+function listHistorySessions(
+  db: DatabaseSync,
+  masterId: number,
+): MasterSession[] {
+  return all<MasterSession>(
+    db,
+    `SELECT s.id, s.date, s.start_min, s.end_min, s.status,
+            mo.name AS module_name, m.name AS master_name,
+            r.name AS room_name, p.full_name AS professor_name,
+            g.name AS group_name
+       FROM session s
+       JOIN master_module mm ON mm.id = s.master_module_id
+       JOIN module mo ON mo.id = mm.module_id
+       JOIN master m ON m.id = mm.master_id
+       JOIN room r ON r.id = s.room_id
+       JOIN professor p ON p.id = s.professor_id
+       LEFT JOIN student_group g ON g.id = mm.student_group_id
+      WHERE mm.master_id = ?
+      ORDER BY s.date DESC, s.start_min DESC
+      LIMIT 500`,
+    masterId,
+  );
+}
+
 /** Fiche de suivi : master + groupes + master-modules + compteurs + 20 prochaines. */
 export function getMasterDetail(
   db: DatabaseSync,
@@ -282,6 +323,7 @@ export function getMasterDetail(
     groups: listGroups(db, id),
     modules: listMasterModules(db, id),
     upcoming: listUpcomingSessions(db, id, today),
+    history: listHistorySessions(db, id),
   });
 }
 

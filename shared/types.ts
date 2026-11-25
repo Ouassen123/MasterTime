@@ -228,6 +228,8 @@ export interface ProfessorDetail {
   absences: AbsenceRow[];
   /** 20 prochaines séances (date >= aujourd'hui, toutes statuts). */
   upcoming: ImpactedSession[];
+  /** Historique complet des séances du professeur, récentes d'abord. */
+  history: ImpactedSession[];
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +338,10 @@ export interface MasterModuleRow {
   is_fixed: number;
   /** Séances réelles non annulées rattachées. */
   nb_seances: number;
+  /** Séances au statut REALISEE (progression du suivi). */
+  done_sessions: number;
+  /** Σ minutes réellement enseignées (actual_* sinon prévues) des REALISEE. */
+  done_min: number;
   /** Toutes les séances référençant le master-module (blocage BR-22). */
   session_count: number;
 }
@@ -372,12 +378,14 @@ export interface MasterSession extends ImpactedSession {
   group_name: string | null;
 }
 
-/** Fiche master : master + compteurs, groupes, master-modules, 20 prochaines. */
+/** Fiche master : master + compteurs, groupes, master-modules, séances. */
 export interface MasterDetail {
   master: MasterRow & MasterCounters;
   groups: StudentGroupRow[];
   modules: MasterModuleRow[];
   upcoming: MasterSession[];
+  /** Toutes les séances du master, récentes d'abord. */
+  history: MasterSession[];
 }
 
 /**

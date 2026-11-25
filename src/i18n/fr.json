@@ -131,7 +131,10 @@
       "master": "Master",
       "room": "Salle",
       "status": "Statut",
-      "empty": "Aucune séance à venir"
+      "upcoming": "À venir",
+      "history": "Historique",
+      "empty": "Aucune séance à venir",
+      "emptyHistory": "Aucune séance enregistrée"
     },
     "availability": {
       "weekday": "Jour",
@@ -202,9 +205,19 @@
     "refusedBody": "Ce master est lié à {{count}} donnée(s) : suppression impossible. Voulez-vous l'archiver à la place ?",
     "tabs": {
       "infos": "Infos",
+      "suivi": "Suivi",
       "modules": "Modules",
       "groups": "Groupes",
       "sessions": "Séances"
+    },
+    "suivi": {
+      "progress": "Progression du volume",
+      "progressText": "{{done}} enseignées / {{total}} prévues",
+      "perModule": "Avancement par module",
+      "planned": "Prévues",
+      "done": "Réalisées",
+      "hoursDone": "Heures faites",
+      "volume": "Volume"
     },
     "weekSheet": "Feuille de présence hebdo",
     "weekSheetWeek": "Semaine",
@@ -224,7 +237,10 @@
       "group": "Groupe",
       "room": "Salle",
       "status": "Statut",
-      "empty": "Aucune séance à venir"
+      "upcoming": "À venir",
+      "history": "Historique",
+      "empty": "Aucune séance à venir",
+      "emptyHistory": "Aucune séance enregistrée"
     }
   },
   "groups": {
@@ -310,6 +326,14 @@
       "reported": "→ reportée"
     },
     "clickToCreate": "Cliquer pour créer une séance",
+    "zoom": {
+      "compact": "Compact",
+      "standard": "Standard",
+      "large": "Grand"
+    },
+    "ghost": {
+      "new": "Nouvelle séance"
+    },
     "detail": {
       "title": "Détail de la séance",
       "date": "Date",

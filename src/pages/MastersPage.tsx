@@ -20,6 +20,8 @@ import {
   InputNumber,
   List,
   Modal,
+  Progress,
+  Segmented,
   Select,
   Space,
   Statistic,
@@ -132,9 +134,167 @@ function SessionsTable({ sessions }: { sessions: MasterSession[] }): React.JSX.E
       rowKey="id"
       columns={columns}
       dataSource={sessions}
-      pagination={false}
+      pagination={{ pageSize: 15, hideOnSinglePage: true }}
       locale={{ emptyText: t('masters.session.empty') }}
     />
+  );
+}
+
+/** Onglet Séances : bascule « À venir » (20 prochaines) / « Historique ». */
+function SessionsPanel({
+  upcoming,
+  history,
+}: {
+  upcoming: MasterSession[];
+  history: MasterSession[];
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<'upcoming' | 'history'>('upcoming');
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Segmented
+        value={mode}
+        onChange={(v) => setMode(v as 'upcoming' | 'history')}
+        options={[
+          { value: 'upcoming', label: t('masters.session.upcoming') },
+          {
+            value: 'history',
+            label: `${t('masters.session.history')} (${history.length})`,
+          },
+        ]}
+      />
+      <SessionsTable sessions={mode === 'upcoming' ? upcoming : history} />
+    </Space>
+  );
+}
+
+/**
+ * Onglet Suivi : compteurs AD-7 + progression du volume global et
+ * par module (heures réellement enseignées / volume prévu).
+ */
+function SuiviTab({
+  master,
+  modules,
+}: {
+  master: MasterDetail['master'];
+  modules: MasterModuleRow[];
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const m = master;
+  const pct =
+    m.volume_prevu_min > 0
+      ? Math.min(
+          100,
+          Math.round((m.heures_enseignees_min / m.volume_prevu_min) * 100),
+        )
+      : 0;
+  const columns: ColumnsType<MasterModuleRow> = [
+    {
+      key: 'module',
+      title: t('masterModules.module'),
+      dataIndex: 'module_name',
+      render: (v: string) => <span dir="auto">{v}</span>,
+    },
+    {
+      key: 'professor',
+      title: t('masterModules.professor'),
+      dataIndex: 'professor_name',
+      render: (v: string) => <span dir="auto">{v}</span>,
+    },
+    {
+      key: 'planned',
+      title: t('masters.suivi.planned'),
+      dataIndex: 'planned_sessions',
+      width: 90,
+      align: 'center',
+    },
+    {
+      key: 'done',
+      title: t('masters.suivi.done'),
+      dataIndex: 'done_sessions',
+      width: 90,
+      align: 'center',
+    },
+    {
+      key: 'hoursDone',
+      title: t('masters.suivi.hoursDone'),
+      dataIndex: 'done_min',
+      width: 110,
+      align: 'center',
+      render: (v: number) => fmtHM(v),
+    },
+    {
+      key: 'volume',
+      title: t('masters.suivi.volume'),
+      dataIndex: 'volume_min',
+      width: 90,
+      align: 'center',
+      render: (v: number) => fmtHM(v),
+    },
+    {
+      key: 'progress',
+      title: '',
+      render: (_v, mm) => {
+        const p =
+          mm.volume_min > 0
+            ? Math.min(100, Math.round((mm.done_min / mm.volume_min) * 100))
+            : 0;
+        return <Progress percent={p} size="small" />;
+      },
+    },
+  ];
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap size="large">
+        <Statistic
+          title={t('masters.counters.realisees')}
+          value={m.nb_realisees}
+          valueStyle={{ color: '#16A34A' }}
+        />
+        <Statistic
+          title={t('masters.counters.restantes')}
+          value={m.nb_restantes}
+        />
+        <Statistic
+          title={t('masters.counters.nonRealisees')}
+          value={m.nb_non_realisees}
+          valueStyle={m.nb_non_realisees > 0 ? { color: '#EA580C' } : undefined}
+        />
+        <Statistic
+          title={t('masters.counters.annulees')}
+          value={m.nb_annulees}
+          valueStyle={m.nb_annulees > 0 ? { color: '#DC2626' } : undefined}
+        />
+        <Statistic
+          title={t('masters.counters.reportees')}
+          value={m.nb_reportees}
+        />
+        <Statistic
+          title={t('masters.counters.heures')}
+          value={fmtHM(m.heures_enseignees_min)}
+        />
+      </Space>
+      <div>
+        <Text type="secondary">{t('masters.suivi.progress')}</Text>
+        <Progress
+          percent={pct}
+          format={() =>
+            t('masters.suivi.progressText', {
+              done: fmtHM(m.heures_enseignees_min),
+              total: fmtHM(m.volume_prevu_min),
+            })
+          }
+        />
+      </div>
+      <Table<MasterModuleRow>
+        size="small"
+        rowKey="id"
+        title={() => <Text strong>{t('masters.suivi.perModule')}</Text>}
+        columns={columns}
+        dataSource={modules}
+        pagination={false}
+      />
+    </Space>
   );
 }
 
@@ -1337,6 +1497,13 @@ export function MastersPage(): React.JSX.Element {
                 ),
               },
               {
+                key: 'suivi',
+                label: t('masters.tabs.suivi'),
+                children: (
+                  <SuiviTab master={m} modules={detail.modules} />
+                ),
+              },
+              {
                 key: 'modules',
                 label: t('masters.tabs.modules'),
                 children: (
@@ -1396,7 +1563,10 @@ export function MastersPage(): React.JSX.Element {
                         {t('masters.weekSheet')}
                       </Button>
                     </Space>
-                    <SessionsTable sessions={detail.upcoming} />
+                    <SessionsPanel
+                      upcoming={detail.upcoming}
+                      history={detail.history}
+                    />
                   </Space>
                 ),
               },

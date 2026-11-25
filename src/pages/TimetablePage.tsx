@@ -22,6 +22,7 @@ import {
   Form,
   Input,
   Modal,
+  Segmented,
   Select,
   Skeleton,
   Space,
@@ -88,6 +89,14 @@ type Scope =
 
 const DAY_START = 7 * 60; // 07:00
 const DAY_END = 20 * 60; // 20:00 → axe 780 min
+
+/** Niveaux de zoom de la grille hebdo (px par minute). */
+type ZoomLevel = 'compact' | 'standard' | 'large';
+const ZOOM_SCALE: Record<ZoomLevel, number> = {
+  compact: 1,
+  standard: 1.35,
+  large: 1.7,
+};
 const HOURS = Array.from(
   { length: (DAY_END - DAY_START) / 60 + 1 },
   (_, i) => DAY_START + i * 60,
@@ -136,18 +145,22 @@ function SessionBlock(props: {
   session: Lane;
   highlight: boolean;
   highlightColor: string;
+  z: number;
   onClick: () => void;
 }): React.JSX.Element | null {
-  const { session: s, highlight, highlightColor, onClick } = props;
+  const { session: s, highlight, highlightColor, z, onClick } = props;
   const { t } = useTranslation();
   const color = STATUS_COLORS[s.effective_status];
   // Clip à l'axe 07:00–20:00 (séance débordante ou hors axe).
   const startC = Math.max(s.start_min, DAY_START);
   const endC = Math.min(s.end_min, DAY_END);
   if (endC - startC <= 0) return null;
-  const top = startC - DAY_START;
-  const height = Math.max(18, endC - startC);
+  const top = (startC - DAY_START) * z;
+  const height = Math.max(18, (endC - startC) * z);
   const widthPct = 100 / s.lanes;
+  // Lisibilité : taille de texte et retour à la ligne adaptés au zoom.
+  const fontSize = z >= 1.5 ? 12.5 : z > 1 ? 12 : 11;
+  const canWrap = height >= 55;
   return (
     <div
       role="button"
@@ -165,12 +178,12 @@ function SessionBlock(props: {
         width: `calc(${widthPct}% - 2px)`,
         background: `${color}1F`,
         borderLeft: `3px solid ${color}`,
-        borderRadius: 4,
-        padding: '2px 4px',
+        borderRadius: 5,
+        padding: '3px 5px',
         overflow: 'hidden',
         cursor: 'pointer',
-        fontSize: 11,
-        lineHeight: 1.25,
+        fontSize,
+        lineHeight: 1.3,
         outline: highlight ? `2px solid ${highlightColor}` : 'none',
         zIndex: highlight ? 3 : 1,
       }}
@@ -182,9 +195,16 @@ function SessionBlock(props: {
         dir="auto"
         style={{
           color: '#111827',
+          fontWeight: 500,
           textDecoration:
             s.effective_status === 'ANNULEE' ? 'line-through' : 'none',
-          whiteSpace: 'nowrap',
+          ...(canWrap
+            ? {
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical' as const,
+              }
+            : { whiteSpace: 'nowrap' as const }),
           textOverflow: 'ellipsis',
           overflow: 'hidden',
         }}
@@ -210,13 +230,16 @@ function SessionBlock(props: {
   );
 }
 
-function OccupancyBlock(props: { occ: OccupancyRow }): React.JSX.Element | null {
-  const { occ } = props;
+function OccupancyBlock(props: {
+  occ: OccupancyRow;
+  z: number;
+}): React.JSX.Element | null {
+  const { occ, z } = props;
   const startC = Math.max(occ.start_min, DAY_START);
   const endC = Math.min(occ.end_min, DAY_END);
   if (endC - startC <= 0) return null;
-  const top = startC - DAY_START;
-  const height = Math.max(16, endC - startC);
+  const top = (startC - DAY_START) * z;
+  const height = Math.max(16, (endC - startC) * z);
   return (
     <Tooltip
       title={<span dir="auto">{`${occ.label} · ${occ.module ?? ''}`}</span>}
@@ -230,10 +253,10 @@ function OccupancyBlock(props: { occ: OccupancyRow }): React.JSX.Element | null 
           right: 1,
           background: '#4B55631F',
           borderLeft: '3px solid #4B5563',
-          borderRadius: 4,
+          borderRadius: 5,
           padding: '2px 4px',
           overflow: 'hidden',
-          fontSize: 11,
+          fontSize: z > 1 ? 12 : 11,
           lineHeight: 1.25,
           color: '#4B5563',
           // Zone bloquée : ni création ni détail — pas le curseur « cell ».
@@ -254,6 +277,13 @@ export function TimetablePage(): React.JSX.Element {
 
   // --- Portée & navigation ----------------------------------------------------
   const [scope, setScope] = useState<Scope>('week');
+  const [zoom, setZoom] = useState<ZoomLevel>('standard');
+  const z = ZOOM_SCALE[zoom];
+  // Aperçu « créneau possible » suivant la souris sur la grille hebdo.
+  const [ghost, setGhost] = useState<{
+    dayKey: string;
+    startMin: number;
+  } | null>(null);
   const [weekStart, setWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()));
   const [entityId, setEntityId] = useState<number | undefined>(undefined);
   const [monthValue, setMonthValue] = useState<Dayjs>(() => dayjs());
@@ -637,25 +667,49 @@ export function TimetablePage(): React.JSX.Element {
     setCreateOpen(true);
   };
 
+  /** Position px dans la colonne → minute de début (snap 15 min, borné). */
+  const offsetToStartMin = (offsetY: number): number => {
+    const span = DAY_END - DAY_START;
+    const minutes = Math.max(0, Math.min(offsetY / z, span));
+    const snapped = Math.round(minutes / 15) * 15;
+    // ≥15 min garanti : le dernier créneau possible s'arrête à DAY_END.
+    return Math.min(DAY_START + snapped, DAY_END - 15);
+  };
+
+  /** Y du curseur relatif au haut de la colonne (quel que soit le bloc). */
+  const columnY = (e: React.MouseEvent<HTMLDivElement>): number =>
+    e.clientY - e.currentTarget.getBoundingClientRect().top;
+
   /**
-   * Clic sur la zone vide d'une colonne-jour : `offsetY` = minutes
-   * depuis DAY_START (1 px = 1 min), snap 15 min. Les blocs
-   * séance/occupation ont leur propre onClick — seul un clic dont la
-   * cible est le fond de la colonne (`e.target === e.currentTarget`)
-   * déclenche la création.
+   * Clic sur la zone vide d'une colonne-jour : ouvre la création au
+   * créneau pointé. Les blocs séance/occupation ont leur propre onClick —
+   * seul un clic dont la cible est le fond de la colonne
+   * (`e.target === e.currentTarget`) déclenche la création.
    */
   const onDayColumnClick = (
     d: Dayjs,
     e: React.MouseEvent<HTMLDivElement>,
   ): void => {
     if (e.target !== e.currentTarget) return;
-    const span = DAY_END - DAY_START;
-    const offsetY = Math.max(0, Math.min(e.nativeEvent.offsetY, span));
-    const snapped = Math.round(offsetY / 15) * 15;
-    // ≥15 min garanti : le dernier créneau possible s'arrête à DAY_END.
-    const startMin = Math.min(DAY_START + snapped, DAY_END - 15);
+    const startMin = offsetToStartMin(columnY(e));
     const endMin = Math.min(startMin + 120, DAY_END);
     openCreateAt(d, startMin, endMin);
+  };
+
+  /**
+   * Survol d'une colonne-jour : aperçu en pointillés du créneau qui
+   * serait créé (visibilité des plages libres pour la planification).
+   */
+  const onDayColumnMove = (
+    dayKey: string,
+    e: React.MouseEvent<HTMLDivElement>,
+  ): void => {
+    const startMin = offsetToStartMin(columnY(e));
+    setGhost((prev) =>
+      prev && prev.dayKey === dayKey && prev.startMin === startMin
+        ? prev
+        : { dayKey, startMin },
+    );
   };
 
   const onCreateMaster = async (masterId: number): Promise<void> => {
@@ -763,16 +817,16 @@ export function TimetablePage(): React.JSX.Element {
             key={d.format('YYYY-MM-DD')}
             style={{
               flex: 1,
-              padding: '6px 4px',
+              padding: '8px 4px',
               textAlign: 'center',
               borderLeft: '1px solid #E5E7EB',
               background: d.isSame(dayjs(), 'day') ? '#2563EB14' : '#fff',
             }}
           >
-            <div style={{ fontWeight: 600, fontSize: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>
               {weekdays[i]}
             </div>
-            <Text type="secondary" style={{ fontSize: 11 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
               {d.format('DD/MM')}
             </Text>
           </div>
@@ -786,7 +840,7 @@ export function TimetablePage(): React.JSX.Element {
               key={h}
               style={{
                 position: 'absolute',
-                top: h - DAY_START,
+                top: (h - DAY_START) * z,
                 right: 8,
                 fontSize: 11,
                 color: '#9CA3AF',
@@ -807,19 +861,22 @@ export function TimetablePage(): React.JSX.Element {
               key={key}
               title={t('timetable.clickToCreate')}
               onClick={(e) => onDayColumnClick(d, e)}
+              onMouseMove={(e) => onDayColumnMove(key, e)}
+              onMouseLeave={() =>
+                setGhost((prev) => (prev?.dayKey === key ? null : prev))
+              }
               style={{
                 flex: 1,
                 position: 'relative',
-                height: DAY_END - DAY_START,
+                height: (DAY_END - DAY_START) * z,
                 borderLeft: '1px solid #E5E7EB',
                 overflow: 'hidden',
                 cursor: 'cell',
-                background:
-                  'repeating-linear-gradient(to bottom, #fff 0, #fff 59px, #F4F5F7 59px, #F4F5F7 60px)',
+                background: `repeating-linear-gradient(to bottom, #fff 0, #fff ${60 * z - 1}px, #F4F5F7 ${60 * z - 1}px, #F4F5F7 ${60 * z}px)`,
               }}
             >
               {dayOcc.map((o) => (
-                <OccupancyBlock key={`occ-${o.id}`} occ={o} />
+                <OccupancyBlock key={`occ-${o.id}`} occ={o} z={z} />
               ))}
               {daySessions.map((s) => (
                 <SessionBlock
@@ -829,9 +886,41 @@ export function TimetablePage(): React.JSX.Element {
                   highlightColor={
                     conflictKind ? KIND_COLORS[conflictKind] : KIND_COLORS.ROOM
                   }
+                  z={z}
                   onClick={() => void openSession(s.id)}
                 />
               ))}
+              {/* Aperçu du créneau possible au survol (clic = créer). */}
+              {ghost?.dayKey === key && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: (ghost.startMin - DAY_START) * z,
+                    height: 120 * z,
+                    left: 1,
+                    right: 1,
+                    border: '2px dashed #2563EB',
+                    borderRadius: 6,
+                    background: 'rgba(37,99,235,0.07)',
+                    color: '#2563EB',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 2,
+                    pointerEvents: 'none',
+                    zIndex: 4,
+                  }}
+                >
+                  <span>+ {t('timetable.ghost.new')}</span>
+                  <span>
+                    {minToHHMM(ghost.startMin)}–
+                    {minToHHMM(Math.min(ghost.startMin + 120, DAY_END))}
+                  </span>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1376,6 +1465,18 @@ export function TimetablePage(): React.JSX.Element {
       <Space wrap>
         {entitySelect()}
         {weekNav}
+        {isWeekGrid && (
+          <Segmented<ZoomLevel>
+            value={zoom}
+            onChange={setZoom}
+            options={(
+              ['compact', 'standard', 'large'] as ZoomLevel[]
+            ).map((lvl) => ({
+              value: lvl,
+              label: t(`timetable.zoom.${lvl}`),
+            }))}
+          />
+        )}
         {scope === 'freeRooms' && (
           <Select
             value={freeRoomsDuration}

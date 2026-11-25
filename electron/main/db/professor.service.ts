@@ -201,12 +201,29 @@ export function getProfessorDetail(
     id,
     today,
   );
+  // Historique complet des séances du professeur, récentes d'abord.
+  const history = all<ImpactedSession>(
+    db,
+    `SELECT s.id, s.date, s.start_min, s.end_min, s.status,
+            mo.name AS module_name, m.name AS master_name,
+            r.name AS room_name
+       FROM session s
+       JOIN master_module mm ON mm.id = s.master_module_id
+       JOIN module mo ON mo.id = mm.module_id
+       JOIN master m ON m.id = mm.master_id
+       JOIN room r ON r.id = s.room_id
+      WHERE s.professor_id = ?
+      ORDER BY s.date DESC, s.start_min DESC
+      LIMIT 500`,
+    id,
+  );
   return apiOk({
     professor,
     teachings,
     availabilities: listAvailabilities(db, id),
     absences: listAbsences(db, id),
     upcoming,
+    history,
   });
 }
 

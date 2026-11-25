@@ -19,6 +19,7 @@ import {
   List,
   Modal,
   Radio,
+  Segmented,
   Select,
   Space,
   Statistic,
@@ -111,9 +112,44 @@ function SessionsTable({ sessions, emptyText }: { sessions: ImpactedSession[]; e
       rowKey="id"
       columns={columns}
       dataSource={sessions}
-      pagination={false}
+      pagination={{ pageSize: 15, hideOnSinglePage: true }}
       locale={{ emptyText }}
     />
+  );
+}
+
+/** Bascule « À venir » (20 prochaines) / « Historique » des séances. */
+function ProfessorSessionsPanel({
+  upcoming,
+  history,
+}: {
+  upcoming: ImpactedSession[];
+  history: ImpactedSession[];
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<'upcoming' | 'history'>('upcoming');
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Segmented
+        value={mode}
+        onChange={(v) => setMode(v as 'upcoming' | 'history')}
+        options={[
+          { value: 'upcoming', label: t('professors.session.upcoming') },
+          {
+            value: 'history',
+            label: `${t('professors.session.history')} (${history.length})`,
+          },
+        ]}
+      />
+      <SessionsTable
+        sessions={mode === 'upcoming' ? upcoming : history}
+        emptyText={
+          mode === 'upcoming'
+            ? t('professors.session.empty')
+            : t('professors.session.emptyHistory')
+        }
+      />
+    </Space>
   );
 }
 
@@ -990,9 +1026,9 @@ export function ProfessorsPage(): React.JSX.Element {
                   key: 'sessions',
                   label: t('professors.tabs.sessions'),
                   children: (
-                    <SessionsTable
-                      sessions={detail.upcoming}
-                      emptyText={t('professors.session.empty')}
+                    <ProfessorSessionsPanel
+                      upcoming={detail.upcoming}
+                      history={detail.history}
                     />
                   ),
                 },
