@@ -180,14 +180,70 @@ function computeLanes<T extends { start_min: number; end_min: number }>(
   return out;
 }
 
-/** Élément de colonne-jour : séance Master ou blocage Licence, en voies. */
+/** Élément de colonne-jour : séance Master ou groupe de blocages Licence. */
 type DayItem = {
   start_min: number;
   end_min: number;
 } & (
   | { kind: 'session'; s: SessionRow }
-  | { kind: 'occ'; o: OccupancyRow }
+  | { kind: 'occ'; occs: OccupancyRow[] }
 );
+
+type LanedItem = DayItem & { lane: number; lanes: number };
+
+/** Bloc « +N » : les éléments excédentaires d'un groupe de chevauchement. */
+type RenderItem =
+  | LanedItem
+  | {
+      kind: 'overflow';
+      items: LanedItem[];
+      start_min: number;
+      end_min: number;
+      lane: number;
+      lanes: number;
+    };
+
+/** Au-delà de ce nombre de voies, le reste est replié dans un bloc « +N ». */
+const MAX_LANES = 4;
+
+/**
+ * Plafonne les voies : les groupes de chevauchement > MAX_LANES gardent
+ * MAX_LANES-1 blocs visibles ; le reste est replié dans un « +N » cliquable.
+ */
+function capLanes(items: LanedItem[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let cluster: LanedItem[] = [];
+  let clusterEnd = -Infinity;
+  const flush = (): void => {
+    if (cluster.length === 0) return;
+    const n = Math.max(...cluster.map((o) => o.lane)) + 1;
+    if (n <= MAX_LANES) {
+      out.push(...cluster);
+    } else {
+      const overflow = cluster.filter((o) => o.lane >= MAX_LANES - 1);
+      for (const it of cluster) {
+        if (it.lane < MAX_LANES - 1) out.push({ ...it, lanes: MAX_LANES });
+      }
+      out.push({
+        kind: 'overflow',
+        items: overflow,
+        start_min: Math.min(...overflow.map((o) => o.start_min)),
+        end_min: Math.max(...overflow.map((o) => o.end_min)),
+        lane: MAX_LANES - 1,
+        lanes: MAX_LANES,
+      });
+    }
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+  for (const it of items) {
+    if (cluster.length > 0 && it.start_min >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end_min);
+  }
+  flush();
+  return out;
+}
 
 function SessionBlock(props: {
   session: Lane;
@@ -322,14 +378,17 @@ function SessionBlock(props: {
 }
 
 function OccupancyBlock(props: {
-  occ: OccupancyRow;
+  /** Blocages Licence du même créneau, regroupés (« Licence ×N »). */
+  occs: OccupancyRow[];
   /** Couleur du cycle Licence. */
   color: string;
   lane: number;
   lanes: number;
   z: number;
 }): React.JSX.Element | null {
-  const { occ, color, lane, lanes, z } = props;
+  const { occs, color, lane, lanes, z } = props;
+  const occ = occs[0];
+  if (!occ) return null;
   const startC = Math.max(occ.start_min, DAY_START);
   const endC = Math.min(occ.end_min, DAY_END);
   if (endC - startC <= 0) return null;
@@ -339,12 +398,17 @@ function OccupancyBlock(props: {
   return (
     <Tooltip
       title={
-        <span dir="auto">
-          {`${occ.label} · ${occ.room_name} · ${occ.module ?? ''}`}
-        </span>
+        <div>
+          {occs.map((o) => (
+            <div key={o.id} dir="auto">
+              {`${o.label} · ${o.room_name} · ${o.module ?? ''}`}
+            </div>
+          ))}
+        </div>
       }
     >
       <div
+        className="tt-block"
         style={{
           position: 'absolute',
           top,
@@ -367,11 +431,60 @@ function OccupancyBlock(props: {
           {minToHHMM(occ.start_min)}–{minToHHMM(occ.end_min)}
         </div>
         <div dir="auto" style={{ color: 'rgba(255,255,255,0.88)' }}>
-          {occ.label}
-          {lanes > 1 ? '' : ` · ${occ.room_name}`}
+          {occs.length === 1
+            ? `${occ.label} · ${occ.room_name}`
+            : `Licence ×${occs.length}`}
         </div>
       </div>
     </Tooltip>
+  );
+}
+
+/** Bloc « +N » : clic → modale listant les éléments repliés du créneau. */
+function OverflowBlock(props: {
+  items: LanedItem[];
+  lane: number;
+  lanes: number;
+  startMin: number;
+  endMin: number;
+  z: number;
+  onClick: () => void;
+}): React.JSX.Element | null {
+  const { items, lane, lanes, startMin, endMin, z, onClick } = props;
+  const { t } = useTranslation();
+  const startC = Math.max(startMin, DAY_START);
+  const endC = Math.min(endMin, DAY_END);
+  if (endC - startC <= 0) return null;
+  const widthPct = 100 / lanes;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="tt-block"
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onClick();
+      }}
+      style={{
+        position: 'absolute',
+        top: (startC - DAY_START) * z,
+        height: Math.max(18, (endC - startC) * z),
+        left: `${lane * widthPct}%`,
+        width: `calc(${widthPct}% - 2px)`,
+        background: '#F1F5F9',
+        border: '1.5px dashed #94A3B8',
+        borderRadius: 5,
+        padding: '3px 5px',
+        overflow: 'hidden',
+        cursor: 'pointer',
+        fontSize: z > 1 ? 12 : 11,
+        lineHeight: 1.3,
+        color: '#475569',
+        fontWeight: 600,
+      }}
+    >
+      {t('timetable.overflow.badge', { count: items.length })}
+    </div>
   );
 }
 
@@ -400,6 +513,10 @@ export function TimetablePage(): React.JSX.Element {
     dayKey: string;
     startMin: number;
   } | null>(null);
+  // Éléments repliés d'un bloc « +N » (modale de détail).
+  const [overflowItems, setOverflowItems] = useState<LanedItem[] | null>(
+    null,
+  );
   const [weekStart, setWeekStart] = useState<Dayjs>(() => mondayOf(dayjs()));
   const [entityId, setEntityId] = useState<number | undefined>(undefined);
   const [monthValue, setMonthValue] = useState<Dayjs>(() => dayjs());
@@ -980,25 +1097,35 @@ export function TimetablePage(): React.JSX.Element {
         {/* Colonnes jours */}
         {days.map((d) => {
           const key = d.format('YYYY-MM-DD');
-          // Séances + blocages Licence partagent les voies du jour.
-          const dayItems = computeLanes<DayItem>([
-            ...(sessionsByDay.get(key) ?? []).map(
-              (s): DayItem => ({
-                kind: 'session',
-                s,
-                start_min: s.start_min,
-                end_min: s.end_min,
-              }),
-            ),
-            ...(occupancyByDay.get(key) ?? []).map(
-              (o): DayItem => ({
-                kind: 'occ',
-                o,
-                start_min: o.start_min,
-                end_min: o.end_min,
-              }),
-            ),
-          ]);
+          // Blocages Licence regroupés par créneau identique (« ×N »).
+          const occGroups = new Map<string, OccupancyRow[]>();
+          for (const o of occupancyByDay.get(key) ?? []) {
+            const k = `${o.start_min}-${o.end_min}`;
+            const list = occGroups.get(k) ?? [];
+            list.push(o);
+            occGroups.set(k, list);
+          }
+          // Séances + groupes Licence partagent les voies du jour.
+          const dayItems = capLanes(
+            computeLanes<DayItem>([
+              ...(sessionsByDay.get(key) ?? []).map(
+                (s): DayItem => ({
+                  kind: 'session',
+                  s,
+                  start_min: s.start_min,
+                  end_min: s.end_min,
+                }),
+              ),
+              ...[...occGroups.values()].map(
+                (occs): DayItem => ({
+                  kind: 'occ',
+                  occs,
+                  start_min: occs[0]!.start_min,
+                  end_min: occs[0]!.end_min,
+                }),
+              ),
+            ]),
+          );
           return (
             <div
               key={key}
@@ -1018,15 +1145,26 @@ export function TimetablePage(): React.JSX.Element {
                 background: `repeating-linear-gradient(to bottom, #fff 0, #fff ${60 * z - 1}px, #F4F5F7 ${60 * z - 1}px, #F4F5F7 ${60 * z}px)`,
               }}
             >
-              {dayItems.map((it) =>
+              {dayItems.map((it, idx) =>
                 it.kind === 'occ' ? (
                   <OccupancyBlock
-                    key={`occ-${it.o.id}`}
-                    occ={it.o}
+                    key={`occ-${it.occs.map((o) => o.id).join('-')}`}
+                    occs={it.occs}
                     color={ttColors.licence}
                     lane={it.lane}
                     lanes={it.lanes}
                     z={z}
+                  />
+                ) : it.kind === 'overflow' ? (
+                  <OverflowBlock
+                    key={`ovf-${idx}`}
+                    items={it.items}
+                    lane={it.lane}
+                    lanes={it.lanes}
+                    startMin={it.start_min}
+                    endMin={it.end_min}
+                    z={z}
+                    onClick={() => setOverflowItems(it.items)}
                   />
                 ) : (
                   <SessionBlock
@@ -2075,6 +2213,93 @@ export function TimetablePage(): React.JSX.Element {
             )}
           </Space>
         ) : null}
+      </Modal>
+
+      {/* Modale « +N » : éléments repliés d'un créneau saturé. */}
+      <Modal
+        title={t('timetable.overflow.title', {
+          count: overflowItems?.length ?? 0,
+        })}
+        open={overflowItems !== null}
+        footer={null}
+        onCancel={() => setOverflowItems(null)}
+      >
+        <div
+          style={{
+            maxHeight: '60vh',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          {(overflowItems ?? []).map((it, i) =>
+            it.kind === 'occ' ? (
+              <div
+                key={`occ-${i}`}
+                style={{
+                  borderLeft: `4px solid ${ttColors.licence}`,
+                  background: '#F8FAFC',
+                  borderRadius: 4,
+                  padding: '4px 8px',
+                }}
+              >
+                <Text strong>
+                  {minToHHMM(it.start_min)}–{minToHHMM(it.end_min)}
+                </Text>
+                {it.occs.map((o) => (
+                  <div dir="auto" key={o.id} style={{ fontSize: 12 }}>
+                    {o.label} · {o.room_name}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div
+                key={it.s.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setOverflowItems(null);
+                  void openSession(it.s.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setOverflowItems(null);
+                    void openSession(it.s.id);
+                  }
+                }}
+                style={{
+                  borderLeft: `4px solid ${
+                    it.s.master.temps_amenage === 1
+                      ? ttColors.amenage
+                      : ttColors.normal
+                  }`,
+                  background: '#F8FAFC',
+                  borderRadius: 4,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                }}
+              >
+                <Space wrap size={6}>
+                  <Text strong>
+                    {minToHHMM(it.s.start_min)}–{minToHHMM(it.s.end_min)}
+                  </Text>
+                  <span dir="auto">{it.s.module.name}</span>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    <span dir="auto">
+                      {it.s.master.name}
+                      {it.s.master.level ? ` (${it.s.master.level})` : ''} ·{' '}
+                      {it.s.room.name} · {it.s.professor.full_name}
+                    </span>
+                  </Text>
+                  <Tag color={STATUS_COLORS[it.s.effective_status]}>
+                    {t(`sessionStatus.${it.s.effective_status}`)}
+                  </Tag>
+                </Space>
+              </div>
+            ),
+          )}
+        </div>
       </Modal>
     </Space>
   );

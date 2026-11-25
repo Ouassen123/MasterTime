@@ -344,6 +344,10 @@
       "customize": "Cliquer pour changer les couleurs",
       "reset": "Réinitialiser"
     },
+    "overflow": {
+      "badge": "+{{count}}",
+      "title": "{{count}} séances / blocages sur ce créneau"
+    },
     "detail": {
       "title": "Détail de la séance",
       "date": "Date",

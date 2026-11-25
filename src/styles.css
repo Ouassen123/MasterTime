@@ -54,7 +54,11 @@ h3.ant-typography {
 }
 .tt-block:hover {
   filter: brightness(0.98);
-  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
+  /* Le bloc s'élargit au survol pour rester lisible quand les voies
+     sont étroites (colonnes saturées) — déborde à droite, au premier plan. */
+  min-width: 170px;
+  z-index: 60;
 }
 
 /* Barres de défilement discrètes. */
