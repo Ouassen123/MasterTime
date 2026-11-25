@@ -37,6 +37,8 @@ import type {
   GenerationResult,
   GenerationRow,
   ExportEntityType,
+  FreeRoomsGrid,
+  FreeRoomsParams,
   GroupInput,
   ImpactedSession,
   ImportApplyResult,
@@ -214,6 +216,10 @@ const api: WindowApi = {
       ipcRenderer.invoke('timetable:summary'),
     occupancy: (filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>> =>
       ipcRenderer.invoke('timetable:occupancy', filter),
+    freeRooms: (
+      params: FreeRoomsParams,
+    ): Promise<ApiResult<FreeRoomsGrid>> =>
+      ipcRenderer.invoke('timetable:freeRooms', params),
   },
   // P16 — résolution assistée des conflits de salle.
   conflicts: {

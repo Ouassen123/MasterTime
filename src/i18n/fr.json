@@ -274,7 +274,18 @@
       "professor": "Par professeur",
       "room": "Par salle",
       "month": "Mois",
-      "year": "Année"
+      "year": "Année",
+      "freeRooms": "Dispo salles"
+    },
+    "freeRooms": {
+      "slot": "Créneau",
+      "closed": "Fermé — {{type}}",
+      "roomTooltip": "Capacité {{capacity}} — cliquer pour planifier",
+      "empty": "Aucun créneau planifiable cette semaine",
+      "legend": "Cliquez sur une salle pour planifier une séance :",
+      "legendSmall": "Salle",
+      "legendBig": "Grande salle / amphi",
+      "legendDash": "« — » = aucune salle libre · « Fermé » = jour férié/fermeture"
     },
     "week": {
       "today": "Aujourd'hui",

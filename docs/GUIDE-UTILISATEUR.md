@@ -133,6 +133,15 @@ Lecture seule, plusieurs vues :
 - Vue **Salle** : les **occupations Licence** (occupations externes,
   saisies en référentiel) apparaissent en gris — elles bloquent la
   génération et l'édition tout comme un cours.
+- **Dispo salles** : grille semaine (lignes = créneaux découpés des
+  fenêtres horaires autorisées, colonnes = jours) listant les **salles
+  libres** pour tout le créneau — ni séance ni occupation Licence.
+  Choisissez la durée du créneau (2 h par défaut, 1 h / 1 h 30 / 3 h) ;
+  les salles sont triées par capacité croissante. Un jour férié ou en
+  fermeture affiche « Fermé — <type> ». **Cliquez sur une salle** pour
+  ouvrir le formulaire de création pré-rempli (salle + date + heures) —
+  il ne reste qu'à choisir le master et le module. C'est le moyen le
+  plus rapide de trouver un trou et d'y planifier une séance.
 
 **Panneau de conflits** (volet droit repliable) : liste persistante
 des chevauchements restés en base (ex. collisions présentes dans les

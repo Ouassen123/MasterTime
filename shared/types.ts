@@ -1385,6 +1385,51 @@ export interface RoomReassignResult {
   skipped: RoomReassignSkip[];
 }
 
+// ---------------------------------------------------------------------------
+// P18 — Grille des salles disponibles
+// ---------------------------------------------------------------------------
+
+/** Durées de créneau autorisées pour la grille (défaut 120). */
+export const FREE_ROOMS_DURATIONS = [60, 90, 120, 180] as const;
+
+/** Paramètres de `timetable:freeRooms` — semaine + durée du créneau. */
+export interface FreeRoomsParams {
+  /** Lundi ISO de la semaine ('YYYY-MM-DD'). */
+  week_start: string;
+  /** Durée du créneau candidat ∈ {60,90,120,180} — défaut 120. */
+  duration_min?: number;
+}
+
+/** Salle libre dans une case de la grille (tri capacité ↑ puis nom). */
+export interface FreeRoomRef {
+  room_id: number;
+  name: string;
+  capacity: number | null;
+}
+
+/** Colonne jour : `closed` = type de l'exception qui ferme le jour. */
+export interface FreeRoomsDay {
+  date: string; // 'YYYY-MM-DD'
+  closed: CalendarExceptionType | null;
+}
+
+/** Ligne créneau (découpé des fenêtres `time_slot`). */
+export interface FreeRoomsSlot {
+  start_min: number;
+  end_min: number;
+}
+
+/**
+ * Grille semaine des salles libres : `cells["<date>|<start_min>"]` liste
+ * les salles libres pour tout le créneau. Une case absente (ou vide) =
+ * « — » ; un jour `closed` n'a aucune case.
+ */
+export interface FreeRoomsGrid {
+  days: FreeRoomsDay[];
+  slots: FreeRoomsSlot[];
+  cells: Record<string, FreeRoomRef[]>;
+}
+
 /** API exposée au renderer via contextBridge (`window.api`). */
 export interface WindowApi {
   appInfo(): Promise<AppInfo>;
@@ -1461,6 +1506,8 @@ export interface WindowApi {
     conflicts(filter?: ConflictFilter): Promise<ApiResult<ConflictItem[]>>;
     summary(): Promise<ApiResult<ConflictSummary>>;
     occupancy(filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>>;
+    /** P18 — grille des salles libres par créneau (vue « Dispo salles »). */
+    freeRooms(params: FreeRoomsParams): Promise<ApiResult<FreeRoomsGrid>>;
   };
   /**
    * P16 — résolution assistée des conflits de salle (ROOM + EXTERNAL).

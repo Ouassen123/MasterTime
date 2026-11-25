@@ -8,6 +8,7 @@ import { ipcMain } from 'electron';
 import type {
   AnnualFilter,
   ConflictFilter,
+  FreeRoomsParams,
   MonthFilter,
   OccupancyFilter,
   WeekFilter,
@@ -21,6 +22,7 @@ import {
   applyReassignment,
   previewReassignment,
 } from '../db/conflict-resolve.service';
+import { freeRoomsGrid } from '../db/free-rooms.service';
 import {
   getSessionDetail,
   listAnnual,
@@ -54,6 +56,16 @@ export function registerTimetableHandlers(getDb: DbGetter): void {
       ? apiErr('Paramètres invalides.')
       : guard(getDb, (db) =>
           listOccupancyWeek(db, filter as unknown as OccupancyFilter),
+        ),
+  );
+
+  // P18 — grille des salles disponibles (lecture ; la création depuis une
+  // case garde la garde BR-10 à l'écriture — sessions:create).
+  ipcMain.handle('timetable:freeRooms', (_e, params: unknown) =>
+    !isObject(params)
+      ? apiErr('Paramètres invalides.')
+      : guard(getDb, (db) =>
+          freeRoomsGrid(db, params as unknown as FreeRoomsParams),
         ),
   );
 

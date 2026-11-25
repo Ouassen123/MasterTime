@@ -59,6 +59,7 @@ import type {
   ConflictItem,
   ConflictKind,
   EffectiveSessionStatus,
+  FreeRoomsGrid,
   MasterDetail,
   MasterRow,
   Module,
@@ -76,7 +77,14 @@ import { EFFECTIVE_SESSION_STATUSES } from '../../shared/types';
 
 const { Text, Title } = Typography;
 
-type Scope = 'week' | 'master' | 'professor' | 'room' | 'month' | 'year';
+type Scope =
+  | 'week'
+  | 'master'
+  | 'professor'
+  | 'room'
+  | 'month'
+  | 'year'
+  | 'freeRooms';
 
 const DAY_START = 7 * 60; // 07:00
 const DAY_END = 20 * 60; // 20:00 → axe 780 min
@@ -250,6 +258,9 @@ export function TimetablePage(): React.JSX.Element {
   const [entityId, setEntityId] = useState<number | undefined>(undefined);
   const [monthValue, setMonthValue] = useState<Dayjs>(() => dayjs());
   const [yearId, setYearId] = useState<number | undefined>(undefined);
+  // P18 — vue « Dispo salles » : durée du créneau candidat + grille.
+  const [freeRoomsDuration, setFreeRoomsDuration] = useState<number>(120);
+  const [freeRooms, setFreeRooms] = useState<FreeRoomsGrid | null>(null);
 
   // --- Référentiels (Selects) -------------------------------------------------
   const [masters, setMasters] = useState<MasterRow[]>([]);
@@ -392,6 +403,23 @@ export function TimetablePage(): React.JSX.Element {
           }
           return;
         }
+        if (scope === 'freeRooms') {
+          // P18 — grille des salles libres (pas de séances/occupation).
+          setSessions([]);
+          setOccupancy([]);
+          setAnnual([]);
+          const res = await api().timetable.freeRooms({
+            week_start: weekStartIso,
+            duration_min: freeRoomsDuration,
+          });
+          if (cancelled) return;
+          if (res.ok) setFreeRooms(res.data);
+          else {
+            setFreeRooms(null);
+            setError(errorMessage(res));
+          }
+          return;
+        }
         if (scope === 'month') {
           const res = await api().timetable.month({
             year: monthValue.year(),
@@ -456,7 +484,7 @@ export function TimetablePage(): React.JSX.Element {
     };
   }, [
     scope, weekStartIso, monthValue, yearId, entityId,
-    entityFilter, statuses, moduleId, reloadKey,
+    entityFilter, statuses, moduleId, reloadKey, freeRoomsDuration,
   ]);
 
   /** Vide le surlignage conflit (navigation, changement d'entité…). */
@@ -578,11 +606,13 @@ export function TimetablePage(): React.JSX.Element {
    * jour cliqué et le créneau calculé (snap 15 min, +120 borné à 20:00).
    * Vue « Par Master » + master sélectionné → master_id pré-rempli
    * (le master-module reste à choisir) ; sinon master libre.
+   * P18 — `roomId` pré-remplit la salle (clic depuis « Dispo salles »).
    */
   const openCreateAt = (
     day: Dayjs,
     startMin: number,
     endMin: number,
+    roomId?: number,
   ): void => {
     createForm.resetFields();
     setCreateDetail(null);
@@ -591,7 +621,7 @@ export function TimetablePage(): React.JSX.Element {
       master_id: undefined,
       master_module_id: undefined,
       professor_id: undefined,
-      room_id: undefined,
+      room_id: roomId,
       group_ids: [],
       comment: undefined,
       date: day,
@@ -966,6 +996,130 @@ export function TimetablePage(): React.JSX.Element {
     );
   }, [annual, scope, t]);
 
+  // --- Vue « Dispo salles » (P18) ------------------------------------------------
+
+  const freeRoomsView = useMemo(() => {
+    if (scope !== 'freeRooms') return null;
+    interface GridRow {
+      key: number;
+      start: number;
+      end: number;
+    }
+    const columns: ColumnsType<GridRow> = [
+      {
+        title: t('timetable.freeRooms.slot'),
+        dataIndex: 'start',
+        fixed: 'left',
+        width: 110,
+        render: (start: number, row) =>
+          `${minToHHMM(start)}–${minToHHMM(row.end)}`,
+      },
+      ...(freeRooms?.days ?? []).map((d, i) => ({
+        title: (
+          <span
+            style={
+              dayjs(d.date).isSame(dayjs(), 'day')
+                ? { color: '#2563EB', fontWeight: 700 }
+                : undefined
+            }
+          >
+            {weekdays[i] ?? ''} {dayjs(d.date).format('DD/MM')}
+          </span>
+        ),
+        key: d.date,
+        onCell: () => ({
+          style: {
+            background:
+              d.closed != null
+                ? '#F3F4F6'
+                : dayjs(d.date).isSame(dayjs(), 'day')
+                  ? '#2563EB08'
+                  : undefined,
+            verticalAlign: 'top',
+            padding: '6px 8px',
+          },
+        }),
+        render: (_: unknown, row: GridRow) => {
+          if (d.closed != null) {
+            return (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {t('timetable.freeRooms.closed', {
+                  type: t(`params.exceptions.types.${d.closed}`),
+                })}
+              </Text>
+            );
+          }
+          const free = freeRooms?.cells[`${d.date}|${row.start}`];
+          if (!free || free.length === 0) {
+            return (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                —
+              </Text>
+            );
+          }
+          return (
+            <Space size={4} wrap>
+              {free.map((r) => {
+                const big = (r.capacity ?? 0) >= 100;
+                return (
+                  <Tooltip
+                    key={r.room_id}
+                    title={t('timetable.freeRooms.roomTooltip', {
+                      capacity: r.capacity ?? '?',
+                    })}
+                  >
+                    <Tag
+                      color={big ? 'geekblue' : 'green'}
+                      style={{ cursor: 'pointer', marginInlineEnd: 0 }}
+                      onClick={() =>
+                        openCreateAt(
+                          dayjs(d.date),
+                          row.start,
+                          row.end,
+                          r.room_id,
+                        )
+                      }
+                    >
+                      {r.name}
+                      {r.capacity != null ? ` · ${r.capacity}` : ''}
+                    </Tag>
+                  </Tooltip>
+                );
+              })}
+            </Space>
+          );
+        },
+      })),
+    ];
+    const rows: GridRow[] = (freeRooms?.slots ?? []).map((s) => ({
+      key: s.start_min,
+      start: s.start_min,
+      end: s.end_min,
+    }));
+    return (
+      <Card size="small">
+        <Space size={16} wrap style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t('timetable.freeRooms.legend')}
+          </Text>
+          <Tag color="green">{t('timetable.freeRooms.legendSmall')}</Tag>
+          <Tag color="geekblue">{t('timetable.freeRooms.legendBig')}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t('timetable.freeRooms.legendDash')}
+          </Text>
+        </Space>
+        <Table<GridRow>
+          size="small"
+          columns={columns}
+          dataSource={rows}
+          pagination={false}
+          scroll={{ x: true }}
+          locale={{ emptyText: t('timetable.freeRooms.empty') }}
+        />
+      </Card>
+    );
+  }, [scope, freeRooms, t]);
+
   // --- Panneau conflits ---------------------------------------------------------
 
   const conflictsByKind = useMemo(() => {
@@ -1150,7 +1304,8 @@ export function TimetablePage(): React.JSX.Element {
   const isWeekGrid =
     scope === 'week' || scope === 'master' || scope === 'professor' || scope === 'room';
 
-  const weekNav = isWeekGrid ? (
+  // P18 : « Dispo salles » partage la navigation semaine (◀ Aujourd'hui ▶).
+  const weekNav = isWeekGrid || scope === 'freeRooms' ? (
     <Space>
       <Button
         icon={<LeftOutlined />}
@@ -1205,7 +1360,15 @@ export function TimetablePage(): React.JSX.Element {
           }}
           style={{ minWidth: 200 }}
           options={(
-            ['week', 'master', 'professor', 'room', 'month', 'year'] as Scope[]
+            [
+              'week',
+              'master',
+              'professor',
+              'room',
+              'month',
+              'year',
+              'freeRooms',
+            ] as Scope[]
           ).map((s) => ({ value: s, label: t(`timetable.tabs.${s}`) }))}
         />
       </Space>
@@ -1213,7 +1376,20 @@ export function TimetablePage(): React.JSX.Element {
       <Space wrap>
         {entitySelect()}
         {weekNav}
-        {scope !== 'year' && (
+        {scope === 'freeRooms' && (
+          <Select
+            value={freeRoomsDuration}
+            onChange={setFreeRoomsDuration}
+            style={{ minWidth: 110 }}
+            options={[
+              { value: 120, label: '2h' },
+              { value: 90, label: '1h30' },
+              { value: 60, label: '1h' },
+              { value: 180, label: '3h' },
+            ]}
+          />
+        )}
+        {scope !== 'year' && scope !== 'freeRooms' && (
           <Select
             mode="multiple"
             allowClear
@@ -1269,6 +1445,8 @@ export function TimetablePage(): React.JSX.Element {
             ) : (
               weekGrid
             )
+          ) : scope === 'freeRooms' ? (
+            freeRoomsView
           ) : scope === 'month' ? (
             monthView
           ) : (
