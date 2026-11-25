@@ -149,15 +149,18 @@ interface Lane extends SessionRow {
 }
 
 /**
- * Répartition en voies : les séances qui se chevauchent dans un même jour
- * partagent la largeur de la colonne (tri par début, plus long d'abord).
+ * Répartition en voies : les blocs qui se chevauchent dans un même jour
+ * (séances + blocages Licence) partagent la largeur de la colonne
+ * (tri par début, plus long d'abord).
  */
-function computeLanes(sessions: SessionRow[]): Lane[] {
-  const sorted = [...sessions].sort(
+function computeLanes<T extends { start_min: number; end_min: number }>(
+  items: T[],
+): (T & { lane: number; lanes: number })[] {
+  const sorted = [...items].sort(
     (a, b) => a.start_min - b.start_min || a.end_min - b.end_min,
   );
   const lanesEnd: number[] = [];
-  const out = sorted.map((s): Lane => {
+  const out = sorted.map((s): T & { lane: number; lanes: number } => {
     let lane = lanesEnd.findIndex((end) => end <= s.start_min);
     if (lane === -1) {
       lane = lanesEnd.length;
@@ -176,6 +179,15 @@ function computeLanes(sessions: SessionRow[]): Lane[] {
   }
   return out;
 }
+
+/** Élément de colonne-jour : séance Master ou blocage Licence, en voies. */
+type DayItem = {
+  start_min: number;
+  end_min: number;
+} & (
+  | { kind: 'session'; s: SessionRow }
+  | { kind: 'occ'; o: OccupancyRow }
+);
 
 function SessionBlock(props: {
   session: Lane;
@@ -214,21 +226,21 @@ function SessionBlock(props: {
         height,
         left: `${s.lane * widthPct}%`,
         width: `calc(${widthPct}% - 2px)`,
-        background: `${cycle}26`,
-        borderLeft: `4px solid ${cycle}`,
+        // Bloc pleine couleur : la teinte code le cycle (légende en haut).
+        background: cycle,
         borderRadius: 5,
         padding: '3px 5px',
         overflow: 'hidden',
         cursor: 'pointer',
         fontSize,
         lineHeight: 1.3,
-        opacity: s.effective_status === 'ANNULEE' ? 0.55 : 1,
-        outline: highlight ? `2px solid ${highlightColor}` : 'none',
+        opacity: s.effective_status === 'ANNULEE' ? 0.5 : 1,
+        outline: highlight ? `3px solid ${highlightColor}` : 'none',
         zIndex: highlight ? 3 : 1,
       }}
     >
-      <div style={{ fontWeight: 600, color: '#111827' }}>
-        {/* Pastille statut : la couleur du bloc code le cycle. */}
+      <div style={{ fontWeight: 600, color: '#FFFFFF' }}>
+        {/* Pastille statut cerclée de blanc (visible sur fond plein). */}
         <span
           title={t(`sessionStatus.${s.effective_status}`)}
           style={{
@@ -237,6 +249,7 @@ function SessionBlock(props: {
             height: 7,
             borderRadius: '50%',
             background: statusColor,
+            boxShadow: '0 0 0 1.5px #FFFFFF',
             marginRight: 5,
             verticalAlign: 1,
           }}
@@ -246,7 +259,7 @@ function SessionBlock(props: {
       <div
         dir="auto"
         style={{
-          color: '#111827',
+          color: '#FFFFFF',
           fontWeight: 500,
           textDecoration:
             s.effective_status === 'ANNULEE' ? 'line-through' : 'none',
@@ -264,11 +277,11 @@ function SessionBlock(props: {
       >
         {s.module.name}
       </div>
-      <div dir="auto" style={{ color: '#4B5563' }}>
+      <div dir="auto" style={{ color: 'rgba(255,255,255,0.88)' }}>
         {s.room.name} · {s.professor.full_name}
       </div>
       {s.lanes === 1 && height >= 50 && (
-        <div dir="auto" style={{ color: '#4B5563' }}>
+        <div dir="auto" style={{ color: 'rgba(255,255,255,0.88)' }}>
           {s.master.name}
           {s.group_name ? ` · ${s.group_name}` : ''}
         </div>
@@ -286,33 +299,40 @@ function OccupancyBlock(props: {
   occ: OccupancyRow;
   /** Couleur du cycle Licence. */
   color: string;
+  lane: number;
+  lanes: number;
   z: number;
 }): React.JSX.Element | null {
-  const { occ, color, z } = props;
+  const { occ, color, lane, lanes, z } = props;
   const startC = Math.max(occ.start_min, DAY_START);
   const endC = Math.min(occ.end_min, DAY_END);
   if (endC - startC <= 0) return null;
   const top = (startC - DAY_START) * z;
   const height = Math.max(16, (endC - startC) * z);
+  const widthPct = 100 / lanes;
   return (
     <Tooltip
-      title={<span dir="auto">{`${occ.label} · ${occ.module ?? ''}`}</span>}
+      title={
+        <span dir="auto">
+          {`${occ.label} · ${occ.room_name} · ${occ.module ?? ''}`}
+        </span>
+      }
     >
       <div
         style={{
           position: 'absolute',
           top,
           height,
-          left: 1,
-          right: 1,
-          background: `${color}26`,
-          borderLeft: `4px solid ${color}`,
+          left: `${lane * widthPct}%`,
+          width: `calc(${widthPct}% - 2px)`,
+          // Bloc pleine couleur ardoise = occupation Licence.
+          background: color,
           borderRadius: 5,
           padding: '2px 4px',
           overflow: 'hidden',
           fontSize: z > 1 ? 12 : 11,
           lineHeight: 1.25,
-          color: '#374151',
+          color: '#FFFFFF',
           // Zone bloquée : ni création ni détail — pas le curseur « cell ».
           cursor: 'default',
         }}
@@ -320,7 +340,10 @@ function OccupancyBlock(props: {
         <div style={{ fontWeight: 600 }}>
           {minToHHMM(occ.start_min)}–{minToHHMM(occ.end_min)}
         </div>
-        <div dir="auto">{occ.label}</div>
+        <div dir="auto" style={{ color: 'rgba(255,255,255,0.88)' }}>
+          {occ.label}
+          {lanes > 1 ? '' : ` · ${occ.room_name}`}
+        </div>
       </div>
     </Tooltip>
   );
@@ -335,6 +358,10 @@ export function TimetablePage(): React.JSX.Element {
   const z = ZOOM_SCALE[zoom];
   // Couleurs des cycles (Licence / Master normal / temps aménagé).
   const [ttColors, setTtColors] = useState<TtColors>(loadTtColors);
+  // Filtre cycle : cycles visibles dans la grille hebdo.
+  const [cycles, setCycles] = useState<
+    ('licence' | 'normal' | 'amenage')[]
+  >(['licence', 'normal', 'amenage']);
   useEffect(() => {
     try {
       localStorage.setItem(TT_COLORS_KEY, JSON.stringify(ttColors));
@@ -542,9 +569,14 @@ export function TimetablePage(): React.JSX.Element {
             moduleId: scope === 'week' ? moduleId : undefined,
             ...entityFilter,
           }),
-          scope === 'room' && entityId != null
-            ? api().timetable.occupancy({ weekStart: weekStartIso, roomId: entityId })
-            : Promise.resolve(null),
+          scope === 'week'
+            ? api().timetable.occupancy({ weekStart: weekStartIso })
+            : scope === 'room' && entityId != null
+              ? api().timetable.occupancy({
+                  weekStart: weekStartIso,
+                  roomId: entityId,
+                })
+              : Promise.resolve(null),
         ]);
         if (cancelled) return;
         if (sessRes.ok) setSessions(sessRes.data);
@@ -851,22 +883,27 @@ export function TimetablePage(): React.JSX.Element {
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, SessionRow[]>();
     for (const s of sessions) {
+      // Filtre cycle : séances du master hors sélection → masquées.
+      const cycle = s.master.temps_amenage === 1 ? 'amenage' : 'normal';
+      if (!cycles.includes(cycle)) continue;
       const list = map.get(s.date) ?? [];
       list.push(s);
       map.set(s.date, list);
     }
     return map;
-  }, [sessions]);
+  }, [sessions, cycles]);
 
   const occupancyByDay = useMemo(() => {
     const map = new Map<string, OccupancyRow[]>();
+    // Filtre cycle : blocages Licence masqués si décochés.
+    if (!cycles.includes('licence')) return map;
     for (const o of occupancy) {
       const list = map.get(o.date) ?? [];
       list.push(o);
       map.set(o.date, list);
     }
     return map;
-  }, [occupancy]);
+  }, [occupancy, cycles]);
 
   // --- Vue semaine -------------------------------------------------------------
 
@@ -917,8 +954,25 @@ export function TimetablePage(): React.JSX.Element {
         {/* Colonnes jours */}
         {days.map((d) => {
           const key = d.format('YYYY-MM-DD');
-          const daySessions = computeLanes(sessionsByDay.get(key) ?? []);
-          const dayOcc = occupancyByDay.get(key) ?? [];
+          // Séances + blocages Licence partagent les voies du jour.
+          const dayItems = computeLanes<DayItem>([
+            ...(sessionsByDay.get(key) ?? []).map(
+              (s): DayItem => ({
+                kind: 'session',
+                s,
+                start_min: s.start_min,
+                end_min: s.end_min,
+              }),
+            ),
+            ...(occupancyByDay.get(key) ?? []).map(
+              (o): DayItem => ({
+                kind: 'occ',
+                o,
+                start_min: o.start_min,
+                end_min: o.end_min,
+              }),
+            ),
+          ]);
           return (
             <div
               key={key}
@@ -938,31 +992,40 @@ export function TimetablePage(): React.JSX.Element {
                 background: `repeating-linear-gradient(to bottom, #fff 0, #fff ${60 * z - 1}px, #F4F5F7 ${60 * z - 1}px, #F4F5F7 ${60 * z}px)`,
               }}
             >
-              {dayOcc.map((o) => (
-                <OccupancyBlock
-                  key={`occ-${o.id}`}
-                  occ={o}
-                  color={ttColors.licence}
-                  z={z}
-                />
-              ))}
-              {daySessions.map((s) => (
-                <SessionBlock
-                  key={s.id}
-                  session={s}
-                  highlight={conflictIds.has(s.id)}
-                  highlightColor={
-                    conflictKind ? KIND_COLORS[conflictKind] : KIND_COLORS.ROOM
-                  }
-                  cycle={
-                    s.master.temps_amenage === 1
-                      ? ttColors.amenage
-                      : ttColors.normal
-                  }
-                  z={z}
-                  onClick={() => void openSession(s.id)}
-                />
-              ))}
+              {dayItems.map((it) =>
+                it.kind === 'occ' ? (
+                  <OccupancyBlock
+                    key={`occ-${it.o.id}`}
+                    occ={it.o}
+                    color={ttColors.licence}
+                    lane={it.lane}
+                    lanes={it.lanes}
+                    z={z}
+                  />
+                ) : (
+                  <SessionBlock
+                    key={it.s.id}
+                    session={{
+                      ...it.s,
+                      lane: it.lane,
+                      lanes: it.lanes,
+                    }}
+                    highlight={conflictIds.has(it.s.id)}
+                    highlightColor={
+                      conflictKind
+                        ? KIND_COLORS[conflictKind]
+                        : KIND_COLORS.ROOM
+                    }
+                    cycle={
+                      it.s.master.temps_amenage === 1
+                        ? ttColors.amenage
+                        : ttColors.normal
+                    }
+                    z={z}
+                    onClick={() => void openSession(it.s.id)}
+                  />
+                ),
+              )}
               {/* Aperçu du créneau possible au survol (clic = créer). */}
               {ghost?.dayKey === key && (
                 <div
@@ -1629,6 +1692,20 @@ export function TimetablePage(): React.JSX.Element {
               { value: 60, label: '1h' },
               { value: 180, label: '3h' },
             ]}
+          />
+        )}
+        {isWeekGrid && (
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder={t('timetable.filters.cycle')}
+            style={{ minWidth: 240 }}
+            value={cycles}
+            onChange={setCycles}
+            maxTagCount={3}
+            options={(['licence', 'normal', 'amenage'] as const).map(
+              (c) => ({ value: c, label: t(`timetable.legend.${c}`) }),
+            )}
           />
         )}
         {scope !== 'year' && scope !== 'freeRooms' && (

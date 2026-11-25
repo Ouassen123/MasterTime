@@ -309,7 +309,8 @@
     },
     "filters": {
       "status": "Statuts",
-      "module": "Module"
+      "module": "Module",
+      "cycle": "Cycles"
     },
     "entity": {
       "master": "Choisir un master",
