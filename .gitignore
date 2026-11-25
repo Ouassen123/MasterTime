@@ -8,3 +8,4 @@ backups/
 *.log
 .DS_Store
 release/
+capture_tmp/
