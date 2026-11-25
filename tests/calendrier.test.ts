@@ -299,7 +299,12 @@ describe('listSessionsWeek', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const s = res.data.find((x) => x.id === past)!;
-    expect(s.master).toEqual({ id: f.masterId, code: 'M-T', name: 'Master T' });
+    expect(s.master).toEqual({
+      id: f.masterId,
+      code: 'M-T',
+      name: 'Master T',
+      temps_amenage: 0,
+    });
     expect(s.module.code).toBe('MOD-T');
     expect(s.professor.full_name).toBe('Prof Un');
     expect(s.room).toEqual({ id: f.roomId, name: 'Salle A', capacity: 40 });

@@ -478,7 +478,13 @@ export interface SessionRow {
   /** AD-7 : PREVUE + date < aujourd'hui → 'NON_ENCORE_REALISEE'. */
   effective_status: EffectiveSessionStatus;
   comment: string | null;
-  master: { id: number; code: string; name: string };
+  master: {
+    id: number;
+    code: string;
+    name: string;
+    /** 1 = master « temps aménagé » (payant) — couleur dédiée dans l'EDT. */
+    temps_amenage: number;
+  };
   module: { id: number; code: string; name: string };
   professor: { id: number; full_name: string };
   room: { id: number; name: string; capacity: number | null };

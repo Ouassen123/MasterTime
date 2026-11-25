@@ -68,6 +68,7 @@ function sessionSelectSql(extraCols = ''): string {
   SELECT s.id,${extraCols ? `\n         ${extraCols},` : ''}
          s.date, s.start_min, s.end_min, s.status, s.comment,
          m.id AS master_id, m.code AS master_code, m.name AS master_name,
+         m.temps_amenage AS master_temps_amenage,
          mo.id AS module_id, mo.code AS module_code, mo.name AS module_name,
          p.id AS professor_id, p.full_name AS professor_name,
          r.id AS room_id, r.name AS room_name, r.capacity AS room_capacity,
@@ -99,6 +100,7 @@ interface SessionSqlRow {
   master_id: number;
   master_code: string;
   master_name: string;
+  master_temps_amenage: number;
   module_id: number;
   module_code: string;
   module_name: string;
@@ -119,7 +121,12 @@ function toSessionRow(r: SessionSqlRow, today: string): SessionRow {
     status: r.status,
     effective_status: effectiveSessionStatus(r.status, r.date, today),
     comment: r.comment,
-    master: { id: r.master_id, code: r.master_code, name: r.master_name },
+    master: {
+      id: r.master_id,
+      code: r.master_code,
+      name: r.master_name,
+      temps_amenage: r.master_temps_amenage,
+    },
     module: { id: r.module_id, code: r.module_code, name: r.module_name },
     professor: { id: r.professor_id, full_name: r.professor_name },
     room: { id: r.room_id, name: r.room_name, capacity: r.room_capacity },

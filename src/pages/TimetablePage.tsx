@@ -17,11 +17,13 @@ import {
   Calendar,
   Card,
   Collapse,
+  ColorPicker,
   DatePicker,
   Empty,
   Form,
   Input,
   Modal,
+  Popover,
   Segmented,
   Select,
   Skeleton,
@@ -97,6 +99,39 @@ const ZOOM_SCALE: Record<ZoomLevel, number> = {
   standard: 1.35,
   large: 1.7,
 };
+
+/**
+ * Couleurs des cycles dans la grille hebdo — personnalisables,
+ * persistées en localStorage (préférence utilisateur, pas de schéma).
+ */
+interface TtColors {
+  licence: string;
+  normal: string;
+  amenage: string;
+}
+const DEFAULT_TT_COLORS: TtColors = {
+  licence: '#2563EB',
+  normal: '#DC2626',
+  amenage: '#D97706',
+};
+const TT_COLORS_KEY = 'mt.tt.colors';
+
+function loadTtColors(): TtColors {
+  try {
+    const raw = localStorage.getItem(TT_COLORS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<TtColors>;
+      return {
+        licence: typeof p.licence === 'string' ? p.licence : '#2563EB',
+        normal: typeof p.normal === 'string' ? p.normal : '#DC2626',
+        amenage: typeof p.amenage === 'string' ? p.amenage : '#D97706',
+      };
+    }
+  } catch {
+    // JSON corrompu : retour aux couleurs par défaut.
+  }
+  return DEFAULT_TT_COLORS;
+}
 const HOURS = Array.from(
   { length: (DAY_END - DAY_START) / 60 + 1 },
   (_, i) => DAY_START + i * 60,
@@ -145,12 +180,14 @@ function SessionBlock(props: {
   session: Lane;
   highlight: boolean;
   highlightColor: string;
+  /** Couleur du cycle (master normal / temps aménagé). */
+  cycle: string;
   z: number;
   onClick: () => void;
 }): React.JSX.Element | null {
-  const { session: s, highlight, highlightColor, z, onClick } = props;
+  const { session: s, highlight, highlightColor, cycle, z, onClick } = props;
   const { t } = useTranslation();
-  const color = STATUS_COLORS[s.effective_status];
+  const statusColor = STATUS_COLORS[s.effective_status];
   // Clip à l'axe 07:00–20:00 (séance débordante ou hors axe).
   const startC = Math.max(s.start_min, DAY_START);
   const endC = Math.min(s.end_min, DAY_END);
@@ -176,19 +213,33 @@ function SessionBlock(props: {
         height,
         left: `${s.lane * widthPct}%`,
         width: `calc(${widthPct}% - 2px)`,
-        background: `${color}1F`,
-        borderLeft: `3px solid ${color}`,
+        background: `${cycle}1F`,
+        borderLeft: `4px solid ${cycle}`,
         borderRadius: 5,
         padding: '3px 5px',
         overflow: 'hidden',
         cursor: 'pointer',
         fontSize,
         lineHeight: 1.3,
+        opacity: s.effective_status === 'ANNULEE' ? 0.55 : 1,
         outline: highlight ? `2px solid ${highlightColor}` : 'none',
         zIndex: highlight ? 3 : 1,
       }}
     >
       <div style={{ fontWeight: 600, color: '#111827' }}>
+        {/* Pastille statut : la couleur du bloc code le cycle. */}
+        <span
+          title={t(`sessionStatus.${s.effective_status}`)}
+          style={{
+            display: 'inline-block',
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: statusColor,
+            marginRight: 5,
+            verticalAlign: 1,
+          }}
+        />
         {minToHHMM(s.start_min)}–{minToHHMM(s.end_min)}
       </div>
       <div
@@ -232,9 +283,11 @@ function SessionBlock(props: {
 
 function OccupancyBlock(props: {
   occ: OccupancyRow;
+  /** Couleur du cycle Licence. */
+  color: string;
   z: number;
 }): React.JSX.Element | null {
-  const { occ, z } = props;
+  const { occ, color, z } = props;
   const startC = Math.max(occ.start_min, DAY_START);
   const endC = Math.min(occ.end_min, DAY_END);
   if (endC - startC <= 0) return null;
@@ -251,14 +304,14 @@ function OccupancyBlock(props: {
           height,
           left: 1,
           right: 1,
-          background: '#4B55631F',
-          borderLeft: '3px solid #4B5563',
+          background: `${color}1F`,
+          borderLeft: `4px solid ${color}`,
           borderRadius: 5,
           padding: '2px 4px',
           overflow: 'hidden',
           fontSize: z > 1 ? 12 : 11,
           lineHeight: 1.25,
-          color: '#4B5563',
+          color: '#374151',
           // Zone bloquée : ni création ni détail — pas le curseur « cell ».
           cursor: 'default',
         }}
@@ -279,6 +332,15 @@ export function TimetablePage(): React.JSX.Element {
   const [scope, setScope] = useState<Scope>('week');
   const [zoom, setZoom] = useState<ZoomLevel>('standard');
   const z = ZOOM_SCALE[zoom];
+  // Couleurs des cycles (Licence / Master normal / temps aménagé).
+  const [ttColors, setTtColors] = useState<TtColors>(loadTtColors);
+  useEffect(() => {
+    try {
+      localStorage.setItem(TT_COLORS_KEY, JSON.stringify(ttColors));
+    } catch {
+      // Stockage indisponible : les couleurs restent en mémoire.
+    }
+  }, [ttColors]);
   // Aperçu « créneau possible » suivant la souris sur la grille hebdo.
   const [ghost, setGhost] = useState<{
     dayKey: string;
@@ -876,7 +938,12 @@ export function TimetablePage(): React.JSX.Element {
               }}
             >
               {dayOcc.map((o) => (
-                <OccupancyBlock key={`occ-${o.id}`} occ={o} z={z} />
+                <OccupancyBlock
+                  key={`occ-${o.id}`}
+                  occ={o}
+                  color={ttColors.licence}
+                  z={z}
+                />
               ))}
               {daySessions.map((s) => (
                 <SessionBlock
@@ -885,6 +952,11 @@ export function TimetablePage(): React.JSX.Element {
                   highlight={conflictIds.has(s.id)}
                   highlightColor={
                     conflictKind ? KIND_COLORS[conflictKind] : KIND_COLORS.ROOM
+                  }
+                  cycle={
+                    s.master.temps_amenage === 1
+                      ? ttColors.amenage
+                      : ttColors.normal
                   }
                   z={z}
                   onClick={() => void openSession(s.id)}
@@ -1476,6 +1548,74 @@ export function TimetablePage(): React.JSX.Element {
               label: t(`timetable.zoom.${lvl}`),
             }))}
           />
+        )}
+        {isWeekGrid && (
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            title={t('timetable.legend.title')}
+            content={
+              <Space direction="vertical" size={8}>
+                {(['licence', 'normal', 'amenage'] as const).map((k) => (
+                  <div
+                    key={k}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 16,
+                    }}
+                  >
+                    <Text style={{ fontSize: 12 }}>
+                      {t(`timetable.legend.${k}`)}
+                    </Text>
+                    <ColorPicker
+                      size="small"
+                      value={ttColors[k]}
+                      onChange={(c) =>
+                        setTtColors({ ...ttColors, [k]: c.toHexString() })
+                      }
+                    />
+                  </div>
+                ))}
+                <Button
+                  size="small"
+                  onClick={() => setTtColors(DEFAULT_TT_COLORS)}
+                >
+                  {t('timetable.legend.reset')}
+                </Button>
+              </Space>
+            }
+          >
+            <Space
+              size={10}
+              title={t('timetable.legend.customize')}
+              style={{
+                cursor: 'pointer',
+                padding: '4px 10px',
+                borderRadius: 8,
+                border: '1px solid #E5E7EB',
+                background: '#fff',
+              }}
+            >
+              {(['licence', 'normal', 'amenage'] as const).map((k) => (
+                <Space key={k} size={4}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 3,
+                      background: ttColors[k],
+                      display: 'inline-block',
+                    }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t(`timetable.legend.${k}`)}
+                  </Text>
+                </Space>
+              ))}
+            </Space>
+          </Popover>
         )}
         {scope === 'freeRooms' && (
           <Select

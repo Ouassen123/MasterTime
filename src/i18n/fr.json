@@ -334,6 +334,14 @@
     "ghost": {
       "new": "Nouvelle séance"
     },
+    "legend": {
+      "licence": "Licence",
+      "normal": "Master normal",
+      "amenage": "Temps aménagé",
+      "title": "Couleurs des cycles",
+      "customize": "Cliquer pour changer les couleurs",
+      "reset": "Réinitialiser"
+    },
     "detail": {
       "title": "Détail de la séance",
       "date": "Date",
