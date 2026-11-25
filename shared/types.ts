@@ -1304,6 +1304,50 @@ export interface AppContext {
   semester: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// P16 — Résolution assistée des conflits de salle (ROOM + EXTERNAL)
+// ---------------------------------------------------------------------------
+
+/**
+ * Proposition de réaffectation de salle (P16) : la séance garde
+ * date/heure/professeur/master — seule la salle change. `kinds` = kinds
+ * de conflit (ROOM et/ou EXTERNAL) qui motivent le déplacement.
+ */
+export interface RoomReassignProposal {
+  session_id: number;
+  /** Libellé « module — master » (affichage). */
+  label: string;
+  date: string;
+  start_min: number;
+  end_min: number;
+  old_room: string;
+  new_room_id: number;
+  new_room: string;
+  kinds: ConflictKind[];
+}
+
+/** Séance en conflit sans salle compatible libre au même créneau. */
+export interface RoomReassignSkip {
+  session_id: number;
+  label: string;
+  date: string;
+  start_min: number;
+  end_min: number;
+  reason: string;
+}
+
+/** Aperçu `conflicts:reassignPreview` — calcul déterministe en mémoire. */
+export interface RoomReassignPreview {
+  proposals: RoomReassignProposal[];
+  skipped: RoomReassignSkip[];
+}
+
+/** Résultat `conflicts:reassignApply` — déplacées + non résolues. */
+export interface RoomReassignResult {
+  moved: number;
+  skipped: RoomReassignSkip[];
+}
+
 /** API exposée au renderer via contextBridge (`window.api`). */
 export interface WindowApi {
   appInfo(): Promise<AppInfo>;
@@ -1380,6 +1424,15 @@ export interface WindowApi {
     conflicts(filter?: ConflictFilter): Promise<ApiResult<ConflictItem[]>>;
     summary(): Promise<ApiResult<ConflictSummary>>;
     occupancy(filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>>;
+  };
+  /**
+   * P16 — résolution assistée des conflits de salle (ROOM + EXTERNAL).
+   * Pas de requireRole côté main (BR-24) : la gestion des EDT est
+   * ouverte aux deux profils — même surface d'écriture que sessions:move.
+   */
+  conflicts: {
+    reassignPreview(): Promise<ApiResult<RoomReassignPreview>>;
+    reassignApply(): Promise<ApiResult<RoomReassignResult>>;
   };
   sessions: {
     get(id: number): Promise<ApiResult<SessionDetail>>;

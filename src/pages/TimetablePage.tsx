@@ -38,6 +38,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
+  SwapOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -65,6 +66,9 @@ import type {
   PlacementConflict,
   ProfessorRow,
   Room,
+  RoomReassignPreview,
+  RoomReassignProposal,
+  RoomReassignResult,
   SessionEditResult,
   SessionRow,
 } from '../../shared/types';
@@ -260,6 +264,15 @@ export function TimetablePage(): React.JSX.Element {
   const [annual, setAnnual] = useState<AnnualRow[]>([]);
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [conflictsOpen, setConflictsOpen] = useState(true);
+  // --- P16 — réaffectation assistée des salles ---------------------------------
+  const [reassignCount, setReassignCount] = useState<number | null>(null);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassignPreview, setReassignPreview] =
+    useState<RoomReassignPreview | null>(null);
+  const [reassignResult, setReassignResult] =
+    useState<RoomReassignResult | null>(null);
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [reassignApplying, setReassignApplying] = useState(false);
   const [conflictIds, setConflictIds] = useState<Set<number>>(new Set());
   const [conflictKind, setConflictKind] = useState<ConflictKind | null>(null);
   const [loading, setLoading] = useState(true);
@@ -310,6 +323,10 @@ export function TimetablePage(): React.JSX.Element {
       const res = await api().timetable.conflicts();
       if (res.ok) setConflicts(res.data);
       else void message.error(errorMessage(res));
+      // P16 : compteur du bouton « Réaffecter les salles » (aperçu
+      // recalculé à chaque rafraîchissement des conflits).
+      const prev = await api().conflicts.reassignPreview();
+      setReassignCount(prev.ok ? prev.data.proposals.length : null);
     } catch (err) {
       void message.error(errorMessage(err));
     }
@@ -459,6 +476,44 @@ export function TimetablePage(): React.JSX.Element {
     setScope('week');
     setEntityId(undefined);
     setWeekStart(mondayOf(dayjs(c.date)));
+  };
+
+  // --- P16 — Réaffectation assistée des salles ----------------------------------
+
+  /** Ouvre la Modal d'aperçu : prévisualisation fraîche à chaque ouverture. */
+  const openReassign = async (): Promise<void> => {
+    setReassignOpen(true);
+    setReassignResult(null);
+    setReassignPreview(null);
+    setReassignLoading(true);
+    try {
+      const res = await api().conflicts.reassignPreview();
+      if (res.ok) setReassignPreview(res.data);
+      else void message.error(errorMessage(res));
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
+  /** Applique la réaffectation : résultat + rechargement conflits + grille. */
+  const applyReassign = async (): Promise<void> => {
+    setReassignApplying(true);
+    try {
+      const res = await api().conflicts.reassignApply();
+      if (res.ok) {
+        setReassignResult(res.data);
+        setReloadKey((k) => k + 1);
+        void loadConflicts();
+      } else {
+        void message.error(errorMessage(res));
+      }
+    } catch (err) {
+      void message.error(errorMessage(err));
+    } finally {
+      setReassignApplying(false);
+    }
   };
 
   // --- Mutations P7b -----------------------------------------------------------
@@ -954,6 +1009,24 @@ export function TimetablePage(): React.JSX.Element {
       }
       styles={{ body: { maxHeight: '70vh', overflowY: 'auto', padding: 8 } }}
     >
+      {/* P16 : résolution assistée — désactivée si aucune proposition. */}
+      <Tooltip
+        title={reassignCount === 0 ? t('conflicts.reassign.none') : undefined}
+      >
+        <Button
+          size="small"
+          block
+          icon={<SwapOutlined />}
+          disabled={reassignCount === 0}
+          onClick={() => void openReassign()}
+          style={{ marginBottom: 8 }}
+        >
+          {t('conflicts.reassign.action')}
+          {reassignCount != null && reassignCount > 0
+            ? ` (${reassignCount})`
+            : ''}
+        </Button>
+      </Tooltip>
       {conflicts.length === 0 ? (
         <Empty description={t('conflicts.empty')} />
       ) : (
@@ -1340,6 +1413,146 @@ export function TimetablePage(): React.JSX.Element {
         conflicts={refusal}
         onClose={() => setRefusal(null)}
       />
+
+      {/* Modal P16 — aperçu + application de la réaffectation des salles */}
+      <Modal
+        title={t('conflicts.reassign.title')}
+        open={reassignOpen}
+        onCancel={() => setReassignOpen(false)}
+        width={780}
+        destroyOnHidden
+        footer={
+          reassignResult != null ? (
+            <Button type="primary" onClick={() => setReassignOpen(false)}>
+              {t('common.close')}
+            </Button>
+          ) : (
+            <Space>
+              <Button onClick={() => setReassignOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                type="primary"
+                loading={reassignApplying}
+                disabled={
+                  reassignLoading ||
+                  (reassignPreview?.proposals.length ?? 0) === 0
+                }
+                onClick={() => void applyReassign()}
+              >
+                {t('conflicts.reassign.apply')}
+              </Button>
+            </Space>
+          )
+        }
+      >
+        {reassignLoading ? (
+          <Skeleton active />
+        ) : reassignResult != null ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Alert
+              type="success"
+              showIcon
+              message={t('conflicts.reassign.applied', {
+                moved: reassignResult.moved,
+              })}
+            />
+            {reassignResult.skipped.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t('conflicts.reassign.appliedSkipped', {
+                  count: reassignResult.skipped.length,
+                })}
+                description={
+                  <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                    {reassignResult.skipped.map((s) => (
+                      <li key={s.session_id} dir="auto">
+                        {`${dayjs(s.date).format('DD/MM')} ` +
+                          `${minToHHMM(s.start_min)}–${minToHHMM(s.end_min)} ` +
+                          `· ${s.label} — ${s.reason}`}
+                      </li>
+                    ))}
+                  </ul>
+                }
+              />
+            )}
+          </Space>
+        ) : reassignPreview != null ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Alert
+              type="info"
+              showIcon
+              message={t('conflicts.reassign.count', {
+                count: reassignPreview.proposals.length,
+              })}
+            />
+            <Table<RoomReassignProposal>
+              size="small"
+              rowKey="session_id"
+              dataSource={reassignPreview.proposals}
+              pagination={
+                reassignPreview.proposals.length > 10
+                  ? { pageSize: 10 }
+                  : false
+              }
+              locale={{ emptyText: t('conflicts.reassign.empty') }}
+              columns={[
+                {
+                  title: t('conflicts.reassign.colSession'),
+                  render: (_, p) => (
+                    <span dir="auto">
+                      {`${dayjs(p.date).format('dddd DD/MM')} · ` +
+                        `${minToHHMM(p.start_min)}–${minToHHMM(p.end_min)} · ` +
+                        `${p.label}`}
+                    </span>
+                  ),
+                },
+                {
+                  title: t('conflicts.reassign.colRoom'),
+                  width: 200,
+                  render: (_, p) => (
+                    <span dir="auto">{`${p.old_room} → ${p.new_room}`}</span>
+                  ),
+                },
+                {
+                  title: t('conflicts.reassign.colKinds'),
+                  width: 200,
+                  render: (_, p) => (
+                    <Space size={4} wrap>
+                      {p.kinds.map((k) => (
+                        <Tag key={k} color={KIND_COLORS[k]}>
+                          {t(`conflicts.kinds.${k}`)}
+                        </Tag>
+                      ))}
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+            {reassignPreview.skipped.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t('conflicts.reassign.skippedTitle', {
+                  count: reassignPreview.skipped.length,
+                })}
+                description={
+                  <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                    {reassignPreview.skipped.map((s) => (
+                      <li key={s.session_id} dir="auto">
+                        {`${dayjs(s.date).format('DD/MM')} ` +
+                          `${minToHHMM(s.start_min)}–${minToHHMM(s.end_min)} ` +
+                          `· ${s.label} — ${s.reason}`}
+                      </li>
+                    ))}
+                  </ul>
+                }
+              />
+            )}
+          </Space>
+        ) : null}
+      </Modal>
     </Space>
   );
 }

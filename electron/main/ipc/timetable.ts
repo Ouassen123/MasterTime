@@ -18,13 +18,17 @@ import {
   detectConflicts,
 } from '../db/conflict.service';
 import {
+  applyReassignment,
+  previewReassignment,
+} from '../db/conflict-resolve.service';
+import {
   getSessionDetail,
   listAnnual,
   listOccupancyWeek,
   listSessionsMonth,
   listSessionsWeek,
 } from '../db/session.service';
-import { guard, isId, isObject, type DbGetter } from './helpers';
+import { currentUserId, guard, isId, isObject, type DbGetter } from './helpers';
 
 export function registerTimetableHandlers(getDb: DbGetter): void {
   ipcMain.handle('timetable:week', (_e, filter: unknown) =>
@@ -61,6 +65,19 @@ export function registerTimetableHandlers(getDb: DbGetter): void {
 
   ipcMain.handle('timetable:summary', (_e) =>
     guard(getDb, (db) => conflictSummary(db)),
+  );
+
+  // P16 — résolution assistée des conflits de salle (ROOM + EXTERNAL).
+  // Pas de requireRole (BR-24) : la gestion des EDT est ouverte aux deux
+  // profils — même surface d'écriture que sessions:move. `reassignApply`
+  // écrit (UPDATE session.room_id + audit + historique) : il attribue
+  // l'audit au profil courant.
+  ipcMain.handle('conflicts:reassignPreview', () =>
+    guard(getDb, (db) => previewReassignment(db)),
+  );
+
+  ipcMain.handle('conflicts:reassignApply', () =>
+    guard(getDb, (db) => applyReassignment(db, currentUserId(db))),
   );
 
   ipcMain.handle('sessions:get', (_e, id: number) =>

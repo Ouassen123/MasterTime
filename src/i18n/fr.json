@@ -44,7 +44,8 @@
     "inactive": "Inactive",
     "active": "Active",
     "yes": "Oui",
-    "no": "Non"
+    "no": "Non",
+    "close": "Fermer"
   },
   "rooms": {
     "title": "Salles",
@@ -463,6 +464,20 @@
       "MASTER": "Conflits de master",
       "GROUP": "Conflits de groupe",
       "EXTERNAL": "Occupations externes (Licence)"
+    },
+    "reassign": {
+      "action": "Réaffecter les salles",
+      "none": "Aucune séance en conflit ne peut être réaffectée automatiquement.",
+      "title": "Réaffectation automatique des salles",
+      "count": "{{count}} séance(s) peuvent être déplacées de salle (même créneau, salle libre).",
+      "colSession": "Séance",
+      "colRoom": "Salle",
+      "colKinds": "Conflit",
+      "skippedTitle": "Non résolubles automatiquement ({{count}})",
+      "apply": "Appliquer",
+      "applied": "{{moved}} séance(s) réaffectée(s) — les conflits de salle associés sont résolus.",
+      "appliedSkipped": "{{count}} séance(s) n'ont pas pu être réaffectées :",
+      "empty": "Aucune proposition de réaffectation."
     }
   },
   "dashboard": {

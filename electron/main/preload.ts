@@ -72,6 +72,8 @@ import type {
   ReportPdfInput,
   Room,
   RoomInput,
+  RoomReassignPreview,
+  RoomReassignResult,
   SessionCreateInput,
   SessionDetail,
   SessionEditResult,
@@ -209,6 +211,13 @@ const api: WindowApi = {
       ipcRenderer.invoke('timetable:summary'),
     occupancy: (filter: OccupancyFilter): Promise<ApiResult<OccupancyRow[]>> =>
       ipcRenderer.invoke('timetable:occupancy', filter),
+  },
+  // P16 — résolution assistée des conflits de salle.
+  conflicts: {
+    reassignPreview: (): Promise<ApiResult<RoomReassignPreview>> =>
+      ipcRenderer.invoke('conflicts:reassignPreview'),
+    reassignApply: (): Promise<ApiResult<RoomReassignResult>> =>
+      ipcRenderer.invoke('conflicts:reassignApply'),
   },
   sessions: {
     get: (id: number): Promise<ApiResult<SessionDetail>> =>
