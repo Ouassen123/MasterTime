@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emplois du temps — FSJP Tanger</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header id="hd"></header>
+  <main>
+    <div class="card">
+      <h2>Avis aux étudiants · <span dir="rtl" lang="ar">إعلانات للطلبة</span></h2>
+      <div id="avis"><p class="muted">Chargement…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>Consulter votre emploi du temps</h2>
+      <div class="row">
+        <div>
+          <label for="master">Votre Master</label>
+          <select id="master"><option value="">Chargement…</option></select>
+        </div>
+        <div style="flex:0 0 auto">
+          <a id="go" class="btn" href="#">Voir l'emploi du temps</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Réclamation · <span dir="rtl" lang="ar">شكاية</span></h2>
+      <div class="row">
+        <div>
+          <label for="cname">Nom (facultatif)</label>
+          <input id="cname" maxlength="100" placeholder="Votre nom">
+        </div>
+        <div>
+          <label for="crole">Vous êtes</label>
+          <select id="crole">
+            <option value="etudiant">Étudiant(e)</option>
+            <option value="professeur">Professeur</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+      </div>
+      <label for="cmsg">Message</label>
+      <textarea id="cmsg" rows="3" maxlength="2000" placeholder="Votre réclamation…"></textarea>
+      <div style="margin-top:10px"><button class="btn" id="csend">Envoyer</button></div>
+      <div id="cresult"></div>
+    </div>
+  </main>
+  <footer>
+    MasterTime Tanger — FSJP · <span data-online>–</span> visiteur(s) en ligne
+  </footer>
+  <script src="/app.js"></script>
+  <script>
+    document.getElementById('hd').innerHTML = MT.header('home');
+    MT.heartbeat();
+
+    // Avis bilingues
+    MT.api('/api/announcements').then((rows) => {
+      const el = document.getElementById('avis');
+      if (!rows.length) {
+        el.innerHTML = '<p class="muted">Aucun avis pour le moment. · <span dir="rtl">لا إعلانات حاليا</span></p>';
+        return;
+      }
+      el.innerHTML = rows.map((a) => `
+        <div class="notice">
+          <div class="t">${a.title_fr}</div>
+          <div>${a.body_fr}</div>
+          ${a.title_ar || a.body_ar ? `<div class="ar">${a.title_ar ? `<b>${a.title_ar}</b><br>` : ''}${a.body_ar}</div>` : ''}
+          <div class="date">Publié le ${new Date(a.published_at + 'Z').toLocaleString('fr-FR')}</div>
+        </div>`).join('');
+    });
+
+    // Sélecteur Master
+    MT.api('/api/masters').then((rows) => {
+      const sel = document.getElementById('master');
+      sel.innerHTML = '<option value="">— Choisir votre Master —</option>' +
+        rows.map((m) => `<option value="${m.id}">${m.name}${m.level ? ` (${m.level})` : ''}</option>`).join('');
+      sel.onchange = () => {
+        document.getElementById('go').href = sel.value ? `/edt.html?master=${sel.value}` : '#';
+      };
+    });
+
+    // Réclamation
+    document.getElementById('csend').onclick = async () => {
+      const r = document.getElementById('cresult');
+      try {
+        await MT.api('/api/complaints', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: document.getElementById('cname').value,
+            role: document.getElementById('crole').value,
+            message: document.getElementById('cmsg').value,
+          }),
+        });
+        r.innerHTML = '<p class="ok">Réclamation envoyée — merci. · <span dir="rtl">تم الإرسال</span></p>';
+        document.getElementById('cmsg').value = '';
+      } catch (e) {
+        r.innerHTML = `<p class="err">${e.message}</p>`;
+      }
+    };
+  </script>
+</body>
+</html>

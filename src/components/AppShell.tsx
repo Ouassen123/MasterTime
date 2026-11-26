@@ -14,6 +14,7 @@ import {
   CalendarOutlined,
   DashboardOutlined,
   DatabaseOutlined,
+  GlobalOutlined,
   HomeOutlined,
   ScheduleOutlined,
   SettingOutlined,
@@ -34,7 +35,7 @@ const { Text, Title } = Typography;
 type NavKey =
   | 'dashboard' | 'masters' | 'professors' | 'modules' | 'rooms'
   | 'schedule' | 'generation' | 'sessions' | 'absences' | 'reports'
-  | 'importExport' | 'settings' | 'backups';
+  | 'importExport' | 'portal' | 'settings' | 'backups';
 
 interface NavEntry {
   key: NavKey;
@@ -87,6 +88,13 @@ const NAV: NavEntry[] = [
     path: '/import-export',
     enabled: true,
     icon: <SwapOutlined />,
+  },
+  {
+    key: 'portal',
+    path: '/portail',
+    enabled: true,
+    adminOnly: true,
+    icon: <GlobalOutlined />,
   },
   {
     key: 'settings',

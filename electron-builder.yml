@@ -12,6 +12,14 @@ files:
   - out/**
   - package.json
 
+# P19 — portail web : serveur (core.mjs) + site statique, hors asar
+# (import dynamique en-processus + fichiers servis au navigateur).
+extraResources:
+  - from: server
+    to: server
+  - from: web
+    to: web
+
 asar: true
 electronLanguages:
   - fr

@@ -145,6 +145,7 @@ app.whenReady().then(() => {
         app.exit(0);
       },
     },
+    getDbPath: () => dbPath,
   });
 
   createWindow();

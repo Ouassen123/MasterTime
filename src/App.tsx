@@ -17,6 +17,7 @@ import { MastersPage } from './pages/MastersPage';
 import { ModulesPage } from './pages/ModulesPage';
 import { ParamsPage } from './pages/ParamsPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { PortalPage } from './pages/PortalPage';
 import { ProfessorsPage } from './pages/ProfessorsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { RoomsPage } from './pages/RoomsPage';
@@ -38,6 +39,7 @@ export default function App(): React.JSX.Element {
         <Route path="rapports" element={<ReportsPage />} />
         <Route path="import-export" element={<ImportExportPage />} />
         <Route path="parametres" element={<ParamsPage />} />
+        <Route path="portail" element={<PortalPage />} />
         <Route path="sauvegardes" element={<BackupsPage />} />
         <Route path="*" element={<PlaceholderPage />} />
       </Route>

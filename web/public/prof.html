@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Espace professeur — FSJP Tanger</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header id="hd"></header>
+  <main>
+    <!-- Connexion -->
+    <div class="card" id="loginCard">
+      <h2>Espace professeur — Connexion</h2>
+      <p class="muted">Vos identifiants vous ont été remis par l'administration.</p>
+      <label for="login">Identifiant</label>
+      <input id="login" autocomplete="username">
+      <label for="password">Mot de passe</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <div style="margin-top:12px"><button class="btn" id="doLogin">Se connecter</button></div>
+      <div id="loginErr"></div>
+    </div>
+
+    <!-- Tableau de bord -->
+    <div id="dash" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><h2 id="hello" style="margin:0"></h2><p class="muted" id="masters"></p></div>
+          <div style="flex:0 0 auto">
+            <button class="btn ghost" id="prev">← Semaine</button>
+            <button class="btn ghost" id="today">Aujourd'hui</button>
+            <button class="btn ghost" id="next">Semaine →</button>
+            <button class="btn ghost" id="logout">Déconnexion</button>
+          </div>
+        </div>
+        <p class="muted" id="weekLabel" style="margin-top:6px"></p>
+      </div>
+      <div class="card">
+        <h2>Mes séances</h2>
+        <div id="sessions"></div>
+      </div>
+      <div class="card">
+        <h2>Mes demandes</h2>
+        <div id="requests"></div>
+      </div>
+    </div>
+
+    <!-- Choix du créneau de report -->
+    <div class="card hidden" id="moveCard">
+      <h2>Proposer un report</h2>
+      <p class="muted" id="moveInfo"></p>
+      <div id="slots"></div>
+      <div style="margin-top:10px"><button class="btn ghost" id="moveCancel">Annuler</button></div>
+    </div>
+  </main>
+  <footer>MasterTime Tanger — FSJP</footer>
+  <script src="/app.js"></script>
+  <script>
+    document.getElementById('hd').innerHTML = MT.header('prof');
+    MT.heartbeat();
+
+    let me = null;
+    let week = MT.mondayOf(MT.today());
+
+    const fmtSlot = (s) => `${MT.fmtDay(s.date)} · ${MT.hm(s.start_min)}–${MT.hm(s.end_min)}`;
+
+    async function init() {
+      try {
+        me = await MT.api('/api/prof/me');
+        document.getElementById('loginCard').classList.add('hidden');
+        document.getElementById('dash').classList.remove('hidden');
+        document.getElementById('hello').textContent = me.full_name;
+        document.getElementById('masters').textContent =
+          me.masters.map((m) => m.name).join(' · ');
+        load();
+        loadRequests();
+      } catch { /* pas connecté */ }
+    }
+
+    document.getElementById('doLogin').onclick = async () => {
+      try {
+        await MT.api('/api/prof/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            login: document.getElementById('login').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        init();
+      } catch (e) {
+        document.getElementById('loginErr').innerHTML = `<p class="err">${e.message}</p>`;
+      }
+    };
+    document.getElementById('logout').onclick = async () => {
+      await MT.api('/api/prof/logout', { method: 'POST' });
+      location.reload();
+    };
+    document.getElementById('prev').onclick = () => { week = MT.addDays(week, -7); load(); };
+    document.getElementById('next').onclick = () => { week = MT.addDays(week, 7); load(); };
+    document.getElementById('today').onclick = () => { week = MT.mondayOf(MT.today()); load(); };
+
+    async function load() {
+      const el = document.getElementById('sessions');
+      const data = await MT.api(`/api/prof/sessions?week=${week}`);
+      document.getElementById('weekLabel').textContent = `Semaine du ${MT.fmtDay(data.weekStart)}`;
+      if (!data.sessions.length) { el.innerHTML = '<p class="muted">Aucune séance cette semaine.</p>'; return; }
+      const badge = { PREVUE: 'blue', REALISEE: 'green', ANNULEE: 'red', REPORTEE: 'gold', NON_ENCORE_REALISEE: 'grey' };
+      const lbl = { PREVUE: 'Prévue', REALISEE: 'Réalisée', ANNULEE: 'Annulée', REPORTEE: 'Reportée', NON_ENCORE_REALISEE: 'Non réalisée' };
+      el.innerHTML = `<table class="tbl"><tr>
+        <th>Séance</th><th>Master</th><th>Salle</th><th>Statut</th><th></th></tr>` +
+        data.sessions.map((s) => `<tr>
+          <td><b>${fmtSlot(s)}</b><br><span class="muted">${s.module_name}</span></td>
+          <td>${s.master_name}</td>
+          <td>${s.room_name}</td>
+          <td><span class="badge ${badge[s.status] || 'grey'}">${lbl[s.status] || s.status}</span>
+            ${s.pending_requests ? '<br><span class="badge gold">Demande en cours</span>' : ''}</td>
+          <td style="white-space:nowrap">
+            ${['PREVUE', 'REPORTEE'].includes(s.status) && !s.pending_requests ? `
+              <button class="btn small danger" onclick="askCancel(${s.id})">Annuler</button>
+              <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">Reporter</button>` : ''}
+          </td></tr>`).join('') + '</table>';
+    }
+
+    window.askCancel = async (sid) => {
+      const reason = prompt('Motif de l\'annulation (visible dans l\'avis aux étudiants) :');
+      if (reason === null) return;
+      try {
+        await MT.api('/api/prof/requests', {
+          method: 'POST',
+          body: JSON.stringify({ session_id: sid, kind: 'cancel', reason }),
+        });
+        load(); loadRequests();
+      } catch (e) { alert(e.message); }
+    };
+
+    window.askMove = async (sid, label) => {
+      const card = document.getElementById('moveCard');
+      card.classList.remove('hidden');
+      document.getElementById('moveInfo').textContent = `Séance : ${label} — créneaux libres proposés par le système :`;
+      const el = document.getElementById('slots');
+      el.innerHTML = '<p class="muted">Recherche des créneaux libres…</p>';
+      card.scrollIntoView({ behavior: 'smooth' });
+      try {
+        const slots = await MT.api(`/api/prof/free-slots?session_id=${sid}`);
+        if (!slots.length) { el.innerHTML = '<p class="muted">Aucun créneau libre cette semaine.</p>'; return; }
+        el.innerHTML = slots.map((sl, i) => `
+          <div class="notice" style="cursor:pointer" onclick="pickSlot(${sid},${i})">
+            <b>${MT.fmtDay(sl.date)} · ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}</b><br>
+            ${sl.rooms.map((r) => `<span class="badge blue">${r.name} · ${r.capacity} places</span>`).join(' ')}
+          </div>`).join('');
+        window._slots = slots;
+      } catch (e) { el.innerHTML = `<p class="err">${e.message}</p>`; }
+    };
+
+    window.pickSlot = async (sid, i) => {
+      const sl = window._slots[i];
+      const roomOpts = sl.rooms.map((r, j) => `${j + 1}. ${r.name} (${r.capacity})`).join('\n');
+      const pick = prompt(`Créneau : ${MT.fmtDay(sl.date)} ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}\nChoisir la salle :\n${roomOpts}`, '1');
+      if (pick === null) return;
+      const room = sl.rooms[Number(pick) - 1];
+      if (!room) return alert('Salle invalide');
+      const reason = prompt('Motif du report (facultatif) :') ?? '';
+      try {
+        await MT.api('/api/prof/requests', {
+          method: 'POST',
+          body: JSON.stringify({
+            session_id: sid, kind: 'move', reason,
+            proposed: { date: sl.date, start_min: sl.start_min, end_min: sl.end_min, room_id: room.id },
+          }),
+        });
+        document.getElementById('moveCard').classList.add('hidden');
+        load(); loadRequests();
+        alert('Demande envoyée — en attente de validation par l\'administration.');
+      } catch (e) { alert(e.message); }
+    };
+
+    document.getElementById('moveCancel').onclick = () =>
+      document.getElementById('moveCard').classList.add('hidden');
+
+    async function loadRequests() {
+      const el = document.getElementById('requests');
+      const rows = await MT.api('/api/prof/requests');
+      if (!rows.length) { el.innerHTML = '<p class="muted">Aucune demande.</p>'; return; }
+      const badge = { pending: 'gold', approved: 'green', rejected: 'red' };
+      const lbl = { pending: 'En attente', approved: 'Approuvée', rejected: 'Rejetée' };
+      el.innerHTML = `<table class="tbl"><tr><th>Séance</th><th>Type</th><th>Proposition</th><th>Statut</th><th>Note admin</th></tr>` +
+        rows.map((r) => `<tr>
+          <td>${MT.fmtDay(r.session_date)} ${MT.hm(r.start_min)}–${MT.hm(r.end_min)}<br><span class="muted">${r.module_name} · ${r.master_name}</span></td>
+          <td>${r.kind === 'cancel' ? 'Annulation' : 'Report'}</td>
+          <td>${r.kind === 'move' && r.proposed_date ? `${MT.fmtDay(r.proposed_date)} ${MT.hm(r.proposed_start_min)}–${MT.hm(r.proposed_end_min)}<br>${r.proposed_room_name ?? ''}` : '—'}</td>
+          <td><span class="badge ${badge[r.status]}">${lbl[r.status]}</span></td>
+          <td class="muted">${r.admin_note || '—'}</td>
+        </tr>`).join('') + '</table>';
+    }
+
+    init();
+  </script>
+</body>
+</html>

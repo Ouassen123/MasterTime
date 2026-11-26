@@ -1678,4 +1678,93 @@ export interface WindowApi {
     remove(id: number): Promise<ApiResult<null>>;
     openFolder(): Promise<ApiResult<null>>;
   };
+  /** P19 — portail web : serveur embarqué + console admin. */
+  webportal: {
+    status(): Promise<ApiResult<WebPortalStatus>>;
+    start(port: number): Promise<ApiResult<null>>;
+    stop(): Promise<ApiResult<null>>;
+    online(): Promise<ApiResult<PortalOnlineCount>>;
+    requests(status?: string): Promise<ApiResult<PortalRequestRow[]>>;
+    approve(id: number, note?: string): Promise<ApiResult<null>>;
+    reject(id: number, note?: string): Promise<ApiResult<null>>;
+    complaints(): Promise<ApiResult<PortalComplaintRow[]>>;
+    setComplaintStatus(
+      id: number,
+      status: 'read' | 'handled',
+    ): Promise<ApiResult<null>>;
+    accounts(): Promise<ApiResult<PortalAccountRow[]>>;
+    createAccount(
+      professorId: number,
+      login: string,
+      password: string,
+    ): Promise<ApiResult<null>>;
+    resetPassword(id: number, password: string): Promise<ApiResult<null>>;
+    toggleAccount(id: number, active: boolean): Promise<ApiResult<null>>;
+    announcements(): Promise<ApiResult<PortalAnnouncementRow[]>>;
+    setAnnouncementActive(
+      id: number,
+      active: boolean,
+    ): Promise<ApiResult<null>>;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// P19 — Portail web
+// ---------------------------------------------------------------------------
+
+export interface WebPortalStatus {
+  running: boolean;
+  port: number | null;
+  urls: string[];
+}
+
+export interface PortalOnlineCount {
+  visitors: number;
+  professors: number;
+}
+
+export interface PortalRequestRow {
+  id: number;
+  session_id: number;
+  professor_id: number;
+  professor_name: string;
+  kind: 'cancel' | 'move';
+  reason: string;
+  proposed_date: string | null;
+  proposed_start_min: number | null;
+  proposed_end_min: number | null;
+  proposed_room_id: number | null;
+  proposed_room_name: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note: string;
+  created_at: string;
+  session_label: string;
+}
+
+export interface PortalAccountRow {
+  id: number;
+  professor_id: number;
+  professor_name: string;
+  login: string;
+  is_active: number;
+  created_at: string;
+}
+
+export interface PortalComplaintRow {
+  id: number;
+  author_name: string;
+  author_role: string;
+  message: string;
+  status: 'new' | 'read' | 'handled';
+  created_at: string;
+}
+
+export interface PortalAnnouncementRow {
+  id: number;
+  title_fr: string;
+  title_ar: string;
+  body_fr: string;
+  body_ar: string;
+  is_active: number;
+  published_at: string;
 }

@@ -25,10 +25,13 @@ import {
   registerBackupHandlers,
   type BackupsIpcContext,
 } from './backups';
+import { registerWebPortalHandlers } from './web-portal';
 
 /** Dépendances résolues côté `main/index.ts` (chemins + redémarrage). */
 export interface IpcDeps {
   backups: BackupsIpcContext;
+  /** Chemin du fichier DB — nécessaire au serveur web embarqué (P19). */
+  getDbPath: () => string;
 }
 
 export function registerIpcHandlers(getDb: DbGetter, deps: IpcDeps): void {
@@ -48,6 +51,7 @@ export function registerIpcHandlers(getDb: DbGetter, deps: IpcDeps): void {
   registerImportExportHandlers(getDb);
   registerSettingsHandlers(getDb, { backupDir: deps.backups.backupDir });
   registerBackupHandlers(getDb, deps.backups);
+  registerWebPortalHandlers(getDb, { getDbPath: deps.getDbPath });
 
   ipcMain.handle('app:context', () =>
     guard(getDb, (db) => collectAppContext(db)),

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emploi du temps — FSJP Tanger</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header id="hd"></header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="master">Master</label>
+          <select id="master"></select>
+        </div>
+        <div style="flex:0 0 auto">
+          <button class="btn ghost" id="prev">← Semaine</button>
+          <button class="btn ghost" id="today">Aujourd'hui</button>
+          <button class="btn ghost" id="next">Semaine →</button>
+        </div>
+      </div>
+      <p class="muted" id="weekLabel" style="margin-top:8px"></p>
+    </div>
+    <div class="card">
+      <div id="grid"><p class="muted">Choisissez un Master…</p></div>
+    </div>
+  </main>
+  <footer>MasterTime Tanger — FSJP · <span data-online>–</span> en ligne</footer>
+  <script src="/app.js"></script>
+  <script>
+    document.getElementById('hd').innerHTML = MT.header('edt');
+    MT.heartbeat();
+
+    const params = new URLSearchParams(location.search);
+    let week = MT.mondayOf(MT.today());
+    let masterId = params.get('master') || '';
+
+    const sel = document.getElementById('master');
+    MT.api('/api/masters').then((rows) => {
+      sel.innerHTML = '<option value="">— Choisir —</option>' +
+        rows.map((m) => `<option value="${m.id}" ${String(m.id) === masterId ? 'selected' : ''}>${m.name}${m.level ? ` (${m.level})` : ''}</option>`).join('');
+      if (masterId) load();
+    });
+
+    sel.onchange = () => { masterId = sel.value; load(); };
+    document.getElementById('prev').onclick = () => { week = MT.addDays(week, -7); load(); };
+    document.getElementById('next').onclick = () => { week = MT.addDays(week, 7); load(); };
+    document.getElementById('today').onclick = () => { week = MT.mondayOf(MT.today()); load(); };
+
+    async function load() {
+      const grid = document.getElementById('grid');
+      if (!masterId) { grid.innerHTML = '<p class="muted">Choisissez un Master…</p>'; return; }
+      grid.innerHTML = '<p class="muted">Chargement…</p>';
+      try {
+        const data = await MT.api(`/api/edt?master_id=${masterId}&week=${week}`);
+        document.getElementById('weekLabel').textContent =
+          `Semaine du ${MT.fmtDay(data.weekStart)}`;
+        // 7 colonnes-jour
+        const cols = Array.from({ length: 7 }, () => []);
+        for (const s of data.sessions) {
+          const wd = (new Date(`${s.date}T00:00:00`).getDay() + 6) % 7;
+          cols[wd].push(s);
+        }
+        grid.innerHTML = '<div class="edt-grid">' + cols.map((ss, i) => {
+          const dayIso = MT.addDays(data.weekStart, i);
+          return `<div class="day-col">
+            <h3>${MT.fmtDay(dayIso)}</h3>
+            ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => `
+              <div class="slot ${s.status === 'REPORTEE' ? 'reportee' : ''}">
+                <span class="tm">${MT.hm(s.start_min)}–${MT.hm(s.end_min)}</span>
+                ${s.module_name}
+                <small>${s.professor_name}</small>
+                <small>📍 ${s.room_name}</small>
+                ${s.status === 'REPORTEE' ? '<small><b>Séance reportée</b></small>' : ''}
+              </div>`).join('')}
+          </div>`;
+        }).join('') + '</div>';
+      } catch (e) {
+        grid.innerHTML = `<p class="err">${e.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

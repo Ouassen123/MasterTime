@@ -89,6 +89,12 @@ import type {
   StudentRow,
   TimeSlotInput,
   TimeSlotRow,
+  PortalAccountRow,
+  PortalAnnouncementRow,
+  PortalComplaintRow,
+  PortalOnlineCount,
+  PortalRequestRow,
+  WebPortalStatus,
   WeekFilter,
   WeekSheetInput,
   WindowApi,
@@ -428,6 +434,52 @@ const api: WindowApi = {
       ipcRenderer.invoke('backups:delete', id),
     openFolder: (): Promise<ApiResult<null>> =>
       ipcRenderer.invoke('backups:openFolder'),
+  },
+  webportal: {
+    status: (): Promise<ApiResult<WebPortalStatus>> =>
+      ipcRenderer.invoke('webportal:status'),
+    start: (port: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:start', port),
+    stop: (): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:stop'),
+    online: (): Promise<ApiResult<PortalOnlineCount>> =>
+      ipcRenderer.invoke('webportal:online'),
+    requests: (status = 'pending'): Promise<ApiResult<PortalRequestRow[]>> =>
+      ipcRenderer.invoke('webportal:requests', status),
+    approve: (id: number, note = ''): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:approve', { id, note }),
+    reject: (id: number, note = ''): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:reject', { id, note }),
+    complaints: (): Promise<ApiResult<PortalComplaintRow[]>> =>
+      ipcRenderer.invoke('webportal:complaints'),
+    setComplaintStatus: (
+      id: number,
+      status: 'read' | 'handled',
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:complaintStatus', { id, status }),
+    accounts: (): Promise<ApiResult<PortalAccountRow[]>> =>
+      ipcRenderer.invoke('webportal:accounts'),
+    createAccount: (
+      professorId: number,
+      login: string,
+      password: string,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:createAccount', {
+        professorId,
+        login,
+        password,
+      }),
+    resetPassword: (id: number, password: string): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:resetPassword', { id, password }),
+    toggleAccount: (id: number, active: boolean): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:toggleAccount', { id, active }),
+    announcements: (): Promise<ApiResult<PortalAnnouncementRow[]>> =>
+      ipcRenderer.invoke('webportal:announcements'),
+    setAnnouncementActive: (
+      id: number,
+      active: boolean,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:announcementActive', { id, active }),
   },
 };
 
