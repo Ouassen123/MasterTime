@@ -481,8 +481,8 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
             return json(res, 400, { error: 'Demande déjà en attente' });
           }
           let pd = null, ps = null, pe = null, pr = null;
-          if (kind === 'move') {
-            const prop = b.proposed ?? {};
+          if (kind === 'move' && b.proposed && b.proposed.date) {
+            const prop = b.proposed;
             pd = String(prop.date ?? '');
             ps = Number(prop.start_min);
             pe = Number(prop.end_min);

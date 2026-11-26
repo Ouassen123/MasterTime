@@ -1685,7 +1685,11 @@ export interface WindowApi {
     stop(): Promise<ApiResult<null>>;
     online(): Promise<ApiResult<PortalOnlineCount>>;
     requests(status?: string): Promise<ApiResult<PortalRequestRow[]>>;
-    approve(id: number, note?: string): Promise<ApiResult<null>>;
+    approve(
+      id: number,
+      note?: string,
+      slot?: ProposedSlot,
+    ): Promise<ApiResult<null>>;
     reject(id: number, note?: string): Promise<ApiResult<null>>;
     complaints(): Promise<ApiResult<PortalComplaintRow[]>>;
     setComplaintStatus(
@@ -1723,6 +1727,14 @@ export interface PortalOnlineCount {
   professors: number;
 }
 
+/** Créneau de report choisi par l'admin quand le prof n'en propose pas. */
+export interface ProposedSlot {
+  date: string;
+  start_min: number;
+  end_min: number;
+  room_id: number;
+}
+
 export interface PortalRequestRow {
   id: number;
   session_id: number;
@@ -1739,6 +1751,12 @@ export interface PortalRequestRow {
   admin_note: string;
   created_at: string;
   session_label: string;
+  /** Séance actuelle — pré-remplit le choix de créneau côté admin. */
+  session_date: string;
+  session_start_min: number;
+  session_end_min: number;
+  session_room_id: number;
+  session_room_name: string;
 }
 
 export interface PortalAccountRow {

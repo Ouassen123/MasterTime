@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { all, get, openDatabase, run } from '../electron/main/db/connection';
+import { get, openDatabase, run } from '../electron/main/db/connection';
 import {
   loadMigrationsFromDir,
   runMigrations,
@@ -283,6 +283,47 @@ describe('P19 — demandes professeurs', () => {
     expect(s?.room_id).toBe(fx.room2Id);
     const anns = listPortalAnnouncements(db);
     expect(anns.ok && anns.data[0]?.title_fr).toContain('Report');
+    expect(anns.ok && anns.data[0]?.body_ar).toContain('تأجيل');
+  });
+
+  it('report sans créneau proposé → l\'admin choisit le créneau à l\'approbation', () => {
+    const db = freshDb();
+    const fx = seedFixture(db);
+    const reqId = Number(
+      run(
+        db,
+        `INSERT INTO session_request
+           (session_id, professor_id, kind, reason)
+         VALUES (?,?,'move','Report sans proposition')`,
+        fx.sessionId,
+        fx.profId,
+      ).lastInsertRowid,
+    );
+    // Sans créneau → refus (l'approbation exige un créneau complet)
+    expect(approvePortalRequest(db, null, reqId).ok).toBe(false);
+    // Créneau choisi par l'admin → séance déplacée + avis publié
+    const res = approvePortalRequest(db, null, reqId, '', {
+      date: '2027-06-10',
+      start_min: 840,
+      end_min: 960,
+      room_id: fx.room2Id,
+    });
+    expect(res.ok).toBe(true);
+    const s = get<{
+      date: string;
+      start_min: number;
+      end_min: number;
+      room_id: number;
+    }>(
+      db,
+      'SELECT date, start_min, end_min, room_id FROM session WHERE id = ?',
+      fx.sessionId,
+    );
+    expect(s?.date).toBe('2027-06-10');
+    expect(s?.start_min).toBe(840);
+    expect(s?.room_id).toBe(fx.room2Id);
+    const anns = listPortalAnnouncements(db);
+    expect(anns.ok && anns.data[0]?.body_fr).toContain('Salle W2');
     expect(anns.ok && anns.data[0]?.body_ar).toContain('تأجيل');
   });
 

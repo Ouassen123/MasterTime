@@ -94,6 +94,7 @@ import type {
   PortalComplaintRow,
   PortalOnlineCount,
   PortalRequestRow,
+  ProposedSlot,
   WebPortalStatus,
   WeekFilter,
   WeekSheetInput,
@@ -446,8 +447,12 @@ const api: WindowApi = {
       ipcRenderer.invoke('webportal:online'),
     requests: (status = 'pending'): Promise<ApiResult<PortalRequestRow[]>> =>
       ipcRenderer.invoke('webportal:requests', status),
-    approve: (id: number, note = ''): Promise<ApiResult<null>> =>
-      ipcRenderer.invoke('webportal:approve', { id, note }),
+    approve: (
+      id: number,
+      note = '',
+      slot?: ProposedSlot,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:approve', { id, note, slot }),
     reject: (id: number, note = ''): Promise<ApiResult<null>> =>
       ipcRenderer.invoke('webportal:reject', { id, note }),
     complaints: (): Promise<ApiResult<PortalComplaintRow[]>> =>

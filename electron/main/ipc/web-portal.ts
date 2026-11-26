@@ -90,15 +90,33 @@ export function registerWebPortalHandlers(
 
   ipcMain.handle(
     'webportal:approve',
-    (_e, payload: { id?: unknown; note?: unknown }) =>
-      guard(getDb, (db) =>
+    (_e, payload: { id?: unknown; note?: unknown; slot?: unknown }) => {
+      const s = payload?.slot as
+        | { date?: unknown; start_min?: unknown; end_min?: unknown; room_id?: unknown }
+        | undefined;
+      const slot =
+        s &&
+        typeof s.date === 'string' &&
+        Number.isInteger(Number(s.start_min)) &&
+        Number.isInteger(Number(s.end_min)) &&
+        Number.isInteger(Number(s.room_id))
+          ? {
+              date: s.date,
+              start_min: Number(s.start_min),
+              end_min: Number(s.end_min),
+              room_id: Number(s.room_id),
+            }
+          : undefined;
+      return guard(getDb, (db) =>
         approvePortalRequest(
           db,
           null,
           Number(payload?.id),
           typeof payload?.note === 'string' ? payload.note : '',
+          slot,
         ),
-      ),
+      );
+    },
   );
 
   ipcMain.handle(

@@ -35,9 +35,10 @@ export function webServerStatus(): {
   urls: string[];
 } {
   if (!state) return { running: false, port: null, urls: [] };
+  const port = state.port;
   const urls = [
-    `http://localhost:${state.port}`,
-    ...lanAddresses().map((ip) => `http://${ip}:${state.port}`),
+    `http://localhost:${port}`,
+    ...lanAddresses().map((ip) => `http://${ip}:${port}`),
   ];
   return { running: true, port: state.port, urls };
 }

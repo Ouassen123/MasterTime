@@ -42,6 +42,7 @@ import type {
   PortalComplaintRow,
   PortalRequestRow,
   ProfessorRow,
+  Room,
   WebPortalStatus,
 } from '../../shared/types';
 
@@ -62,6 +63,7 @@ export function PortalPage(): React.JSX.Element {
   const [complaints, setComplaints] = useState<PortalComplaintRow[]>([]);
   const [accounts, setAccounts] = useState<PortalAccountRow[]>([]);
   const [profs, setProfs] = useState<ProfessorRow[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [announcements, setAnnouncements] = useState<PortalAnnouncementRow[]>(
     [],
   );
@@ -88,12 +90,14 @@ export function PortalPage(): React.JSX.Element {
   }, []);
 
   const loadAccounts = useCallback(async () => {
-    const [r, p] = await Promise.all([
+    const [r, p, ro] = await Promise.all([
       api().webportal.accounts(),
       api().professors.list(),
+      api().rooms.list(),
     ]);
     if (r.ok) setAccounts(r.data);
     if (p.ok) setProfs(p.data);
+    if (ro.ok) setRooms(ro.data);
   }, []);
 
   const loadAnnouncements = useCallback(async () => {
@@ -121,6 +125,97 @@ export function PortalPage(): React.JSX.Element {
     setBusy(false);
     if (!r.ok) message.error(errorMessage(r));
     void refresh();
+  };
+
+  const toMin = (s: string): number => {
+    const [h, m] = s.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  /** Approbation : si le prof n'a pas proposé de créneau, l'admin le choisit. */
+  const approveRequest = (r: PortalRequestRow) => {
+    if (r.kind === 'move' && !r.proposed_date) {
+      let date = r.session_date;
+      let start = hm(r.session_start_min);
+      let end = hm(r.session_end_min);
+      let roomId = r.session_room_id;
+      Modal.confirm({
+        title: t('portal.pickSlotTitle'),
+        width: 400,
+        content: (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <div>
+              <Text type="secondary">{t('portal.slotDate')}</Text>
+              <Input
+                type="date"
+                defaultValue={date}
+                onChange={(e) => {
+                  date = e.target.value;
+                }}
+              />
+            </div>
+            <Space>
+              <div>
+                <Text type="secondary">{t('portal.slotStart')}</Text>
+                <Input
+                  type="time"
+                  defaultValue={start}
+                  onChange={(e) => {
+                    start = e.target.value;
+                  }}
+                />
+              </div>
+              <div>
+                <Text type="secondary">{t('portal.slotEnd')}</Text>
+                <Input
+                  type="time"
+                  defaultValue={end}
+                  onChange={(e) => {
+                    end = e.target.value;
+                  }}
+                />
+              </div>
+            </Space>
+            <div>
+              <Text type="secondary">{t('portal.slotRoom')}</Text>
+              <Select
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                defaultValue={roomId}
+                options={rooms
+                  .filter((ro) => ro.is_active === 1)
+                  .map((ro) => ({
+                    value: ro.id,
+                    label: `${ro.name}${ro.capacity ? ` (${ro.capacity})` : ''}`,
+                  }))}
+                onChange={(v) => {
+                  roomId = v;
+                }}
+              />
+            </div>
+          </Space>
+        ),
+        onOk: async () => {
+          const res = await api().webportal.approve(r.id, '', {
+            date,
+            start_min: toMin(start),
+            end_min: toMin(end),
+            room_id: roomId,
+          });
+          if (res.ok) {
+            message.success(t('portal.approvedMsg'));
+            void loadRequests();
+            void loadAnnouncements();
+          } else message.error(errorMessage(res));
+        },
+      });
+      return;
+    }
+    Modal.confirm({
+      title: t('portal.confirmApprove'),
+      onOk: () => decide(r.id, 'approve'),
+    });
   };
 
   const decide = async (
@@ -168,12 +263,14 @@ export function PortalPage(): React.JSX.Element {
     {
       title: t('portal.colProposed'),
       render: (_, r) =>
-        r.kind === 'move' && r.proposed_date ? (
+        r.kind !== 'move' ? (
+          '—'
+        ) : r.proposed_date ? (
           <span dir="auto">
             {`${r.proposed_date} ${hm(r.proposed_start_min)}–${hm(r.proposed_end_min)} · ${r.proposed_room_name ?? ''}`}
           </span>
         ) : (
-          '—'
+          <Tag color="blue">{t('portal.slotToChoose')}</Tag>
         ),
     },
     {
@@ -208,12 +305,7 @@ export function PortalPage(): React.JSX.Element {
               size="small"
               type="primary"
               icon={<CheckOutlined />}
-              onClick={() =>
-                Modal.confirm({
-                  title: t('portal.confirmApprove'),
-                  onOk: () => decide(r.id, 'approve'),
-                })
-              }
+              onClick={() => approveRequest(r)}
             >
               {t('portal.approve')}
             </Button>

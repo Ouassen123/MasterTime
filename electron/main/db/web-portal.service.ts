@@ -151,6 +151,9 @@ export function listPortalRequests(
       .prepare(
         `SELECT sr.*, p.full_name AS professor_name,
                 pr.name AS proposed_room_name,
+                s.date AS session_date, s.start_min AS session_start_min,
+                s.end_min AS session_end_min, s.room_id AS session_room_id,
+                cr.name AS session_room_name,
                 (m.name || ' · ' || mo.name || ' · ' ||
                  s.date || ' ' ||
                  printf('%02d:%02d', s.start_min/60, s.start_min%60))
@@ -162,6 +165,7 @@ export function listPortalRequests(
          JOIN master m ON m.id = mm.master_id
          JOIN module mo ON mo.id = mm.module_id
          LEFT JOIN room pr ON pr.id = sr.proposed_room_id
+         LEFT JOIN room cr ON cr.id = s.room_id
          ${where}
          ORDER BY sr.created_at DESC LIMIT 200`,
       )
@@ -265,6 +269,7 @@ export function approvePortalRequest(
   userId: number | null,
   id: number,
   adminNote: string = '',
+  slot?: { date: string; start_min: number; end_min: number; room_id: number },
 ): ApiResult<null> {
   const r = loadRequest(db, id);
   if (!r) return apiErr('Demande introuvable.');
@@ -277,13 +282,28 @@ export function approvePortalRequest(
       reason: r.reason || 'Annulation déclarée par le professeur (portail web)',
     });
   } else {
+    // Créneau du report : proposition du prof, sinon choix de l'admin.
+    r.proposed_date ??= slot?.date ?? null;
+    r.proposed_start_min ??= slot?.start_min ?? null;
+    r.proposed_end_min ??= slot?.end_min ?? null;
+    r.proposed_room_id ??= slot?.room_id ?? null;
     if (
       !r.proposed_date ||
       r.proposed_start_min == null ||
       r.proposed_end_min == null ||
       r.proposed_room_id == null
     ) {
-      return apiErr('Proposition de créneau incomplète.');
+      return apiErr(
+        'Créneau requis : choisissez date, horaire et salle pour approuver ce report.',
+      );
+    }
+    if (!r.proposed_room_name) {
+      r.proposed_room_name =
+        get<{ name: string }>(
+          db,
+          'SELECT name FROM room WHERE id = ?',
+          r.proposed_room_id,
+        )?.name ?? '';
     }
     applied = moveSession(db, userId, r.session_id, {
       date: r.proposed_date,
