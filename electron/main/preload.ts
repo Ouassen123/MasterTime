@@ -92,6 +92,7 @@ import type {
   PortalAccountRow,
   PortalAnnouncementRow,
   PortalComplaintRow,
+  AnnouncementInput,
   PortalOnlineCount,
   PortalRequestRow,
   ProposedSlot,
@@ -485,6 +486,17 @@ const api: WindowApi = {
       active: boolean,
     ): Promise<ApiResult<null>> =>
       ipcRenderer.invoke('webportal:announcementActive', { id, active }),
+    createAnnouncement: (
+      input: AnnouncementInput,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:announcementCreate', input),
+    updateAnnouncement: (
+      id: number,
+      input: AnnouncementInput,
+    ): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:announcementUpdate', { id, ...input }),
+    deleteAnnouncement: (id: number): Promise<ApiResult<null>> =>
+      ipcRenderer.invoke('webportal:announcementDelete', { id }),
   },
 };
 

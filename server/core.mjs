@@ -141,11 +141,12 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
     return s;
   }
 
-  /** Créneaux + salles libres pour reporter `sessionId` dans sa semaine. */
+  /** Créneaux + salles libres pour reporter `sessionId`
+   *  (d'aujourd'hui jusqu'à ~4 semaines, borné par la fin du semestre). */
   function freeSlots(sessionId) {
     const s = q1(
       `SELECT s.id, s.date, s.start_min, s.end_min, s.professor_id,
-              mm.master_id, m.name AS master_name,
+              mm.master_id, m.name AS master_name, mm.sched_end,
               (SELECT COALESCE(SUM(size),0) FROM student_group g
                 WHERE g.master_id = mm.master_id) AS effectif
        FROM session s
@@ -156,12 +157,13 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
     );
     if (!s) return null;
     const dur = s.end_min - s.start_min;
-    const [wStart] = weekBounds(s.date);
     const today = localToday();
+    const horizon = addDays(today, 27);
+    const lastDay = s.sched_end && s.sched_end < horizon ? s.sched_end : horizon;
     const out = [];
-    for (let d = 0; d < 6; d++) {
-      const date = addDays(wStart, d);
-      if (date < today) continue;
+    for (let date = today; date <= lastDay && out.length < 15; date = addDays(date, 1)) {
+      const d = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+      if (d === 6) continue; // dimanche
       // Jour fermé (férié/examen/fermeture) → ignoré.
       const closed = q1(
         `SELECT 1 AS x FROM calendar_exception
@@ -179,11 +181,14 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
         d,
         dur,
       );
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
       for (const ts of slots) {
         const start = ts.start_min;
         const end = start + dur;
         if (end > ts.end_min) continue;
         if (date === s.date && start === s.start_min) continue; // créneau actuel
+        if (date === today && start <= nowMin) continue; // déjà passé aujourd'hui
         // Prof libre : pas de séance ni indisponibilité ni absence.
         const profBusy = q1(
           `SELECT 1 AS x FROM session

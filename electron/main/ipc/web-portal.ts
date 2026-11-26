@@ -8,6 +8,8 @@ import { guard, type DbGetter } from './helpers';
 import {
   approvePortalRequest,
   createPortalAccount,
+  createPortalAnnouncement,
+  deletePortalAnnouncement,
   listPortalAccounts,
   listPortalAnnouncements,
   listPortalComplaints,
@@ -18,6 +20,7 @@ import {
   setAnnouncementActive,
   setComplaintStatus,
   setPortalAccountActive,
+  updatePortalAnnouncement,
 } from '../db/web-portal.service';
 import {
   startWebServer,
@@ -190,5 +193,35 @@ export function registerWebPortalHandlers(
       guard(getDb, (db) =>
         setAnnouncementActive(db, Number(payload?.id), payload?.active !== false),
       ),
+  );
+
+  const annInput = (p: unknown) => {
+    const a = (p ?? {}) as Record<string, unknown>;
+    return {
+      title_fr: String(a.title_fr ?? ''),
+      title_ar: String(a.title_ar ?? ''),
+      body_fr: String(a.body_fr ?? ''),
+      body_ar: String(a.body_ar ?? ''),
+    };
+  };
+
+  ipcMain.handle(
+    'webportal:announcementCreate',
+    (_e, payload: unknown) =>
+      guard(getDb, (db) => createPortalAnnouncement(db, annInput(payload))),
+  );
+
+  ipcMain.handle(
+    'webportal:announcementUpdate',
+    (_e, payload: { id?: unknown } & Record<string, unknown>) =>
+      guard(getDb, (db) =>
+        updatePortalAnnouncement(db, Number(payload?.id), annInput(payload)),
+      ),
+  );
+
+  ipcMain.handle(
+    'webportal:announcementDelete',
+    (_e, payload: { id?: unknown }) =>
+      guard(getDb, (db) => deletePortalAnnouncement(db, Number(payload?.id))),
   );
 }

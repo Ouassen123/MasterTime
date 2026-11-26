@@ -1709,6 +1709,12 @@ export interface WindowApi {
       id: number,
       active: boolean,
     ): Promise<ApiResult<null>>;
+    createAnnouncement(input: AnnouncementInput): Promise<ApiResult<null>>;
+    updateAnnouncement(
+      id: number,
+      input: AnnouncementInput,
+    ): Promise<ApiResult<null>>;
+    deleteAnnouncement(id: number): Promise<ApiResult<null>>;
   };
 }
 
@@ -1775,6 +1781,14 @@ export interface PortalComplaintRow {
   message: string;
   status: 'new' | 'read' | 'handled';
   created_at: string;
+}
+
+/** Contenu d'un avis saisi par l'admin (portail web). */
+export interface AnnouncementInput {
+  title_fr: string;
+  title_ar?: string;
+  body_fr: string;
+  body_ar?: string;
 }
 
 export interface PortalAnnouncementRow {

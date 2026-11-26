@@ -456,6 +456,69 @@ export function PortalPage(): React.JSX.Element {
     },
   ];
 
+  /** Modal création / modification d'un avis bilingue. */
+  const announcementModal = (r?: PortalAnnouncementRow) => {
+    let titleFr = r?.title_fr ?? '';
+    let bodyFr = r?.body_fr ?? '';
+    let titleAr = r?.title_ar ?? '';
+    let bodyAr = r?.body_ar ?? '';
+    Modal.confirm({
+      title: r ? t('portal.editAnn') : t('portal.newAnnouncement'),
+      width: 520,
+      content: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Input
+            placeholder={t('portal.annTitleFr')}
+            defaultValue={titleFr}
+            onChange={(e) => {
+              titleFr = e.target.value;
+            }}
+          />
+          <Input.TextArea
+            rows={3}
+            placeholder={t('portal.annBodyFr')}
+            defaultValue={bodyFr}
+            onChange={(e) => {
+              bodyFr = e.target.value;
+            }}
+          />
+          <Input
+            dir="rtl"
+            placeholder={t('portal.annTitleAr')}
+            defaultValue={titleAr}
+            onChange={(e) => {
+              titleAr = e.target.value;
+            }}
+          />
+          <Input.TextArea
+            rows={3}
+            dir="rtl"
+            placeholder={t('portal.annBodyAr')}
+            defaultValue={bodyAr}
+            onChange={(e) => {
+              bodyAr = e.target.value;
+            }}
+          />
+        </Space>
+      ),
+      onOk: async () => {
+        const input = {
+          title_fr: titleFr,
+          title_ar: titleAr,
+          body_fr: bodyFr,
+          body_ar: bodyAr,
+        };
+        const res = r
+          ? await api().webportal.updateAnnouncement(r.id, input)
+          : await api().webportal.createAnnouncement(input);
+        if (res.ok) {
+          message.success(r ? t('portal.annUpdated') : t('portal.annSaved'));
+          void loadAnnouncements();
+        } else message.error(errorMessage(res));
+      },
+    });
+  };
+
   const annCols: ColumnsType<PortalAnnouncementRow> = [
     {
       title: t('portal.colPublished'),
@@ -493,6 +556,35 @@ export function PortalPage(): React.JSX.Element {
             void loadAnnouncements();
           }}
         />
+      ),
+    },
+    {
+      title: '',
+      width: 180,
+      render: (_, r) => (
+        <Space>
+          <Button size="small" onClick={() => announcementModal(r)}>
+            {t('portal.editAnn')}
+          </Button>
+          <Button
+            size="small"
+            danger
+            onClick={() =>
+              Modal.confirm({
+                title: t('portal.confirmDeleteAnn'),
+                onOk: async () => {
+                  const res = await api().webportal.deleteAnnouncement(r.id);
+                  if (res.ok) {
+                    message.success(t('portal.annDeleted'));
+                    void loadAnnouncements();
+                  } else message.error(errorMessage(res));
+                },
+              })
+            }
+          >
+            {t('portal.deleteAnn')}
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -687,13 +779,22 @@ export function PortalPage(): React.JSX.Element {
             key: 'announcements',
             label: t('portal.tabAnnouncements'),
             children: (
-              <Table
-                rowKey="id"
-                size="small"
-                dataSource={announcements}
-                columns={annCols}
-                pagination={{ pageSize: 15 }}
-              />
+              <>
+                <Button
+                  type="primary"
+                  style={{ marginBottom: 10 }}
+                  onClick={() => announcementModal()}
+                >
+                  {t('portal.newAnnouncement')}
+                </Button>
+                <Table
+                  rowKey="id"
+                  size="small"
+                  dataSource={announcements}
+                  columns={annCols}
+                  pagination={{ pageSize: 15 }}
+                />
+              </>
             ),
           },
         ]}

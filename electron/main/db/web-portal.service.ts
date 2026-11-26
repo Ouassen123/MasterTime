@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import { apiErr, apiOk } from '../../../shared/types';
 import type {
+  AnnouncementInput,
   ApiResult,
   PortalAccountRow,
   PortalAnnouncementRow,
@@ -389,6 +390,57 @@ export function setAnnouncementActive(
     id,
   );
   return apiOk(null);
+}
+
+export function createPortalAnnouncement(
+  db: DatabaseSync,
+  a: AnnouncementInput,
+): ApiResult<null> {
+  if (!a.title_fr?.trim() || !a.body_fr?.trim()) {
+    return apiErr("Titre et corps en français requis.");
+  }
+  db.prepare(
+    `INSERT INTO announcement (title_fr, title_ar, body_fr, body_ar)
+     VALUES (?, ?, ?, ?)`,
+  ).run(
+    a.title_fr.trim().slice(0, 200),
+    (a.title_ar ?? '').trim().slice(0, 200),
+    a.body_fr.trim().slice(0, 2000),
+    (a.body_ar ?? '').trim().slice(0, 2000),
+  );
+  return apiOk(null);
+}
+
+export function updatePortalAnnouncement(
+  db: DatabaseSync,
+  id: number,
+  a: AnnouncementInput,
+): ApiResult<null> {
+  if (!a.title_fr?.trim() || !a.body_fr?.trim()) {
+    return apiErr("Titre et corps en français requis.");
+  }
+  const res = db
+    .prepare(
+      `UPDATE announcement
+       SET title_fr = ?, title_ar = ?, body_fr = ?, body_ar = ?
+       WHERE id = ?`,
+    )
+    .run(
+      a.title_fr.trim().slice(0, 200),
+      (a.title_ar ?? '').trim().slice(0, 200),
+      a.body_fr.trim().slice(0, 2000),
+      (a.body_ar ?? '').trim().slice(0, 2000),
+      id,
+    );
+  return res.changes > 0 ? apiOk(null) : apiErr('Avis introuvable.');
+}
+
+export function deletePortalAnnouncement(
+  db: DatabaseSync,
+  id: number,
+): ApiResult<null> {
+  const res = db.prepare(`DELETE FROM announcement WHERE id = ?`).run(id);
+  return res.changes > 0 ? apiOk(null) : apiErr('Avis introuvable.');
 }
 
 // --- Présence ---------------------------------------------------------------------

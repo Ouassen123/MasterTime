@@ -16,6 +16,8 @@ import { ensureProfiles } from '../electron/main/db/profile.service';
 import {
   approvePortalRequest,
   createPortalAccount,
+  createPortalAnnouncement,
+  deletePortalAnnouncement,
   listPortalAccounts,
   listPortalAnnouncements,
   listPortalComplaints,
@@ -24,6 +26,7 @@ import {
   rejectPortalRequest,
   resetPortalPassword,
   setComplaintStatus,
+  updatePortalAnnouncement,
 } from '../electron/main/db/web-portal.service';
 import { hashPassword, verifyPassword } from '../server/core.mjs';
 
@@ -388,5 +391,40 @@ describe('P19 — réclamations + présence', () => {
     const res = portalOnlineCount(db);
     expect(res.ok && res.data.visitors).toBe(2);
     expect(res.ok && res.data.professors).toBe(1);
+  });
+});
+
+describe('P19 — avis admin (CRUD)', () => {
+  it('créer, modifier, dépublier, supprimer un avis', () => {
+    const db = freshDb();
+    // Création : titre/corps FR requis
+    expect(
+      createPortalAnnouncement(db, { title_fr: '', body_fr: '' }).ok,
+    ).toBe(false);
+    expect(
+      createPortalAnnouncement(db, {
+        title_fr: 'Examens S1',
+        title_ar: 'الامتحانات',
+        body_fr: 'Les examens commencent le 15 décembre.',
+        body_ar: 'تبدأ الامتحانات يوم 15 دجنبر.',
+      }).ok,
+    ).toBe(true);
+    let rows = listPortalAnnouncements(db);
+    expect(rows.ok && rows.data).toHaveLength(1);
+    const id = rows.ok ? rows.data[0]!.id : 0;
+    // Modification
+    expect(
+      updatePortalAnnouncement(db, id, {
+        title_fr: 'Examens S1 (reportés)',
+        body_fr: 'Report au 20 décembre.',
+      }).ok,
+    ).toBe(true);
+    rows = listPortalAnnouncements(db);
+    expect(rows.ok && rows.data[0]?.title_fr).toContain('reportés');
+    // Suppression
+    expect(deletePortalAnnouncement(db, id).ok).toBe(true);
+    expect(deletePortalAnnouncement(db, id).ok).toBe(false);
+    rows = listPortalAnnouncements(db);
+    expect(rows.ok && rows.data).toHaveLength(0);
   });
 });
