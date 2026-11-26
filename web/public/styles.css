@@ -77,7 +77,7 @@ label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
 .slot .btn.small { margin: 5px 4px 0 0; padding: 4px 10px; font-size: 12px; }
 
 table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
-.tbl th { text-align: left; padding: 8px; border-bottom: 2px solid var(--line); color: var(--navy); font-size: 13px; }
+.tbl th { text-align: start; padding: 8px; border-bottom: 2px solid var(--line); color: var(--navy); font-size: 13px; }
 .tbl td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 
 .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 600; }

@@ -20,6 +20,20 @@
     .daydate { font-size: 12px; font-weight: 400; color: var(--muted); }
     .navbtns { display: flex; gap: 8px; flex-wrap: wrap; }
     .badge { font-size: 12px; }
+    .tbl-wrap { overflow-x: auto; }
+    .slist { display: none; }
+    .sitem { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+    .sitem .m { font-weight: 700; color: var(--navy); font-size: 15px; }
+    .sitem.off { background: #f1f5f9; }
+    .sitem.off .m { text-decoration: line-through; color: var(--muted); }
+    .sitem .ln { font-size: 13px; margin-top: 6px; display: flex; gap: 6px 16px; flex-wrap: wrap; }
+    .sitem .ln b { color: var(--navy); font-weight: 600; }
+    @media (max-width: 640px) {
+      .tbl-wrap { display: none; }
+      .slist { display: block; }
+      .sheet-head .meta { font-size: 14px; }
+      .sheet-head .prog { font-size: 18px; }
+    }
     @media print {
       header, .controls, footer { display: none !important; }
       main { margin: 0; max-width: none; }
@@ -99,16 +113,29 @@
         const m = data.master;
         const sessions = [...data.sessions].sort((a, b) =>
           a.date === b.date ? a.start_min - b.start_min : a.date < b.date ? -1 : 1);
+        const statusTag = (st) =>
+          ({ REPORTEE: '<span class="badge gold">مؤجلة</span>', ANNULEE: '<span class="badge red">ملغاة</span>', REALISEE: '<span class="badge green">تمت</span>' }[st] || '');
         const rows = sessions.map((s) => {
           const off = s.status === 'ANNULEE';
-          const tag = { REPORTEE: '<span class="badge gold">مؤجلة</span>', ANNULEE: '<span class="badge red">ملغاة</span>', REALISEE: '<span class="badge green">تمت</span>' }[s.status] || '';
           return `<tr class="${off ? 'off' : ''}">
-            <td class="mod">${s.module_name} ${tag}</td>
+            <td class="mod">${s.module_name} ${statusTag(s.status)}</td>
             <td>${s.professor_name}</td>
             <td class="dayname">${arDay(s.date)}<div class="daydate">${s.date.split('-').reverse().join('/')}</div></td>
             <td style="white-space:nowrap">${MT.hm(s.start_min)} - ${MT.hm(s.end_min)}</td>
             <td>${arRoom(s.room_name)}</td>
           </tr>`;
+        }).join('');
+        const cards = sessions.map((s) => {
+          const off = s.status === 'ANNULEE';
+          return `<div class="sitem ${off ? 'off' : ''}">
+            <div class="m">${s.module_name} ${statusTag(s.status)}</div>
+            <div class="ln">
+              <span><b>${s.professor_name}</b></span>
+              <span>${arDay(s.date)} ${s.date.split('-').reverse().join('/')}</span>
+              <span>${MT.hm(s.start_min)} - ${MT.hm(s.end_min)}</span>
+              <span><b>${arRoom(s.room_name)}</b></span>
+            </div>
+          </div>`;
         }).join('');
         grid.innerHTML = `
           <div class="sheet-head">
@@ -122,9 +149,10 @@
           </div>
           ${sessions.length === 0
             ? '<p class="muted">لا توجد حصص هذا الأسبوع.</p>'
-            : `<table class="tbl"><tr>
+            : `<div class="tbl-wrap"><table class="tbl"><tr>
                 <th>الوحدة</th><th>الأستاذ</th><th>اليوم</th><th>التوقيت</th><th>القاعة/المدرج</th>
-              </tr>${rows}</table>`}`;
+              </tr>${rows}</table></div>
+              <div class="slist">${cards}</div>`}`;
       } catch (e) {
         grid.innerHTML = `<p class="err">${e.message}</p>`;
       }
