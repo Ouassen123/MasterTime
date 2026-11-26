@@ -1,37 +1,65 @@
 <!doctype html>
-<html lang="fr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Emploi du temps — FSJP Tanger</title>
+  <title>جدول الحصص — كلية العلوم القانونية والسياسية طنجة</title>
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, 'Traditional Arabic', Arial, sans-serif; }
+    .sheet-head { text-align: center; margin-bottom: 14px; }
+    .sheet-head .prog { font-weight: 700; font-size: 18px; color: var(--navy); }
+    .sheet-head .meta { display: flex; flex-wrap: wrap; gap: 8px 26px; justify-content: center; margin-top: 8px; font-size: 15px; }
+    .sheet-head .meta b { color: var(--navy); }
+    .tbl { font-size: 15px; }
+    .tbl th { font-size: 14px; }
+    .tbl td.off .mod { text-decoration: line-through; color: var(--muted); }
+    .tbl tr.off td { background: #f1f5f9; }
+    .dayname { font-weight: 700; color: var(--navy); white-space: nowrap; }
+    .navbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { font-size: 12px; }
+    @media print {
+      header, .controls, footer { display: none !important; }
+      main { margin: 0; max-width: none; }
+      .card { box-shadow: none; border: 1px solid #cbd5e1; }
+    }
+  </style>
 </head>
 <body>
   <header id="hd"></header>
   <main>
-    <div class="card">
+    <div class="card controls">
       <div class="row">
         <div>
-          <label for="master">Master</label>
+          <label for="master">الماستر</label>
           <select id="master"></select>
         </div>
-        <div style="flex:0 0 auto">
-          <button class="btn ghost" id="prev">← Semaine</button>
-          <button class="btn ghost" id="today">Aujourd'hui</button>
-          <button class="btn ghost" id="next">Semaine →</button>
+        <div style="flex:0 0 auto" class="navbtns">
+          <button class="btn ghost" id="prev">← الأسبوع السابق</button>
+          <button class="btn ghost" id="today">هذا الأسبوع</button>
+          <button class="btn ghost" id="next">الأسبوع المقبل →</button>
+          <button class="btn" id="print">طباعة</button>
         </div>
       </div>
       <p class="muted" id="weekLabel" style="margin-top:8px"></p>
     </div>
     <div class="card">
-      <div id="grid"><p class="muted">Choisissez un Master…</p></div>
+      <div id="grid"><p class="muted">اختر ماستر…</p></div>
     </div>
   </main>
-  <footer>MasterTime Tanger — FSJP · <span data-online>–</span> en ligne</footer>
+  <footer>MasterTime Tanger — FSJP · <span data-online>–</span> متصل</footer>
   <script src="/app.js"></script>
   <script>
     document.getElementById('hd').innerHTML = MT.header('edt');
     MT.heartbeat();
+
+    const AR_DAYS = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
+    const arRoom = (n) => String(n || '')
+      .replace(/^Salle\s*/, 'القاعة ')
+      .replace(/^Amphi\s*/, 'المدرج ')
+      .replace(/^Annexe\s*/, 'الملحقة ');
+    const arDay = (iso) => AR_DAYS[(new Date(`${iso}T00:00:00`).getDay() + 6) % 7];
+    const arDate = (iso) => `${arDay(iso)} ${iso.split('-').reverse().join('/')}`;
 
     const params = new URLSearchParams(location.search);
     let week = MT.mondayOf(MT.today());
@@ -39,8 +67,8 @@
 
     const sel = document.getElementById('master');
     MT.api('/api/masters').then((rows) => {
-      sel.innerHTML = '<option value="">— Choisir —</option>' +
-        rows.map((m) => `<option value="${m.id}" ${String(m.id) === masterId ? 'selected' : ''}>${m.name}${m.level ? ` (${m.level})` : ''}</option>`).join('');
+      sel.innerHTML = '<option value="">— اختر —</option>' +
+        rows.map((m) => `<option value="${m.id}" ${String(m.id) === masterId ? 'selected' : ''}>${m.name}${m.level ? ` (${m.level === 'M1' ? 'س1/س2' : 'س3/س4'})` : ''}</option>`).join('');
       if (masterId) load();
     });
 
@@ -48,39 +76,43 @@
     document.getElementById('prev').onclick = () => { week = MT.addDays(week, -7); load(); };
     document.getElementById('next').onclick = () => { week = MT.addDays(week, 7); load(); };
     document.getElementById('today').onclick = () => { week = MT.mondayOf(MT.today()); load(); };
+    document.getElementById('print').onclick = () => window.print();
 
     async function load() {
       const grid = document.getElementById('grid');
-      if (!masterId) { grid.innerHTML = '<p class="muted">Choisissez un Master…</p>'; return; }
-      grid.innerHTML = '<p class="muted">Chargement…</p>';
+      if (!masterId) { grid.innerHTML = '<p class="muted">اختر ماستر…</p>'; return; }
+      grid.innerHTML = '<p class="muted">جار التحميل…</p>';
       try {
         const data = await MT.api(`/api/edt?master_id=${masterId}&week=${week}`);
         document.getElementById('weekLabel').textContent =
-          `Semaine du ${MT.fmtDay(data.weekStart)}`;
-        // 7 colonnes-jour
-        const cols = Array.from({ length: 7 }, () => []);
-        for (const s of data.sessions) {
-          const wd = (new Date(`${s.date}T00:00:00`).getDay() + 6) % 7;
-          cols[wd].push(s);
-        }
-        grid.innerHTML = '<div class="edt-grid">' + cols.map((ss, i) => {
-          const dayIso = MT.addDays(data.weekStart, i);
-          return `<div class="day-col">
-            <h3>${MT.fmtDay(dayIso)}</h3>
-            ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => {
-              const cls = { REPORTEE: 'reportee', ANNULEE: 'off', REALISEE: 'ok', NON_ENCORE_REALISEE: 'idle' }[s.status] ?? '';
-              const tag = { REPORTEE: 'Séance reportée', ANNULEE: 'Séance annulée' }[s.status];
-              return `
-              <div class="slot ${cls}">
-                <span class="tm">${MT.hm(s.start_min)}–${MT.hm(s.end_min)}</span>
-                <span class="mod">${s.module_name}</span>
-                <small>${s.professor_name}</small>
-                <small>📍 ${s.room_name}</small>
-                ${tag ? `<small><b>${tag}</b></small>` : ''}
-              </div>`;
-            }).join('')}
-          </div>`;
-        }).join('') + '</div>';
+          `الأسبوع من ${data.weekStart.split('-').reverse().join('/')}`;
+        const mName = sel.options[sel.selectedIndex]?.textContent || '';
+        const sessions = [...data.sessions].sort((a, b) =>
+          a.date === b.date ? a.start_min - b.start_min : a.date < b.date ? -1 : 1);
+        const rows = sessions.map((s) => {
+          const off = s.status === 'ANNULEE';
+          const tag = { REPORTEE: '<span class="badge gold">مؤجلة</span>', ANNULEE: '<span class="badge red">ملغاة</span>', REALISEE: '<span class="badge green">تمت</span>' }[s.status] || '';
+          return `<tr class="${off ? 'off' : ''}">
+            <td class="mod">${s.module_name} ${tag}</td>
+            <td>${s.professor_name}</td>
+            <td class="dayname">${arDate(s.date)}</td>
+            <td style="white-space:nowrap">${MT.hm(s.start_min)} - ${MT.hm(s.end_min)}</td>
+            <td>${arRoom(s.room_name)}</td>
+          </tr>`;
+        }).join('');
+        grid.innerHTML = `
+          <div class="sheet-head">
+            <div class="prog">برنامج توزيع الحصص</div>
+            <div class="meta">
+              <span>ماستر : <b>${mName}</b></span>
+              <span>السنة الجامعية : <b>2026/2027</b></span>
+            </div>
+          </div>
+          ${sessions.length === 0
+            ? '<p class="muted">لا توجد حصص هذا الأسبوع.</p>'
+            : `<table class="tbl"><tr>
+                <th>الوحدة</th><th>الأستاذ</th><th>اليوم</th><th>التوقيت</th><th>القاعة/المدرج</th>
+              </tr>${rows}</table>`}`;
       } catch (e) {
         grid.innerHTML = `<p class="err">${e.message}</p>`;
       }

@@ -272,7 +272,6 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
              JOIN professor p ON p.id = s.professor_id
              JOIN room r ON r.id = s.room_id
              WHERE mm.master_id = ? AND s.date BETWEEN ? AND ?
-               AND s.status != 'ANNULEE'
              ORDER BY s.date, s.start_min`,
             masterId, wStart, wEnd,
           ),
