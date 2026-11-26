@@ -56,13 +56,29 @@
     <div class="card hidden" id="moveCard">
       <h2>اقتراح تأجيل</h2>
       <p class="muted" id="moveInfo"></p>
+      <input type="text" id="moveReason" placeholder="سبب التأجيل (اختياري)"
+        style="width:100%; padding:8px 10px; margin:8px 0; border:1px solid #cbd5e1; border-radius:8px; font:inherit">
       <div id="slots"></div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
         <button class="btn" id="moveNoChoice">إرسال الطلب فقط — تختار الإدارة التوقيت</button>
         <button class="btn ghost" id="moveCancel">رجوع</button>
       </div>
     </div>
+
+    <!-- Annulation d'une séance -->
+    <div class="card hidden" id="cancelCard">
+      <h2>إلغاء الحصة</h2>
+      <p class="muted" id="cancelInfo"></p>
+      <input type="text" id="cancelReason" placeholder="سبب الإلغاء (سيظهر في الإعلان للطلبة)"
+        style="width:100%; padding:8px 10px; margin:8px 0; border:1px solid #cbd5e1; border-radius:8px; font:inherit">
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button class="btn danger" id="doCancel">تأكيد الإلغاء</button>
+        <button class="btn ghost" id="cancelBack">رجوع</button>
+      </div>
+    </div>
   </main>
+  <div id="toast" style="position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    background:#0f766e; color:#fff; padding:10px 20px; border-radius:10px; display:none; z-index:50"></div>
   <footer>MasterTime Tanger — FSJP</footer>
   <script src="/app.js"></script>
   <script>
@@ -148,20 +164,44 @@
       }).join('') + '</div>';
     }
 
-    window.askCancel = async (sid) => {
-      const reason = prompt('سبب الإلغاء (سيظهر في الإعلان للطلبة) :');
-      if (reason === null) return;
+    let toastTimer = null;
+    function toast(msg, isErr) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.background = isErr ? '#b91c1c' : '#0f766e';
+      t.style.display = 'block';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+    }
+
+    window.askCancel = (sid) => {
+      window._cancelSid = sid;
+      document.getElementById('cancelReason').value = '';
+      document.getElementById('cancelCard').classList.remove('hidden');
+      document.getElementById('cancelCard').scrollIntoView({ behavior: 'smooth' });
+      document.getElementById('cancelReason').focus();
+    };
+
+    document.getElementById('doCancel').onclick = async () => {
       try {
         await MT.api('/api/prof/requests', {
           method: 'POST',
-          body: JSON.stringify({ session_id: sid, kind: 'cancel', reason }),
+          body: JSON.stringify({
+            session_id: window._cancelSid, kind: 'cancel',
+            reason: document.getElementById('cancelReason').value,
+          }),
         });
+        document.getElementById('cancelCard').classList.add('hidden');
         load(); loadRequests();
-      } catch (e) { alert(e.message); }
+        toast('تم إرسال طلب الإلغاء — في انتظار مصادقة الإدارة.');
+      } catch (e) { toast(e.message, true); }
     };
+    document.getElementById('cancelBack').onclick = () =>
+      document.getElementById('cancelCard').classList.add('hidden');
 
     window.askMove = async (sid) => {
       window._moveSid = sid;
+      document.getElementById('moveReason').value = '';
       const card = document.getElementById('moveCard');
       card.classList.remove('hidden');
       const el = document.getElementById('slots');
@@ -184,40 +224,29 @@
       } catch (e) { el.innerHTML = `<p class="err">${e.message}</p>`; }
     };
 
-    window.pickRoom = async (sid, i, j) => {
+    async function sendMove(sid, body) {
+      try {
+        await MT.api('/api/prof/requests', {
+          method: 'POST',
+          body: JSON.stringify({ session_id: sid, kind: 'move', ...body }),
+        });
+        document.getElementById('moveCard').classList.add('hidden');
+        load(); loadRequests();
+        toast('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
+      } catch (e) { toast(e.message, true); }
+    }
+
+    window.pickRoom = (sid, i, j) => {
       const sl = window._slots[i];
       const room = sl.rooms[j];
-      const reason = prompt(
-        `التأجيل إلى ${MT.fmtDayAr(sl.date)} ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)} — ${MT.arRoom(room.name)}\nسبب التأجيل (اختياري) :`);
-      if (reason === null) return;
-      try {
-        await MT.api('/api/prof/requests', {
-          method: 'POST',
-          body: JSON.stringify({
-            session_id: sid, kind: 'move', reason,
-            proposed: { date: sl.date, start_min: sl.start_min, end_min: sl.end_min, room_id: room.id },
-          }),
-        });
-        document.getElementById('moveCard').classList.add('hidden');
-        load(); loadRequests();
-        alert('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
-      } catch (e) { alert(e.message); }
+      sendMove(sid, {
+        reason: document.getElementById('moveReason').value,
+        proposed: { date: sl.date, start_min: sl.start_min, end_min: sl.end_min, room_id: room.id },
+      });
     };
 
-    document.getElementById('moveNoChoice').onclick = async () => {
-      const sid = window._moveSid;
-      const reason = prompt('سبب التأجيل (اختياري) — الإدارة ستختار التوقيت والقاعة :');
-      if (reason === null) return;
-      try {
-        await MT.api('/api/prof/requests', {
-          method: 'POST',
-          body: JSON.stringify({ session_id: sid, kind: 'move', reason }),
-        });
-        document.getElementById('moveCard').classList.add('hidden');
-        load(); loadRequests();
-        alert('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
-      } catch (e) { alert(e.message); }
-    };
+    document.getElementById('moveNoChoice').onclick = () =>
+      sendMove(window._moveSid, { reason: document.getElementById('moveReason').value });
 
     document.getElementById('moveCancel').onclick = () =>
       document.getElementById('moveCard').classList.add('hidden');
