@@ -104,12 +104,17 @@ Import/Export, Paramètres, Sauvegardes</summary>
   zéro dépendance) — joignable sur le réseau de la faculté via
   `http://<IP-du-PC>:8080`, ou déployable sur le serveur de la
   faculté (`server/index.mjs` autonome, même base SQLite)
+- **Interface 100 % arabe (RTL)** : accueil, EDT et espace prof —
+  l'EDT reprend le format officiel de la faculté (برنامج توزيع الحصص :
+  ماستر / السداسي / السنة الجامعية / المنسق + tableau الوحدة/الأستاذ/
+  اليوم/التوقيت/القاعة), vue **mobile en cartes** sur téléphone
 - **Étudiants** : consultation libre de l'EDT par Master (semaine
-  par jour), sans compte — fil d'**avis bilingue Français + Arabe**
+  par jour), sans compte — fil d'**avis bilingue Arabe + Français**
   (style panneau d'affichage fsjest.ma) + logo FSJP officiel
 - **Professeurs** : espace connecté (login + mot de passe gérés par
-  l'admin) → déclarer une **annulation** ou proposer un **report** —
-  le système propose les créneaux et salles réellement libres
+  l'admin) → déclarer une **annulation** ou demander un **report** —
+  au choix : créneau/salle libres proposés par le système, ou demande
+  simple (l'admin choisit le créneau à l'approbation)
 - **Validation admin** : chaque demande arrive dans la console
   « Portail web » → **Approuver** applique la mutation (gardes-fous
   de conflits conservés) **et publie l'avis bilingue
@@ -125,8 +130,9 @@ Import/Export, Paramètres, Sauvegardes</summary>
 2. Lancer le setup — **aucun droit administrateur requis**
    (installation par utilisateur), interface en français.
 3. Premier lancement : la base locale se crée et les **données
-   réelles FSJP** se chargent automatiquement (14 Masters, 133
-   professeurs, 17 salles, ~1 160 séances, 168 occupations Licence).
+   réelles FSJP** se chargent automatiquement (26 Masters — 14 en M2
+   et 12 cohortes M1/S1 importées du fichier officiel — 150
+   professeurs, 19 salles, ~2 180 séances, 168 occupations Licence).
 
 Données stockées dans `%APPDATA%\MasterTime Tanger\` (base SQLite +
 dossier `backups/`).
