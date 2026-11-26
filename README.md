@@ -40,6 +40,10 @@ Import/Export, Paramètres, Sauvegardes</summary>
 |:---:|:---:|
 | ![Paramètres](docs/screenshots/09-parametres.png) | ![Sauvegardes](docs/screenshots/10-sauvegardes.png) |
 
+| Portail web (console admin) |
+|:---:|
+| ![Portail web](docs/screenshots/11-portail.png) |
+
 </details>
 
 ---

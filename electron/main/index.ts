@@ -82,6 +82,7 @@ const CAPTURE_ROUTES: [string, string][] =
         ['08-import-export', '/import-export'],
         ['09-parametres', '/parametres'],
         ['10-sauvegardes', '/sauvegardes'],
+        ['11-portail', '/portail'],
       ];
 
 async function runCapture(win: BrowserWindow, dir: string): Promise<void> {
