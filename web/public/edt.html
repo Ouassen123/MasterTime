@@ -7,15 +7,17 @@
   <link rel="stylesheet" href="/styles.css">
   <style>
     body { font-family: 'Segoe UI', Tahoma, 'Traditional Arabic', Arial, sans-serif; }
-    .sheet-head { text-align: center; margin-bottom: 14px; }
-    .sheet-head .prog { font-weight: 700; font-size: 18px; color: var(--navy); }
-    .sheet-head .meta { display: flex; flex-wrap: wrap; gap: 8px 26px; justify-content: center; margin-top: 8px; font-size: 15px; }
+    .sheet-head { margin-bottom: 14px; }
+    .sheet-head .prog { font-weight: 700; font-size: 22px; color: var(--navy); text-align: center; margin-bottom: 12px; }
+    .sheet-head .meta { font-size: 16px; line-height: 1.9; }
+    .sheet-head .meta .lbl { display: inline-block; min-width: 130px; }
     .sheet-head .meta b { color: var(--navy); }
     .tbl { font-size: 15px; }
     .tbl th { font-size: 14px; }
     .tbl td.off .mod { text-decoration: line-through; color: var(--muted); }
     .tbl tr.off td { background: #f1f5f9; }
     .dayname { font-weight: 700; color: var(--navy); white-space: nowrap; }
+    .daydate { font-size: 12px; font-weight: 400; color: var(--muted); }
     .navbtns { display: flex; gap: 8px; flex-wrap: wrap; }
     .badge { font-size: 12px; }
     @media print {
@@ -54,16 +56,18 @@
     MT.heartbeat();
 
     const AR_DAYS = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
+    const AR_SEM = { 1: 'الأول', 2: 'الثاني', 3: 'الثالث', 4: 'الرابع' };
     const arRoom = (n) => String(n || '')
       .replace(/^Salle\s*/, 'القاعة ')
       .replace(/^Amphi\s*/, 'المدرج ')
       .replace(/^Annexe\s*/, 'الملحقة ');
     const arDay = (iso) => AR_DAYS[(new Date(`${iso}T00:00:00`).getDay() + 6) % 7];
-    const arDate = (iso) => `${arDay(iso)} ${iso.split('-').reverse().join('/')}`;
+    const arYear = (lbl) => String(lbl || '').replace('-', '/');
 
     const params = new URLSearchParams(location.search);
     let week = MT.mondayOf(MT.today());
     let masterId = params.get('master') || '';
+    let navigated = false;
 
     const sel = document.getElementById('master');
     MT.api('/api/masters').then((rows) => {
@@ -72,7 +76,7 @@
       if (masterId) load();
     });
 
-    sel.onchange = () => { masterId = sel.value; load(); };
+    sel.onchange = () => { masterId = sel.value; navigated = false; load(); };
     document.getElementById('prev').onclick = () => { week = MT.addDays(week, -7); load(); };
     document.getElementById('next').onclick = () => { week = MT.addDays(week, 7); load(); };
     document.getElementById('today').onclick = () => { week = MT.mondayOf(MT.today()); load(); };
@@ -84,9 +88,15 @@
       grid.innerHTML = '<p class="muted">جار التحميل…</p>';
       try {
         const data = await MT.api(`/api/edt?master_id=${masterId}&week=${week}`);
+        if (data.sessions.length === 0 && !navigated && data.firstSessionDate) {
+          navigated = true;
+          week = MT.mondayOf(data.firstSessionDate);
+          return load();
+        }
+        navigated = true;
         document.getElementById('weekLabel').textContent =
           `الأسبوع من ${data.weekStart.split('-').reverse().join('/')}`;
-        const mName = sel.options[sel.selectedIndex]?.textContent || '';
+        const m = data.master;
         const sessions = [...data.sessions].sort((a, b) =>
           a.date === b.date ? a.start_min - b.start_min : a.date < b.date ? -1 : 1);
         const rows = sessions.map((s) => {
@@ -95,7 +105,7 @@
           return `<tr class="${off ? 'off' : ''}">
             <td class="mod">${s.module_name} ${tag}</td>
             <td>${s.professor_name}</td>
-            <td class="dayname">${arDate(s.date)}</td>
+            <td class="dayname">${arDay(s.date)}<div class="daydate">${s.date.split('-').reverse().join('/')}</div></td>
             <td style="white-space:nowrap">${MT.hm(s.start_min)} - ${MT.hm(s.end_min)}</td>
             <td>${arRoom(s.room_name)}</td>
           </tr>`;
@@ -104,8 +114,10 @@
           <div class="sheet-head">
             <div class="prog">برنامج توزيع الحصص</div>
             <div class="meta">
-              <span>ماستر : <b>${mName}</b></span>
-              <span>السنة الجامعية : <b>2026/2027</b></span>
+              <div><span class="lbl">ماستر :</span> <b>${m.name}</b></div>
+              ${m.semester_ordinal ? `<div><span class="lbl">السداسي :</span> <b>${AR_SEM[m.semester_ordinal] || m.semester_ordinal}</b></div>` : ''}
+              ${m.year_label ? `<div><span class="lbl">السنة الجامعية :</span> <b>${arYear(m.year_label)}</b></div>` : ''}
+              ${m.responsible_name ? `<div><span class="lbl">المنسق :</span> <b>${m.responsible_name}</b></div>` : ''}
             </div>
           </div>
           ${sessions.length === 0

@@ -19,17 +19,19 @@ const MT = (() => {
     return `${DAYS[(d.getDay() + 6) % 7]} ${d.getDate()}/${d.getMonth() + 1}`;
   };
 
+  const pad = (n) => String(n).padStart(2, '0');
+  const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   function mondayOf(iso) {
     const d = new Date(`${iso}T00:00:00`);
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    return d.toISOString().slice(0, 10);
+    return toIso(d);
   }
   function addDays(iso, n) {
     const d = new Date(`${iso}T00:00:00`);
     d.setDate(d.getDate() + n);
-    return d.toISOString().slice(0, 10);
+    return toIso(d);
   }
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => toIso(new Date());
 
   // Présence en ligne (compteur côté admin) — heartbeat 30 s.
   function heartbeat() {

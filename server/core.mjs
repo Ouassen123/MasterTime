@@ -85,6 +85,13 @@ function addDays(iso, n) {
     .slice(0, 10);
 }
 
+// Date locale « YYYY-MM-DD » (et non UTC — évite le décalage minuit→1h).
+function localToday() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 // --- Mots de passe : scrypt « salt:hash » hex (même format côté admin) -------
 
 export function hashPassword(password) {
@@ -150,7 +157,7 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
     if (!s) return null;
     const dur = s.end_min - s.start_min;
     const [wStart] = weekBounds(s.date);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     const out = [];
     for (let d = 0; d < 6; d++) {
       const date = addDays(wStart, d);
@@ -244,10 +251,13 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
       // --- API publique ----------------------------------------------------
       if (p === '/api/masters' && req.method === 'GET') {
         return json(res, 200, q(
-          `SELECT m.id, m.code, m.name,
-                  CASE WHEN sem.ordinal <= 2 THEN 'M1' ELSE 'M2' END AS level
+          `SELECT m.id, m.code, m.name, m.responsible_name,
+                  sem.ordinal AS semester_ordinal,
+                  CASE WHEN sem.ordinal <= 2 THEN 'M1' ELSE 'M2' END AS level,
+                  ay.label AS year_label
            FROM master m
            LEFT JOIN semester sem ON sem.id = m.semester_id
+           LEFT JOIN academic_year ay ON ay.id = m.academic_year_id
            WHERE m.status = 'ACTIF'
            ORDER BY m.name`,
         ));
@@ -260,8 +270,26 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
           return json(res, 400, { error: 'Paramètres invalides' });
         }
         const [wStart, wEnd] = weekBounds(week);
+        const master = q1(
+          `SELECT m.id, m.name, m.responsible_name, sem.ordinal AS semester_ordinal,
+                  ay.label AS year_label
+           FROM master m
+           LEFT JOIN semester sem ON sem.id = m.semester_id
+           LEFT JOIN academic_year ay ON ay.id = m.academic_year_id
+           WHERE m.id = ?`,
+          masterId,
+        );
+        if (!master) return json(res, 404, { error: 'Master introuvable' });
+        const first = q1(
+          `SELECT MIN(s.date) AS d FROM session s
+           JOIN master_module mm ON mm.id = s.master_module_id
+           WHERE mm.master_id = ? AND s.status != 'ANNULEE'`,
+          masterId,
+        );
         return json(res, 200, {
           weekStart: wStart,
+          firstSessionDate: first?.d ?? null,
+          master,
           sessions: q(
             `SELECT s.id, s.date, s.start_min, s.end_min, s.status,
                     mo.name AS module_name, p.full_name AS professor_name,
@@ -440,7 +468,7 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
              WHERE s.id = ? AND (s.professor_id = ? OR mm.professor_id = ?)`,
             sid, prof.id, prof.id,
           );
-          const today = new Date().toISOString().slice(0, 10);
+          const today = localToday();
           if (!sess || !['PREVUE', 'REPORTEE'].includes(sess.status) || sess.date < today) {
             return json(res, 400, { error: 'Séance invalide' });
           }
