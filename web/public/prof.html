@@ -231,7 +231,7 @@
         rows.map((r) => `<tr>
           <td>${MT.fmtDayAr(r.session_date)} ${MT.hm(r.start_min)}–${MT.hm(r.end_min)}<br><span class="muted">${r.module_name} · ${r.master_name}</span></td>
           <td>${r.kind === 'cancel' ? 'إلغاء' : 'تأجيل'}</td>
-          <td>${r.kind === 'move' && r.proposed_date ? `${MT.fmtDayAr(r.proposed_date)} ${MT.hm(r.proposed_start_min)}–${MT.hm(r.proposed_end_min)}<br>${MT.arRoom(r.proposed_room_name ?? '')}` : '—'}</td>
+          <td>${r.kind === 'move' ? (r.proposed_date ? `${MT.fmtDayAr(r.proposed_date)} ${MT.hm(r.proposed_start_min)}–${MT.hm(r.proposed_end_min)}<br>${MT.arRoom(r.proposed_room_name ?? '')}` : 'الإدارة ستختار التوقيت') : '—'}</td>
           <td><span class="badge ${badge[r.status]}">${lbl[r.status]}</span></td>
           <td class="muted">${r.admin_note || '—'}</td>
         </tr>`).join('') + '</table></div>';

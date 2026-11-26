@@ -1,83 +1,92 @@
 <!doctype html>
-<html lang="fr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Emplois du temps — FSJP Tanger</title>
+  <title>إعلانات وجداول الحصص — كلية العلوم القانونية والسياسية طنجة</title>
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, 'Traditional Arabic', Arial, sans-serif; }
+    .notice { border-right-width: 4px; border-left-width: 0; }
+    .notice .fr { direction: ltr; text-align: left; font-size: 13px; color: var(--muted); margin-top: 6px; }
+  </style>
 </head>
 <body>
   <header id="hd"></header>
   <main>
     <div class="card">
-      <h2>Avis aux étudiants · <span dir="rtl" lang="ar">إعلانات للطلبة</span></h2>
-      <div id="avis"><p class="muted">Chargement…</p></div>
+      <h2>إعلانات للطلبة · <span dir="ltr" lang="fr" style="font-size:14px; color:var(--muted)">Avis aux étudiants</span></h2>
+      <div id="avis"><p class="muted">جار التحميل…</p></div>
     </div>
 
     <div class="card">
-      <h2>Consulter votre emploi du temps</h2>
+      <h2>استشر جدول الحصص</h2>
       <div class="row">
         <div>
-          <label for="master">Votre Master</label>
-          <select id="master"><option value="">Chargement…</option></select>
+          <label for="master">الماستر</label>
+          <select id="master"><option value="">جار التحميل…</option></select>
         </div>
         <div style="flex:0 0 auto">
-          <a id="go" class="btn" href="#">Voir l'emploi du temps</a>
+          <a id="go" class="btn" href="#">عرض جدول الحصص</a>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Réclamation · <span dir="rtl" lang="ar">شكاية</span></h2>
+      <h2>شكاية</h2>
       <div class="row">
         <div>
-          <label for="cname">Nom (facultatif)</label>
-          <input id="cname" maxlength="100" placeholder="Votre nom">
+          <label for="cname">الاسم (اختياري)</label>
+          <input id="cname" maxlength="100" placeholder="اسمك">
         </div>
         <div>
-          <label for="crole">Vous êtes</label>
+          <label for="crole">أنت</label>
           <select id="crole">
-            <option value="etudiant">Étudiant(e)</option>
-            <option value="professeur">Professeur</option>
-            <option value="autre">Autre</option>
+            <option value="etudiant">طالب(ة)</option>
+            <option value="professeur">أستاذ(ة)</option>
+            <option value="autre">آخر</option>
           </select>
         </div>
       </div>
-      <label for="cmsg">Message</label>
-      <textarea id="cmsg" rows="3" maxlength="2000" placeholder="Votre réclamation…"></textarea>
-      <div style="margin-top:10px"><button class="btn" id="csend">Envoyer</button></div>
+      <label for="cmsg">الرسالة</label>
+      <textarea id="cmsg" rows="3" maxlength="2000" placeholder="اكتب شكايتك هنا…"></textarea>
+      <div style="margin-top:10px"><button class="btn" id="csend">إرسال</button></div>
       <div id="cresult"></div>
     </div>
   </main>
   <footer>
-    MasterTime Tanger — FSJP · <span data-online>–</span> visiteur(s) en ligne
+    MasterTime Tanger — FSJP · <span data-online>–</span> متصل حاليا
   </footer>
   <script src="/app.js"></script>
   <script>
     document.getElementById('hd').innerHTML = MT.header('home');
     MT.heartbeat();
 
-    // Avis bilingues
+    // Avis : arabe en premier, version française en dessous
     MT.api('/api/announcements').then((rows) => {
       const el = document.getElementById('avis');
       if (!rows.length) {
-        el.innerHTML = '<p class="muted">Aucun avis pour le moment. · <span dir="rtl">لا إعلانات حاليا</span></p>';
+        el.innerHTML = '<p class="muted">لا إعلانات حاليا.</p>';
         return;
       }
-      el.innerHTML = rows.map((a) => `
+      el.innerHTML = rows.map((a) => {
+        const hasAr = a.title_ar || a.body_ar;
+        return `
         <div class="notice">
-          <div class="t">${a.title_fr}</div>
-          <div>${a.body_fr}</div>
-          ${a.title_ar || a.body_ar ? `<div class="ar">${a.title_ar ? `<b>${a.title_ar}</b><br>` : ''}${a.body_ar}</div>` : ''}
-          <div class="date">Publié le ${new Date(a.published_at + 'Z').toLocaleString('fr-FR')}</div>
-        </div>`).join('');
+          ${hasAr
+            ? `<div class="t">${a.title_ar || ''}</div><div>${a.body_ar || ''}</div>
+               <div class="fr"><b>${a.title_fr}</b> — ${a.body_fr}</div>`
+            : `<div class="t">${a.title_fr}</div><div>${a.body_fr}</div>`}
+          <div class="date">نشر بتاريخ ${new Date(a.published_at + 'Z').toLocaleString('fr-FR')}</div>
+        </div>`;
+      }).join('');
     });
 
     // Sélecteur Master
     MT.api('/api/masters').then((rows) => {
       const sel = document.getElementById('master');
-      sel.innerHTML = '<option value="">— Choisir votre Master —</option>' +
-        rows.map((m) => `<option value="${m.id}">${m.name}${m.level ? ` (${m.level})` : ''}</option>`).join('');
+      sel.innerHTML = '<option value="">— اختر ماسترك —</option>' +
+        rows.map((m) => `<option value="${m.id}">${m.name}${m.level ? ` (${m.level === 'M1' ? 'س1/س2' : 'س3/س4'})` : ''}</option>`).join('');
       sel.onchange = () => {
         document.getElementById('go').href = sel.value ? `/edt.html?master=${sel.value}` : '#';
       };
@@ -95,7 +104,7 @@
             message: document.getElementById('cmsg').value,
           }),
         });
-        r.innerHTML = '<p class="ok">Réclamation envoyée — merci. · <span dir="rtl">تم الإرسال</span></p>';
+        r.innerHTML = '<p class="ok">تم إرسال الشكاية — شكرا.</p>';
         document.getElementById('cmsg').value = '';
       } catch (e) {
         r.innerHTML = `<p class="err">${e.message}</p>`;
