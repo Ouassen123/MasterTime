@@ -67,14 +67,18 @@
           const dayIso = MT.addDays(data.weekStart, i);
           return `<div class="day-col">
             <h3>${MT.fmtDay(dayIso)}</h3>
-            ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => `
-              <div class="slot ${s.status === 'REPORTEE' ? 'reportee' : ''}">
+            ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => {
+              const cls = { REPORTEE: 'reportee', ANNULEE: 'off', REALISEE: 'ok', NON_ENCORE_REALISEE: 'idle' }[s.status] ?? '';
+              const tag = { REPORTEE: 'Séance reportée', ANNULEE: 'Séance annulée' }[s.status];
+              return `
+              <div class="slot ${cls}">
                 <span class="tm">${MT.hm(s.start_min)}–${MT.hm(s.end_min)}</span>
-                ${s.module_name}
+                <span class="mod">${s.module_name}</span>
                 <small>${s.professor_name}</small>
                 <small>📍 ${s.room_name}</small>
-                ${s.status === 'REPORTEE' ? '<small><b>Séance reportée</b></small>' : ''}
-              </div>`).join('')}
+                ${tag ? `<small><b>${tag}</b></small>` : ''}
+              </div>`;
+            }).join('')}
           </div>`;
         }).join('') + '</div>';
       } catch (e) {

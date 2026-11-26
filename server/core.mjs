@@ -150,9 +150,11 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
     if (!s) return null;
     const dur = s.end_min - s.start_min;
     const [wStart] = weekBounds(s.date);
+    const today = new Date().toISOString().slice(0, 10);
     const out = [];
     for (let d = 0; d < 6; d++) {
       const date = addDays(wStart, d);
+      if (date < today) continue;
       // Jour fermé (férié/examen/fermeture) → ignoré.
       const closed = q1(
         `SELECT 1 AS x FROM calendar_exception
@@ -439,7 +441,8 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
              WHERE s.id = ? AND (s.professor_id = ? OR mm.professor_id = ?)`,
             sid, prof.id, prof.id,
           );
-          if (!sess || !['PREVUE', 'REPORTEE'].includes(sess.status)) {
+          const today = new Date().toISOString().slice(0, 10);
+          if (!sess || !['PREVUE', 'REPORTEE'].includes(sess.status) || sess.date < today) {
             return json(res, 400, { error: 'Séance invalide' });
           }
           const dup = q1(
@@ -457,7 +460,7 @@ export function createHandler({ dbPath, publicDir = DEFAULT_PUBLIC }) {
             ps = Number(prop.start_min);
             pe = Number(prop.end_min);
             pr = Number(prop.room_id);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(pd) || !(ps < pe) || !Number.isInteger(pr)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(pd) || !(ps < pe) || !Number.isInteger(pr) || pd < today) {
               return json(res, 400, { error: 'Créneau proposé invalide' });
             }
           }

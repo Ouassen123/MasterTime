@@ -77,6 +77,11 @@
       } catch { /* pas connecté */ }
     }
 
+    for (const id of ['login', 'password']) {
+      document.getElementById(id).addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('doLogin').click();
+      });
+    }
     document.getElementById('doLogin').onclick = async () => {
       try {
         await MT.api('/api/prof/login', {
@@ -104,21 +109,34 @@
       const data = await MT.api(`/api/prof/sessions?week=${week}`);
       document.getElementById('weekLabel').textContent = `Semaine du ${MT.fmtDay(data.weekStart)}`;
       if (!data.sessions.length) { el.innerHTML = '<p class="muted">Aucune séance cette semaine.</p>'; return; }
-      const badge = { PREVUE: 'blue', REALISEE: 'green', ANNULEE: 'red', REPORTEE: 'gold', NON_ENCORE_REALISEE: 'grey' };
+      const today = MT.today();
+      const cls = { PREVUE: '', REALISEE: 'ok', ANNULEE: 'off', REPORTEE: 'reportee', NON_ENCORE_REALISEE: 'idle' };
       const lbl = { PREVUE: 'Prévue', REALISEE: 'Réalisée', ANNULEE: 'Annulée', REPORTEE: 'Reportée', NON_ENCORE_REALISEE: 'Non réalisée' };
-      el.innerHTML = `<table class="tbl"><tr>
-        <th>Séance</th><th>Master</th><th>Salle</th><th>Statut</th><th></th></tr>` +
-        data.sessions.map((s) => `<tr>
-          <td><b>${fmtSlot(s)}</b><br><span class="muted">${s.module_name}</span></td>
-          <td>${s.master_name}</td>
-          <td>${s.room_name}</td>
-          <td><span class="badge ${badge[s.status] || 'grey'}">${lbl[s.status] || s.status}</span>
-            ${s.pending_requests ? '<br><span class="badge gold">Demande en cours</span>' : ''}</td>
-          <td style="white-space:nowrap">
-            ${['PREVUE', 'REPORTEE'].includes(s.status) && !s.pending_requests ? `
-              <button class="btn small danger" onclick="askCancel(${s.id})">Annuler</button>
-              <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">Reporter</button>` : ''}
-          </td></tr>`).join('') + '</table>';
+      const cols = Array.from({ length: 7 }, () => []);
+      for (const s of data.sessions) {
+        const wd = (new Date(`${s.date}T00:00:00`).getDay() + 6) % 7;
+        cols[wd].push(s);
+      }
+      el.innerHTML = '<div class="edt-grid">' + cols.map((ss, i) => {
+        const dayIso = MT.addDays(data.weekStart, i);
+        return `<div class="day-col${dayIso === today ? ' today' : ''}">
+          <h3>${MT.fmtDay(dayIso)}</h3>
+          ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => {
+            const can = ['PREVUE', 'REPORTEE'].includes(s.status) && !s.pending_requests && s.date >= today;
+            return `<div class="slot ${cls[s.status] ?? ''}">
+              <span class="tm">${MT.hm(s.start_min)}–${MT.hm(s.end_min)}</span>
+              <span class="mod">${s.module_name}</span>
+              <small>${s.master_name}</small>
+              <small>📍 ${s.room_name}</small>
+              <small>${lbl[s.status] ?? s.status}${s.pending_requests ? ' · demande en cours' : ''}</small>
+              ${can ? `<div>
+                <button class="btn small danger" onclick="askCancel(${s.id})">Annuler</button>
+                <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">Reporter</button>
+              </div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('') + '</div>';
     }
 
     window.askCancel = async (sid) => {

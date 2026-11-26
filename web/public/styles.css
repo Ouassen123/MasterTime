@@ -61,6 +61,7 @@ label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
 
 .edt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .day-col { background: #f8fafc; border-radius: 8px; padding: 8px; min-height: 90px; }
+.day-col.today { outline: 2px solid var(--blue); background: #eff6ff; }
 .day-col h3 { font-size: 13px; color: var(--navy); margin-bottom: 8px; text-transform: capitalize; }
 .slot {
   background: var(--blue); color: #fff; border-radius: 6px; padding: 6px 8px;
@@ -68,7 +69,12 @@ label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
 }
 .slot .tm { font-weight: 700; }
 .slot.reportee { background: var(--gold); }
+.slot.ok { background: var(--green); }
+.slot.idle { background: #64748b; }
+.slot.off { background: #94a3b8; }
+.slot.off .mod { text-decoration: line-through; }
 .slot small { display: block; opacity: .9; }
+.slot .btn.small { margin: 5px 4px 0 0; padding: 4px 10px; font-size: 12px; }
 
 table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .tbl th { text-align: left; padding: 8px; border-bottom: 2px solid var(--line); color: var(--navy); font-size: 13px; }
