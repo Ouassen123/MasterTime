@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 
 const dbPath = process.argv[2];
 const apply = process.argv[3] === 'apply';
-const plan = JSON.parse(readFileSync('C:/Users/viet/Desktop/import_plan.json', 'utf8'));
+const planPath = new URL('./data/import-s1-2027.plan.json', import.meta.url);
+const plan = JSON.parse(readFileSync(planPath, 'utf8'));
 
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA foreign_keys=ON');
@@ -125,6 +126,9 @@ try {
   let nextMasterCode = Math.max(...masters.map((m) => Number(m.code?.slice(2)) || 0)) + 1;
   const masterRows = new Map(); // master name -> id
   const getMaster = (name, coord) => {
+    // cohorte S1 déjà importée ? -> réutiliser (idempotent)
+    const s1 = masters.find((m) => m.semester_id === SEMESTER_S1 && normAr(m.name) === normAr(name));
+    if (s1) return s1.id;
     const ex = masters.find((m) => normAr(m.name) === normAr(name));
     if (!ex) {
       const code = `M-${String(nextMasterCode++).padStart(2, '0')}`;
@@ -210,6 +214,8 @@ try {
           report.conflicts.push(`${e.module} : ${room.name} ${e.day} ${Math.floor(s0/60)}h — conflit non résolu`);
         }
       }
+      if (q1('SELECT id FROM master_module WHERE master_id=? AND module_id=? AND professor_id=? AND semester_id=?',
+        masterId, modId, profId, SEMESTER_S1)) continue; // déjà importé
       const mmr = run(
         `INSERT INTO master_module (master_id, module_id, semester_id, professor_id, student_group_id,
            volume_min, session_duration_min, planned_sessions, distribution_rule, sched_start, sched_end, is_fixed)
