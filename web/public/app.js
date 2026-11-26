@@ -18,6 +18,15 @@ const MT = (() => {
     const d = new Date(`${iso}T00:00:00`);
     return `${DAYS[(d.getDay() + 6) % 7]} ${d.getDate()}/${d.getMonth() + 1}`;
   };
+  const AR_DAYS = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
+  const fmtDayAr = (iso) => {
+    const d = new Date(`${iso}T00:00:00`);
+    return `${AR_DAYS[(d.getDay() + 6) % 7]} ${d.getDate()}/${d.getMonth() + 1}`;
+  };
+  const arRoom = (n) => String(n || '')
+    .replace(/^Salle\s*/, 'القاعة ')
+    .replace(/^Amphi\s*/, 'المدرج ')
+    .replace(/^Annexe\s*/, 'الملحقة ');
 
   const pad = (n) => String(n).padStart(2, '0');
   const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -62,11 +71,11 @@ const MT = (() => {
         <p>Faculté des Sciences Juridiques et Politiques — Tanger</p>
       </div>
       <nav>
-        <a href="/" ${active === 'home' ? 'style="background:rgba(255,255,255,.3)"' : ''}>Accueil</a>
-        <a href="/edt.html" ${active === 'edt' ? 'style="background:rgba(255,255,255,.3)"' : ''}>Emplois du temps</a>
-        <a href="/prof.html" ${active === 'prof' ? 'style="background:rgba(255,255,255,.3)"' : ''}>Espace professeur</a>
+        <a href="/" ${active === 'home' ? 'style="background:rgba(255,255,255,.3)"' : ''}>الرئيسية</a>
+        <a href="/edt.html" ${active === 'edt' ? 'style="background:rgba(255,255,255,.3)"' : ''}>جدول الحصص</a>
+        <a href="/prof.html" ${active === 'prof' ? 'style="background:rgba(255,255,255,.3)"' : ''}>فضاء الأستاذ</a>
       </nav>`;
   }
 
-  return { api, hm, DAYS, fmtDay, mondayOf, addDays, today, heartbeat, header };
+  return { api, hm, DAYS, fmtDay, AR_DAYS, fmtDayAr, arRoom, mondayOf, addDays, today, heartbeat, header };
 })();

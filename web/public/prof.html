@@ -1,23 +1,30 @@
 <!doctype html>
-<html lang="fr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Espace professeur — FSJP Tanger</title>
+  <title>فضاء الأستاذ — كلية العلوم القانونية والسياسية طنجة</title>
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, 'Traditional Arabic', Arial, sans-serif; }
+    .slot .btn.small { margin: 5px 0 0 6px; }
+    .rooms .badge { cursor: pointer; margin: 2px; }
+    .rooms .badge:hover { filter: brightness(1.1); }
+    .tbl-wrap { overflow-x: auto; }
+  </style>
 </head>
 <body>
   <header id="hd"></header>
   <main>
     <!-- Connexion -->
     <div class="card" id="loginCard">
-      <h2>Espace professeur — Connexion</h2>
-      <p class="muted">Vos identifiants vous ont été remis par l'administration.</p>
-      <label for="login">Identifiant</label>
-      <input id="login" autocomplete="username">
-      <label for="password">Mot de passe</label>
-      <input id="password" type="password" autocomplete="current-password">
-      <div style="margin-top:12px"><button class="btn" id="doLogin">Se connecter</button></div>
+      <h2>فضاء الأستاذ — تسجيل الدخول</h2>
+      <p class="muted">تم تسليم بيانات الدخول الخاصة بكم من طرف الإدارة.</p>
+      <label for="login">المعرف</label>
+      <input id="login" autocomplete="username" dir="ltr">
+      <label for="password">كلمة المرور</label>
+      <input id="password" type="password" autocomplete="current-password" dir="ltr">
+      <div style="margin-top:12px"><button class="btn" id="doLogin">دخول</button></div>
       <div id="loginErr"></div>
     </div>
 
@@ -26,31 +33,31 @@
       <div class="card">
         <div class="row">
           <div><h2 id="hello" style="margin:0"></h2><p class="muted" id="masters"></p></div>
-          <div style="flex:0 0 auto">
-            <button class="btn ghost" id="prev">← Semaine</button>
-            <button class="btn ghost" id="today">Aujourd'hui</button>
-            <button class="btn ghost" id="next">Semaine →</button>
-            <button class="btn ghost" id="logout">Déconnexion</button>
+          <div style="flex:0 0 auto" class="navbtns">
+            <button class="btn ghost" id="prev">→ الأسبوع السابق</button>
+            <button class="btn ghost" id="today">هذا الأسبوع</button>
+            <button class="btn ghost" id="next">الأسبوع المقبل ←</button>
+            <button class="btn ghost" id="logout">تسجيل الخروج</button>
           </div>
         </div>
         <p class="muted" id="weekLabel" style="margin-top:6px"></p>
       </div>
       <div class="card">
-        <h2>Mes séances</h2>
+        <h2>حصصي</h2>
         <div id="sessions"></div>
       </div>
       <div class="card">
-        <h2>Mes demandes</h2>
+        <h2>طلباتي</h2>
         <div id="requests"></div>
       </div>
     </div>
 
     <!-- Choix du créneau de report -->
     <div class="card hidden" id="moveCard">
-      <h2>Proposer un report</h2>
+      <h2>اقتراح تأجيل</h2>
       <p class="muted" id="moveInfo"></p>
       <div id="slots"></div>
-      <div style="margin-top:10px"><button class="btn ghost" id="moveCancel">Annuler</button></div>
+      <div style="margin-top:10px"><button class="btn ghost" id="moveCancel">رجوع</button></div>
     </div>
   </main>
   <footer>MasterTime Tanger — FSJP</footer>
@@ -62,7 +69,7 @@
     let me = null;
     let week = MT.mondayOf(MT.today());
 
-    const fmtSlot = (s) => `${MT.fmtDay(s.date)} · ${MT.hm(s.start_min)}–${MT.hm(s.end_min)}`;
+    const fmtSlot = (s) => `${MT.fmtDayAr(s.date)} · ${MT.hm(s.start_min)}–${MT.hm(s.end_min)}`;
 
     async function init() {
       try {
@@ -74,7 +81,7 @@
           me.masters.map((m) => m.name).join(' · ');
         load();
         loadRequests();
-      } catch { /* pas connecté */ }
+      } catch { /* غير مسجل */ }
     }
 
     for (const id of ['login', 'password']) {
@@ -107,11 +114,12 @@
     async function load() {
       const el = document.getElementById('sessions');
       const data = await MT.api(`/api/prof/sessions?week=${week}`);
-      document.getElementById('weekLabel').textContent = `Semaine du ${MT.fmtDay(data.weekStart)}`;
-      if (!data.sessions.length) { el.innerHTML = '<p class="muted">Aucune séance cette semaine.</p>'; return; }
+      document.getElementById('weekLabel').textContent =
+        `الأسبوع من ${data.weekStart.split('-').reverse().join('/')}`;
+      if (!data.sessions.length) { el.innerHTML = '<p class="muted">لا توجد حصص هذا الأسبوع.</p>'; return; }
       const today = MT.today();
       const cls = { PREVUE: '', REALISEE: 'ok', ANNULEE: 'off', REPORTEE: 'reportee', NON_ENCORE_REALISEE: 'idle' };
-      const lbl = { PREVUE: 'Prévue', REALISEE: 'Réalisée', ANNULEE: 'Annulée', REPORTEE: 'Reportée', NON_ENCORE_REALISEE: 'Non réalisée' };
+      const lbl = { PREVUE: 'مجدولة', REALISEE: 'تمت', ANNULEE: 'ملغاة', REPORTEE: 'مؤجلة', NON_ENCORE_REALISEE: 'لم تتم' };
       const cols = Array.from({ length: 7 }, () => []);
       for (const s of data.sessions) {
         const wd = (new Date(`${s.date}T00:00:00`).getDay() + 6) % 7;
@@ -120,18 +128,18 @@
       el.innerHTML = '<div class="edt-grid">' + cols.map((ss, i) => {
         const dayIso = MT.addDays(data.weekStart, i);
         return `<div class="day-col${dayIso === today ? ' today' : ''}">
-          <h3>${MT.fmtDay(dayIso)}</h3>
+          <h3>${MT.fmtDayAr(dayIso)}</h3>
           ${ss.length === 0 ? '<span class="muted">—</span>' : ss.map((s) => {
             const can = ['PREVUE', 'REPORTEE'].includes(s.status) && !s.pending_requests && s.date >= today;
             return `<div class="slot ${cls[s.status] ?? ''}">
               <span class="tm">${MT.hm(s.start_min)}–${MT.hm(s.end_min)}</span>
               <span class="mod">${s.module_name}</span>
               <small>${s.master_name}</small>
-              <small>📍 ${s.room_name}</small>
-              <small>${lbl[s.status] ?? s.status}${s.pending_requests ? ' · demande en cours' : ''}</small>
+              <small>${MT.arRoom(s.room_name)}</small>
+              <small>${lbl[s.status] ?? s.status}${s.pending_requests ? ' · طلب قيد المعالجة' : ''}</small>
               ${can ? `<div>
-                <button class="btn small danger" onclick="askCancel(${s.id})">Annuler</button>
-                <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">Reporter</button>
+                <button class="btn small danger" onclick="askCancel(${s.id})">إلغاء</button>
+                <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">تأجيل</button>
               </div>` : ''}
             </div>`;
           }).join('')}
@@ -140,7 +148,7 @@
     }
 
     window.askCancel = async (sid) => {
-      const reason = prompt('Motif de l\'annulation (visible dans l\'avis aux étudiants) :');
+      const reason = prompt('سبب الإلغاء (سيظهر في الإعلان للطلبة) :');
       if (reason === null) return;
       try {
         await MT.api('/api/prof/requests', {
@@ -154,30 +162,29 @@
     window.askMove = async (sid, label) => {
       const card = document.getElementById('moveCard');
       card.classList.remove('hidden');
-      document.getElementById('moveInfo').textContent = `Séance : ${label} — créneaux libres proposés par le système :`;
+      document.getElementById('moveInfo').textContent =
+        `الحصة : ${label} — الأوقات الشاغرة المقترحة من طرف النظام (اضغط على القاعة للاختيار) :`;
       const el = document.getElementById('slots');
-      el.innerHTML = '<p class="muted">Recherche des créneaux libres…</p>';
+      el.innerHTML = '<p class="muted">البحث عن الأوقات الشاغرة…</p>';
       card.scrollIntoView({ behavior: 'smooth' });
       try {
         const slots = await MT.api(`/api/prof/free-slots?session_id=${sid}`);
-        if (!slots.length) { el.innerHTML = '<p class="muted">Aucun créneau libre cette semaine.</p>'; return; }
+        if (!slots.length) { el.innerHTML = '<p class="muted">لا توجد أوقات شاغرة هذا الأسبوع.</p>'; return; }
         el.innerHTML = slots.map((sl, i) => `
-          <div class="notice" style="cursor:pointer" onclick="pickSlot(${sid},${i})">
-            <b>${MT.fmtDay(sl.date)} · ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}</b><br>
-            ${sl.rooms.map((r) => `<span class="badge blue">${r.name} · ${r.capacity} places</span>`).join(' ')}
+          <div class="notice rooms">
+            <b>${MT.fmtDayAr(sl.date)} · ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}</b><br>
+            ${sl.rooms.map((r, j) => `<span class="badge blue" onclick="pickRoom(${sid},${i},${j})">${r.name} · ${r.capacity} مقعد</span>`).join(' ')}
           </div>`).join('');
         window._slots = slots;
       } catch (e) { el.innerHTML = `<p class="err">${e.message}</p>`; }
     };
 
-    window.pickSlot = async (sid, i) => {
+    window.pickRoom = async (sid, i, j) => {
       const sl = window._slots[i];
-      const roomOpts = sl.rooms.map((r, j) => `${j + 1}. ${r.name} (${r.capacity})`).join('\n');
-      const pick = prompt(`Créneau : ${MT.fmtDay(sl.date)} ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}\nChoisir la salle :\n${roomOpts}`, '1');
-      if (pick === null) return;
-      const room = sl.rooms[Number(pick) - 1];
-      if (!room) return alert('Salle invalide');
-      const reason = prompt('Motif du report (facultatif) :') ?? '';
+      const room = sl.rooms[j];
+      const reason = prompt(
+        `التأجيل إلى ${MT.fmtDayAr(sl.date)} ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)} — ${room.name}\nسبب التأجيل (اختياري) :`);
+      if (reason === null) return;
       try {
         await MT.api('/api/prof/requests', {
           method: 'POST',
@@ -188,7 +195,7 @@
         });
         document.getElementById('moveCard').classList.add('hidden');
         load(); loadRequests();
-        alert('Demande envoyée — en attente de validation par l\'administration.');
+        alert('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
       } catch (e) { alert(e.message); }
     };
 
@@ -198,17 +205,17 @@
     async function loadRequests() {
       const el = document.getElementById('requests');
       const rows = await MT.api('/api/prof/requests');
-      if (!rows.length) { el.innerHTML = '<p class="muted">Aucune demande.</p>'; return; }
+      if (!rows.length) { el.innerHTML = '<p class="muted">لا توجد طلبات.</p>'; return; }
       const badge = { pending: 'gold', approved: 'green', rejected: 'red' };
-      const lbl = { pending: 'En attente', approved: 'Approuvée', rejected: 'Rejetée' };
-      el.innerHTML = `<table class="tbl"><tr><th>Séance</th><th>Type</th><th>Proposition</th><th>Statut</th><th>Note admin</th></tr>` +
+      const lbl = { pending: 'قيد الانتظار', approved: 'مقبولة', rejected: 'مرفوضة' };
+      el.innerHTML = `<div class="tbl-wrap"><table class="tbl"><tr><th>الحصة</th><th>النوع</th><th>الاقتراح</th><th>الحالة</th><th>ملاحظة الإدارة</th></tr>` +
         rows.map((r) => `<tr>
-          <td>${MT.fmtDay(r.session_date)} ${MT.hm(r.start_min)}–${MT.hm(r.end_min)}<br><span class="muted">${r.module_name} · ${r.master_name}</span></td>
-          <td>${r.kind === 'cancel' ? 'Annulation' : 'Report'}</td>
-          <td>${r.kind === 'move' && r.proposed_date ? `${MT.fmtDay(r.proposed_date)} ${MT.hm(r.proposed_start_min)}–${MT.hm(r.proposed_end_min)}<br>${r.proposed_room_name ?? ''}` : '—'}</td>
+          <td>${MT.fmtDayAr(r.session_date)} ${MT.hm(r.start_min)}–${MT.hm(r.end_min)}<br><span class="muted">${r.module_name} · ${r.master_name}</span></td>
+          <td>${r.kind === 'cancel' ? 'إلغاء' : 'تأجيل'}</td>
+          <td>${r.kind === 'move' && r.proposed_date ? `${MT.fmtDayAr(r.proposed_date)} ${MT.hm(r.proposed_start_min)}–${MT.hm(r.proposed_end_min)}<br>${MT.arRoom(r.proposed_room_name ?? '')}` : '—'}</td>
           <td><span class="badge ${badge[r.status]}">${lbl[r.status]}</span></td>
           <td class="muted">${r.admin_note || '—'}</td>
-        </tr>`).join('') + '</table>';
+        </tr>`).join('') + '</table></div>';
     }
 
     init();

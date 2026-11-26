@@ -69,13 +69,9 @@
     document.getElementById('hd').innerHTML = MT.header('edt');
     MT.heartbeat();
 
-    const AR_DAYS = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
     const AR_SEM = { 1: 'الأول', 2: 'الثاني', 3: 'الثالث', 4: 'الرابع' };
-    const arRoom = (n) => String(n || '')
-      .replace(/^Salle\s*/, 'القاعة ')
-      .replace(/^Amphi\s*/, 'المدرج ')
-      .replace(/^Annexe\s*/, 'الملحقة ');
-    const arDay = (iso) => AR_DAYS[(new Date(`${iso}T00:00:00`).getDay() + 6) % 7];
+    const arRoom = MT.arRoom;
+    const arDay = (iso) => MT.AR_DAYS[(new Date(`${iso}T00:00:00`).getDay() + 6) % 7];
     const arYear = (lbl) => String(lbl || '').replace('-', '/');
 
     const params = new URLSearchParams(location.search);
