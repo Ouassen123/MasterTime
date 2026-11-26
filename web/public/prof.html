@@ -51,17 +51,6 @@
         <div id="requests"></div>
       </div>
     </div>
-
-    <!-- Choix du créneau de report -->
-    <div class="card hidden" id="moveCard">
-      <h2>اقتراح تأجيل</h2>
-      <p class="muted" id="moveInfo"></p>
-      <div id="slots"></div>
-      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
-        <button class="btn" id="moveNoChoice">إرسال الطلب فقط — تختار الإدارة التوقيت</button>
-        <button class="btn ghost" id="moveCancel">رجوع</button>
-      </div>
-    </div>
   </main>
   <footer>MasterTime Tanger — FSJP</footer>
   <script src="/app.js"></script>
@@ -71,8 +60,6 @@
 
     let me = null;
     let week = MT.mondayOf(MT.today());
-
-    const fmtSlot = (s) => `${MT.fmtDayAr(s.date)} · ${MT.hm(s.start_min)}–${MT.hm(s.end_min)}`;
 
     async function init() {
       try {
@@ -142,7 +129,7 @@
               <small>${lbl[s.status] ?? s.status}${s.pending_requests ? ' · طلب قيد المعالجة' : ''}</small>
               ${can ? `<div>
                 <button class="btn small danger" onclick="askCancel(${s.id})">إلغاء</button>
-                <button class="btn small" onclick="askMove(${s.id},'${fmtSlot(s)}')">تأجيل</button>
+                <button class="btn small" onclick="askMove(${s.id})">تأجيل</button>
               </div>` : ''}
             </div>`;
           }).join('')}
@@ -162,49 +149,7 @@
       } catch (e) { alert(e.message); }
     };
 
-    window.askMove = async (sid, label) => {
-      window._moveSid = sid;
-      const card = document.getElementById('moveCard');
-      card.classList.remove('hidden');
-      document.getElementById('moveInfo').textContent =
-        `الحصة : ${label} — الأوقات الشاغرة المقترحة من طرف النظام (اضغط على القاعة للاختيار) :`;
-      const el = document.getElementById('slots');
-      el.innerHTML = '<p class="muted">البحث عن الأوقات الشاغرة…</p>';
-      card.scrollIntoView({ behavior: 'smooth' });
-      try {
-        const slots = await MT.api(`/api/prof/free-slots?session_id=${sid}`);
-        if (!slots.length) { el.innerHTML = '<p class="muted">لا توجد أوقات شاغرة هذا الأسبوع.</p>'; return; }
-        el.innerHTML = slots.map((sl, i) => `
-          <div class="notice rooms">
-            <b>${MT.fmtDayAr(sl.date)} · ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)}</b><br>
-            ${sl.rooms.map((r, j) => `<span class="badge blue" onclick="pickRoom(${sid},${i},${j})">${r.name} · ${r.capacity} مقعد</span>`).join(' ')}
-          </div>`).join('');
-        window._slots = slots;
-      } catch (e) { el.innerHTML = `<p class="err">${e.message}</p>`; }
-    };
-
-    window.pickRoom = async (sid, i, j) => {
-      const sl = window._slots[i];
-      const room = sl.rooms[j];
-      const reason = prompt(
-        `التأجيل إلى ${MT.fmtDayAr(sl.date)} ${MT.hm(sl.start_min)}–${MT.hm(sl.end_min)} — ${room.name}\nسبب التأجيل (اختياري) :`);
-      if (reason === null) return;
-      try {
-        await MT.api('/api/prof/requests', {
-          method: 'POST',
-          body: JSON.stringify({
-            session_id: sid, kind: 'move', reason,
-            proposed: { date: sl.date, start_min: sl.start_min, end_min: sl.end_min, room_id: room.id },
-          }),
-        });
-        document.getElementById('moveCard').classList.add('hidden');
-        load(); loadRequests();
-        alert('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
-      } catch (e) { alert(e.message); }
-    };
-
-    document.getElementById('moveNoChoice').onclick = async () => {
-      const sid = window._moveSid;
+    window.askMove = async (sid) => {
       const reason = prompt('سبب التأجيل (اختياري) — الإدارة ستختار التوقيت والقاعة :');
       if (reason === null) return;
       try {
@@ -212,14 +157,10 @@
           method: 'POST',
           body: JSON.stringify({ session_id: sid, kind: 'move', reason }),
         });
-        document.getElementById('moveCard').classList.add('hidden');
         load(); loadRequests();
         alert('تم إرسال الطلب — في انتظار مصادقة الإدارة.');
       } catch (e) { alert(e.message); }
     };
-
-    document.getElementById('moveCancel').onclick = () =>
-      document.getElementById('moveCard').classList.add('hidden');
 
     async function loadRequests() {
       const el = document.getElementById('requests');
