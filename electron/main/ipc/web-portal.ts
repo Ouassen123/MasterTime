@@ -49,6 +49,16 @@ export function registerWebPortalHandlers(
           ? process.resourcesPath
           : app.getAppPath();
         await startWebServer(appRoot, deps.getDbPath(), p);
+        // Persistance : le serveur redémarre automatiquement avec l'app.
+        const db = getDb();
+        db?.prepare(
+          `INSERT INTO setting (key, value) VALUES ('webportal_enabled','1')
+           ON CONFLICT(key) DO UPDATE SET value = '1'`,
+        ).run();
+        db?.prepare(
+          `INSERT INTO setting (key, value) VALUES ('webportal_port', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        ).run(String(p));
         return apiOk(null);
       } catch (err) {
         return apiErr(
@@ -60,6 +70,11 @@ export function registerWebPortalHandlers(
 
   ipcMain.handle('webportal:stop', async (): Promise<ApiResult<null>> => {
     await stopWebServer();
+    const db = getDb();
+    db?.prepare(
+      `INSERT INTO setting (key, value) VALUES ('webportal_enabled','0')
+       ON CONFLICT(key) DO UPDATE SET value = '0'`,
+    ).run();
     return apiOk(null);
   });
 

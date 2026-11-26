@@ -8,12 +8,13 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
-import { closeDb, getDb } from './db/connection';
+import { closeDb, get, getDb } from './db/connection';
 import { bundledMigrations, runMigrations } from './db/migrate';
 import { seedReal } from './db/seed-real';
 import { collectDbStatus } from './db/status';
 import { ensureProfiles } from './db/profile.service';
 import { registerIpcHandlers } from './ipc';
+import { startWebServer } from './webserver.service';
 import type { AppInfo } from '../../shared/types';
 
 let db: DatabaseSync | null = null;
@@ -147,6 +148,34 @@ app.whenReady().then(() => {
     },
     getDbPath: () => dbPath,
   });
+
+  // P19 — redémarrage automatique du portail web s'il était actif.
+  if (db) {
+    try {
+      const en = get<{ value: string }>(
+        db,
+        "SELECT value FROM setting WHERE key = 'webportal_enabled'",
+      );
+      if (en?.value === '1') {
+        const pr = get<{ value: string }>(
+          db,
+          "SELECT value FROM setting WHERE key = 'webportal_port'",
+        );
+        const appRoot = app.isPackaged
+          ? process.resourcesPath
+          : app.getAppPath();
+        void startWebServer(
+          appRoot,
+          dbPath,
+          Number(pr?.value) || 8080,
+        ).catch((err) =>
+          console.error('[web] Démarrage auto impossible :', err),
+        );
+      }
+    } catch (err) {
+      console.error('[web] Lecture réglage portail :', err);
+    }
+  }
 
   createWindow();
 

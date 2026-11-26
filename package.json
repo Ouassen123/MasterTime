@@ -1,6 +1,6 @@
 {
   "name": "mastertime-tanger",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MasterTime Tanger — gestion des emplois du temps des Masters (Electron + SQLite)",
   "author": "FSJP Tanger",
   "private": true,

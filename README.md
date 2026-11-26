@@ -95,6 +95,25 @@ Import/Export, Paramètres, Sauvegardes</summary>
 - Profils **Administrateur** / **Gestionnaire**, journal d'audit
   complet de toutes les écritures
 
+**Portail web (P19)**
+- **Site public** embarqué dans l'app (serveur `node:http` intégré,
+  zéro dépendance) — joignable sur le réseau de la faculté via
+  `http://<IP-du-PC>:8080`, ou déployable sur le serveur de la
+  faculté (`server/index.mjs` autonome, même base SQLite)
+- **Étudiants** : consultation libre de l'EDT par Master (semaine
+  par jour), sans compte — fil d'**avis bilingue Français + Arabe**
+  (style panneau d'affichage fsjest.ma) + logo FSJP officiel
+- **Professeurs** : espace connecté (login + mot de passe gérés par
+  l'admin) → déclarer une **annulation** ou proposer un **report** —
+  le système propose les créneaux et salles réellement libres
+- **Validation admin** : chaque demande arrive dans la console
+  « Portail web » → **Approuver** applique la mutation (gardes-fous
+  de conflits conservés) **et publie l'avis bilingue
+  automatiquement** ; rejet avec note
+- **Temps réel** : compteur de visiteurs et profs en ligne, boîte de
+  **réclamations**, gestion des comptes profs, avis dépubliables
+- Le serveur **redémarre automatiquement** avec l'app s'il était actif
+
 ## Installation (utilisateur)
 
 1. Télécharger `Master Time Tanger Setup X.Y.Z.exe` depuis les
