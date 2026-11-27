@@ -11,6 +11,7 @@ import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { BackupsPage } from './pages/BackupsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { EdtArabePage } from './pages/EdtArabePage';
 import { GenerationPage } from './pages/GenerationPage';
 import { ImportExportPage } from './pages/ImportExportPage';
 import { MastersPage } from './pages/MastersPage';
@@ -34,6 +35,7 @@ export default function App(): React.JSX.Element {
         <Route path="professeurs" element={<ProfessorsPage />} />
         <Route path="salles" element={<RoomsPage />} />
         <Route path="emplois-du-temps" element={<TimetablePage />} />
+        <Route path="edt-arabe" element={<EdtArabePage />} />
         <Route path="generation" element={<GenerationPage />} />
         <Route path="seances" element={<SessionsPage />} />
         <Route path="rapports" element={<ReportsPage />} />

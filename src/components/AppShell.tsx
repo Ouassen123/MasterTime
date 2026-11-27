@@ -19,6 +19,7 @@ import {
   ScheduleOutlined,
   SettingOutlined,
   SwapOutlined,
+  TableOutlined,
   TeamOutlined,
   ThunderboltOutlined,
   UserDeleteOutlined,
@@ -34,7 +35,7 @@ const { Text, Title } = Typography;
 
 type NavKey =
   | 'dashboard' | 'masters' | 'professors' | 'modules' | 'rooms'
-  | 'schedule' | 'generation' | 'sessions' | 'absences' | 'reports'
+  | 'schedule' | 'edtArabe' | 'generation' | 'sessions' | 'absences' | 'reports'
   | 'importExport' | 'portal' | 'settings' | 'backups';
 
 interface NavEntry {
@@ -63,6 +64,12 @@ const NAV: NavEntry[] = [
     path: '/emplois-du-temps',
     enabled: true,
     icon: <CalendarOutlined />,
+  },
+  {
+    key: 'edtArabe',
+    path: '/edt-arabe',
+    enabled: true,
+    icon: <TableOutlined />,
   },
   {
     key: 'generation',
